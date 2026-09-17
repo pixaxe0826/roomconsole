@@ -1,0 +1,23 @@
+{
+  "mode": "before-fix",
+  "checks": [
+    "Old code reproduces QR/link removal on real server invalidate (600ms overview delay)"
+  ],
+  "samples": [
+    {
+      "ms": 2341,
+      "present": false
+    },
+    {
+      "ms": 2430,
+      "present": true
+    },
+    {
+      "ms": 3050,
+      "present": false
+    }
+  ],
+  "errors": [],
+  "passed": 1,
+  "scope": "Chromium set_content with production JS; real temporary loopback API/WebSocket via Python transport bridge. Delayed responses, failure and expiry are controlled tests. Not native V35/iPad/Safari or camera scanning."
+}
