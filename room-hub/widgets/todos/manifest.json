@@ -1,0 +1,15 @@
+{
+  "id": "todos",
+  "name": "할 일",
+  "description": "일~토 고정 주간 탐색과 날짜별 할 일. 연결된 클라이언트에서 완료·완료 취소가 가능합니다.",
+  "icon": "todo",
+  "apiVersion": 1,
+  "version": "1.1.0",
+  "entry": "widget.js",
+  "style": "style.css",
+  "defaultSize": {
+    "w": 4,
+    "h": 4
+  },
+  "configDefaults": {}
+}

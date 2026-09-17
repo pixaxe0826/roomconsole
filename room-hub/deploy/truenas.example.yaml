@@ -1,0 +1,22 @@
+# Example only. Replace POOL and every host path before deployment.
+# Requires a TrueNAS release/runtime supporting Docker Compose Custom Apps.
+# Host data directory must be writable by UID:GID 10001:10001.
+services:
+  room-hub:
+    build:
+      context: /mnt/POOL/apps/room_hub
+    image: room-hub:0.1.1
+    restart: unless-stopped
+    ports:
+      - "8088:8088"
+    environment:
+      HUB_DATA_DIR: /app/data
+      HUB_PORT: "8088"
+      HUB_SECURE_COOKIE: "false"
+    volumes:
+      - /mnt/POOL/appdata/room_hub:/app/data
+      - /mnt/POOL/apps/room_hub/widgets:/app/widgets:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

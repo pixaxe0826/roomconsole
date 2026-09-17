@@ -1,0 +1,25 @@
+/* Scoped to the todo widget; loaded by both live clients and standalone previews. */
+.todo-content .widget-head{margin-bottom:10px}
+.todo-week-label{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-shrink:0;margin-bottom:5px;color:var(--muted);font-size:10px;font-variant-numeric:tabular-nums}
+.todo-today-button{border:0;background:transparent;color:var(--accent);border-radius:9px;min-width:44px;min-height:36px;padding:4px 8px;font-size:11px;font-weight:600}
+.todo-week-strip.day-strip{grid-template-columns:minmax(32px,44px) repeat(7,minmax(0,1fr)) minmax(32px,44px);gap:2px;align-items:stretch;margin-bottom:10px}
+.todo-week-strip .week-arrow{border:0;background:var(--surface2);border-radius:11px;min-height:44px;width:100%;display:flex;align-items:center;justify-content:center;padding:0;color:var(--accent)}
+.todo-week-strip .week-arrow:hover,.todo-today-button:hover{background:var(--accent-soft)}
+.todo-week-strip .week-arrow-left{display:inline-flex;transform:rotate(180deg)}
+.todo-week-strip .day-chip{min-height:48px;min-width:0;position:relative}
+.todo-week-strip .day-chip.is-today:not(.active){box-shadow:inset 0 0 0 1px var(--accent)}
+.todo-week-strip .day-chip.is-sunday:not(.active)>span{color:var(--red)}
+.todo-week-strip .day-chip.is-saturday:not(.active)>span{color:#768aa1}
+.todo-content .task-complete-button{display:flex;align-items:center;justify-content:center;flex:0 0 44px;width:44px;height:44px;min-height:44px;padding:0;border:0;border-radius:12px;background:transparent;touch-action:manipulation}
+.todo-content .task-complete-button:hover:not(:disabled){background:var(--accent-soft)}
+.todo-content .task-complete-button .task-circle{pointer-events:none}
+.todo-content .task-saving{color:var(--accent)}
+.todo-content .task-complete-button[aria-busy=true] .task-circle{color:var(--accent);border-color:var(--accent)}
+.todo-content .task-complete-button[aria-busy=true] .task-circle.done{color:white}
+.todo-content .todo-item{gap:8px}
+.todo-content.expanded .todo-week-label{font-size:12px;margin-bottom:8px}
+.todo-content.expanded .todo-today-button{min-height:44px;font-size:13px}
+.todo-content.expanded .todo-week-strip{margin-bottom:18px}
+.todo-content.expanded .week-arrow{min-height:62px}
+@media(max-width:950px){.todo-week-strip.day-strip{grid-template-columns:32px repeat(7,minmax(0,1fr)) 32px;gap:1px}.todo-week-label{font-size:9px}}
+@media(max-height:760px) and (min-width:900px){.todo-content .widget-head{margin-bottom:4px}.todo-week-label{margin-bottom:2px}.todo-today-button{min-height:28px}.todo-week-strip.day-strip{margin-bottom:6px}.todo-week-strip .day-chip{min-height:44px}}
