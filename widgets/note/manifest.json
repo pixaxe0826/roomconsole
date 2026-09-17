@@ -1,0 +1,18 @@
+{
+  "id": "note",
+  "name": "메모",
+  "description": "플러그인 확장 예제. 관리자 설정 또는 서버 데이터의 텍스트를 표시합니다.",
+  "icon": "note",
+  "apiVersion": 1,
+  "version": "1.0.0",
+  "entry": "widget.js",
+  "style": "style.css",
+  "defaultSize": {
+    "w": 2,
+    "h": 2
+  },
+  "configDefaults": {
+    "text": "하루에 하나씩, 천천히.",
+    "caption": "오늘의 메모"
+  }
+}
