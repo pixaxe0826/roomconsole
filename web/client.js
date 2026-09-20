@@ -6,6 +6,7 @@ let state,selectedDate,month,expanded=null,offset=0,socket,renderId=0,cleanups=[
 function notice(text){$('#notice').textContent=text||'';$('#notice').classList.toggle('hidden',!text)}
 function connection(ok,label){
  const wasOnline=online;online=ok;
+ if(!ok)window.RoomLife?.offline();
  $('#connection').innerHTML=`<i class="status-dot ${ok?'':'off'}"></i> ${R.esc(label||(ok?'서버 연결됨':'다시 연결 중'))}`;
  if(!ok&&state&&!demo)notice('실시간 연결을 재시도하고 있습니다. 마지막으로 받은 내용을 표시합니다.');else if(ok)notice('');
  if(state&&!demo&&!stopped&&wasOnline!==ok)render();
@@ -37,7 +38,7 @@ function widgetNode(instance,ex=false){
  const el=document.createElement('section');el.className='widget';el.dataset.widgetId=instance.id;el.setAttribute('aria-label',instance.title||instance.type);
  if(!ex){el.style.gridColumn=`${instance.x+1} / span ${instance.w}`;el.style.gridRow=`${instance.y+1} / span ${instance.h}`;el.tabIndex=0;el.setAttribute('role','button')}
  const rect=grid.getBoundingClientRect(),w=(rect.width-(state.layout.columns-1)*16)/state.layout.columns*instance.w,h=(rect.height-(state.layout.rows-1)*16)/state.layout.rows*instance.h;
- const compact=!ex&&(w<245||h<155||(instance.type==='calendar'&&(w<300||h<255))||(['todos','all-todos'].includes(instance.type)&&h<255));
+ const compact=!ex&&(w<245||h<155||(instance.type==='calendar'&&(w<300||h<255))||(['todos','all-todos'].includes(instance.type)&&h<255)||(instance.type==='alarms'&&h<300));
  if(!ex&&(w<95||h<72))el.classList.add('micro');if(!ex&&h<45)el.classList.add('nano');
  const ctx=context(instance,ex,compact),mod=moduleFor(instance);
  try{el.innerHTML=mod?.render?mod.render(ctx):'<div class="empty">위젯 폴더를 확인하세요.</div>';const cleanup=mod?.bind?.(el,ctx);if(typeof cleanup==='function')cleanups.push(cleanup)}
@@ -82,11 +83,14 @@ function applyState(next){
  // An old in-flight GET must not undo an already acknowledged completion.
  if(state&&next.revision<state.revision)return;
  if(state){const local=new Map(state.tasks.map(t=>[t.id,t]));next.tasks=next.tasks.map(t=>{const current=local.get(t.id);return current&&current.version>t.version?current:t})}
+ if(state?.life&&next.life&&state.life.revision>next.life.revision)next.life=state.life;
  state=next;offset=new Date(next.server_time).getTime()-Date.now();
+ window.RoomLife?.displayUpdate(next.life);
  if(!selectedDate){selectedDate=next.today;month=next.today.slice(0,7)}
  render();
 }
 function requirePairing(message='기기 연결 필요'){
+ window.RoomLife?.stopDisplay();
  stopped=true;++renderId;socket?.close();pendingTasks.clear();cleanups.forEach(fn=>fn());cleanups=[];
  expanded=null;focus.classList.add('hidden');focusContent.replaceChildren();$('#display').classList.remove('hidden');
  grid.innerHTML=`<div class="loading-card">${R.icon('screen',40)}<h2>이 화면을 방과 연결해 주세요</h2><p>관리자 → 표시 기기에서 연결 링크를 만든 뒤<br>이 iPad의 Safari로 열어 주세요.<br>키보드 입력 없이 연결됩니다.</p></div>`;
@@ -183,5 +187,9 @@ setInterval(()=>{
 setInterval(()=>{if(!demo){refresh();presence()}},30000);
 let resizeTimer;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>render(),130)});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!demo)refresh()});
-window.RoomDisplay={selectDate,openWidget,home,getState:()=>state};start();
+window.RoomDisplay={selectDate,openWidget,home,getState:()=>state,updateLife:next=>{
+ if(stopped||!state||!next||state.life&&state.life.revision>next.revision)return;
+ const changed=JSON.stringify(state.life?.notes)!==JSON.stringify(next.notes)||JSON.stringify(state.life?.alarms)!==JSON.stringify(next.alarms)||state.life?.scheduler?.error!==next.scheduler?.error;
+ state.life=next;if(changed)render();
+}};start();
 })();

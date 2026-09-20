@@ -45,3 +45,10 @@
 - 모든 assistant write는 관리자 confirmation+snapshot+receipt를 거친다.
 - 원문/요청/모델원출력은 manager만, Client에는 검증된 최종결과만 보낸다.
 - 일반대화의 품질검사는 post-response다. streaming/실기기검증으로 과장하지 않는다.
+
+## 0.1.7 메모·알람 계약
+- app/life.py는 additive SQLite 서비스다. 임의 모델 도구 권한을 추가하지 않는다.
+- note는 기존 고정 문구 보존, 새 메모는 shared + 위젯 배치 opt-in만 표시한다.
+- alarms 예약 CRUD는 관리자. 유효 표시 기기는 기존 회차 ack/snooze만 허용한다.
+- ringing은 실제 소리 재생 증거가 아니다. 잠금/백그라운드/오프라인 보장을 하지 않는다.
+- tests/test_life.py, tests/test_life_update.py, scripts/life_browser.py와 기존 테스트를 실행한다.

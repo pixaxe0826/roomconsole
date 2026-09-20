@@ -62,6 +62,8 @@ jobs:
           tests/test_display_completion.py
           tests/test_all_tasks.py
           tests/test_repo_packaging.py
+          tests/test_life.py
+          tests/test_life_update.py
           --timeout=30
           --timeout-method=thread
           --junitxml=artifacts/test-results/backend.xml
@@ -102,6 +104,7 @@ jobs:
       - run: python scripts/llm_widget_live.py
       - run: python scripts/assistant_browser.py
       - run: python scripts/context_browser.py
+      - run: python scripts/life_browser.py
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

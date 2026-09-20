@@ -1,0 +1,15 @@
+{
+  "id": "alarms",
+  "name": "알람",
+  "description": "서버 예약 시각·반복·놓친 알람과 열린 iPad 화면의 소리·확인·5분 미루기. 잠금 알림은 지원하지 않습니다.",
+  "icon": "clock",
+  "apiVersion": 1,
+  "version": "1.0.0",
+  "entry": "widget.js",
+  "style": "style.css",
+  "defaultSize": {
+    "w": 4,
+    "h": 2
+  },
+  "configDefaults": {}
+}

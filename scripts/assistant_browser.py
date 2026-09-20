@@ -23,11 +23,13 @@ def load_bridged(page, api, kind):
         assert path.startswith('/api/'), path
         r=api.request(method,path,content=body,headers={'Content-Type':'application/json'} if body else None)
         return {'status':r.status_code,'body':r.text}
-    page.expose_function('assistantHTTP',bridge)
+    if not getattr(page,'_room_bridge',False):
+        page.expose_function('assistantHTTP',bridge);page._room_bridge=True
     html=(ROOT/f'web/{kind}.html').read_text()
     html=re.sub(r'<link\b[^>]*>','',html)
     html=re.sub(r'<script defer[^>]*></script>','',html)
     cssfiles=['base.css','client.css','speech.css'] if kind=='client' else ['base.css','manager.css','manager-llm.css']
+    cssfiles.append('life.css')
     css='\n'.join((ROOT/'web'/x).read_text() for x in cssfiles)
     if kind=='client':css+='\n'+'\n'.join(x.read_text() for x in (ROOT/'widgets').glob('*/style.css'))
     code=(ROOT/'web/shared.js').read_text()+r"""
@@ -39,6 +41,7 @@ def load_bridged(page, api, kind):
     history.replaceState=()=>{};
     Room.connect=(role,handler,status)=>{window.assistantInvalidate=()=>handler({type:'invalidate'});queueMicrotask(()=>{status(true);handler({type:'hello'})});const timer=setInterval(()=>handler({type:'invalidate'}),350);return {send:()=>{},close:()=>clearInterval(timer)};};
     """
+    code+='\n'+(ROOT/'web/life.js').read_text('utf-8')+'\n'
     if kind=='client':
         code+='window.ROOM_WIDGETS={};\n'
         for mod in (ROOT/'widgets').glob('*/widget.js'):

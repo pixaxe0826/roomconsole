@@ -23,9 +23,7 @@ def main():
     class Backend(BaseHTTPRequestHandler):
         def log_message(self,*a):pass
         def send_json(self,obj):
-            data=json.dumps(obj,ensure_ascii=False).encode();self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(data)));self.end_headers()
-            try:self.wfile.write(data)
-            except (BrokenPipeError,ConnectionResetError):pass
+            data=json.dumps(obj,ensure_ascii=False).encode();self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
         def do_GET(self):self.send_json({'data':[{'id':'Qwen3-0.6B-Q5_K_M.gguf'}]})
         def do_POST(self):
             body=self.rfile.read(int(self.headers['Content-Length']));captured.append(body)
@@ -53,7 +51,7 @@ def main():
             def request(method,path,data=None):return getattr(api,method)(base+path,headers=headers,data=data)
             source='내일 오후 세 시에 택배 보내기 추가해 줘.'
             vid=request('post','/api/voice/text',{'request_id':'browser-voice','source':'UI-test','text':source}).json()['id']
-            check('health/version 0.1.6',request('get','/healthz').json()['version']=='0.1.6')
+            check('health/version 0.1.7',request('get','/healthz').json()['version']=='0.1.7')
             browser_http=None
             injected_html=None
             if os.environ.get('HUB_BROWSER_BRIDGE')=='1':
@@ -80,7 +78,9 @@ def main():
                 page.set_content(injected_html,wait_until='domcontentloaded')
             else:
                 page.goto(base+'/manager')
-            page.locator('#loginForm input').fill(app.state.admin_token);page.locator('#loginForm button').click();page.wait_for_selector('#managerApp:not(.hidden)')
+            page.locator('#loginForm input').fill(app.state.admin_token)
+            page.locator('#loginForm button').click()
+            page.wait_for_selector('#managerApp:not(.hidden)')
             page.evaluate("RoomLLM.setMode('legacy');RoomManager.navigate('voice')");page.get_by_role('button',name='LLM으로 전송',exact=True).click();page.wait_for_selector('.llm-history-item.selected')
             check('disabled model stores prepared request',page.locator('.llm-detail-heading').inner_text().find('미전송')>=0)
             check('disabled model never called',len(captured)==0)

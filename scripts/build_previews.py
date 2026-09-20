@@ -28,16 +28,24 @@ def build():
   meta={'id':rid,'status':'succeeded','sent_at':at,'updated_at':at}
   demo['llm_display']['items'].append(meta)
   demo['llm_display_demo_details'][rid]={**meta,'finished_at':at,'model':'모의 응답 · 실제 LLM 아님','input':question,'output':answer,'refusal':None,'output_kind':'text','truncated':False}
+ # Synthetic examples only. No alarms ring and no writes occur in file demos.
+ demo['life_demo']={'notes':[
+  {'id':'n1','title':'작은 것부터, 하나씩','body':'오늘의 생각을 남겨 두세요.\n\n책 20페이지 읽기\n주말 산책 코스 찾아보기','pinned':True,'shared':True,'version':1,'created_at':now,'updated_at':now},
+  {'id':'n2','title':'다음에 읽을 책','body':'관심 있는 주제와 문장을 모아 두는 곳.','pinned':False,'shared':False,'version':1,'created_at':now,'updated_at':now}],
+  'alarms':[{'id':'a1','label':'하루를 시작하는 시간','repeat':'weekly','weekdays':[0,1,2,3,4],'date':None,'time':'07:30','timezone':'Asia/Seoul','enabled':True,'next_fire_at':'2026-09-17T22:30:00+00:00','version':1},
+  {'id':'a2','label':'잠깐, 몸을 움직여요','repeat':'weekly','weekdays':list(range(7)),'date':None,'time':'15:00','timezone':'Asia/Seoul','enabled':True,'next_fire_at':'2026-09-17T06:00:00+00:00','version':1}],
+  'events':[]}
+ demo['life']={'version':1,'revision':1,'as_of':now,'notes':{'enabled':True,'items':[demo['life_demo']['notes'][0]]},'alarms':{'enabled':True,'items':demo['life_demo']['alarms'],'events':[]},'scheduler':{'error':False,'delivery':'foreground_browser_only','sound_confirmed':False}}
  safe=lambda obj:json.dumps(obj,ensure_ascii=False).replace('<','\\u003c')
  common=(ROOT/'web/base.css').read_text(encoding='utf-8');shared=(ROOT/'web/shared.js').read_text(encoding='utf-8')
  def assemble(kind,prefix,extra=''):
   html=(ROOT/f'web/{kind}.html').read_text(encoding='utf-8');html=re.sub(r'<link\b[^>]*>','',html);html=re.sub(r'<script defer[^>]*></script>','',html)
-  css=common+'\n'+(ROOT/f'web/{kind}.css').read_text(encoding='utf-8')+'\n'+(ROOT/'web/speech.css').read_text(encoding='utf-8')
+  css=common+'\n'+(ROOT/'web/life.css').read_text('utf-8')+'\n'+(ROOT/f'web/{kind}.css').read_text(encoding='utf-8')+'\n'+(ROOT/'web/speech.css').read_text(encoding='utf-8')
   if kind=='manager':css+='\n'+(ROOT/'web/manager-llm.css').read_text('utf-8')
   if kind=='client':css+='\n'+'\n'.join((ROOT/'widgets'/m['id']/m['style']).read_text('utf-8') for m in registry)
   html=html.replace('</head>','<style>'+css+'</style></head>')
   llm=(ROOT/'scripts/llm_demo.js').read_text('utf-8')+'\n'+(ROOT/'web/manager-llm.js').read_text('utf-8') if kind=='manager' else ''
-  scripts=prefix+'\n'+shared+'\n'+extra+'\n'+llm+'\n'+(ROOT/f'web/{kind}.js').read_text(encoding='utf-8')
+  scripts=prefix+'\n'+shared+'\n'+(ROOT/'web/life.js').read_text('utf-8')+'\n'+extra+'\n'+llm+'\n'+(ROOT/f'web/{kind}.js').read_text(encoding='utf-8')
   if kind=='client':scripts+='\n'+(ROOT/'web/speech.js').read_text(encoding='utf-8')
   return html.replace('</body>','<script>'+scripts.replace('</script','<\\/script')+'</script></body>')
  mod='window.ROOM_WIDGETS={};\n'
@@ -61,5 +69,10 @@ def build():
  llm_demo['layout']['widgets'].append({'id':'llm','type':'llm-response','title':'LLM 응답','x':4,'y':0,'w':4,'h':2,'config':{}})
  llm_client=assemble('client','window.ROOM_DEMO='+safe(llm_demo)+';',mod)
  (out/'llm_widget_preview.html').write_text(llm_client,encoding='utf-8',newline='\n')
+ life_demo=json.loads(json.dumps(demo))
+ life_demo['layout']['widgets'][2].update(type='note',title='메모')
+ life_demo['layout']['widgets'][3].update(type='alarms',title='알람')
+ life_client=assemble('client','window.ROOM_DEMO='+safe(life_demo)+';',mod)
+ (out/'notes_alarms_preview.html').write_text(life_client,encoding='utf-8',newline='\n')
  print('Built',len(client.encode()),len(manager.encode()),len(all_client.encode()),'bytes')
 if __name__=='__main__':build()
