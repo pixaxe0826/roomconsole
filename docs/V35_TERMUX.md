@@ -1,6 +1,6 @@
 # LG V35 / Termux 상시 서버
 
-[문서 홈](../README.md) · [현재 상태](CURRENT_STATUS.md)
+[문서 홈](../README.md) · [현재 상태](CURRENT_STATUS.md) · [Git 관리형 업데이트](V35_GIT_UPDATE.md)
 
 이 문서는 현재 Room Hub 0.1.4를 LG V35에서 상시 실행할 때의 **현재 권장 구조**를 설명합니다. 특정 사용자명/IP를 가정하지 않습니다.
 
@@ -65,6 +65,31 @@ sv restart "$PREFIX/var/service/room-hub"
 ```
 
 PRoot 자식 프로세스 종료가 지연될 수 있으므로 소스에는 `deploy/termux/stop-room-hub.py`도 포함되어 있습니다. 업데이트 전에 8088이 실제로 닫혔는지 확인하세요.
+
+
+## Git 관리형 업데이트
+
+기존 ZIP/패치 설치를 한 번 Git clone으로 전환하면 이후에는 운영 V35에서 소스를 직접 수정하지 않고, 검토·병합된 GitHub `main`만 fast-forward로 적용할 수 있습니다.
+
+현재 설치가 Git인지 확인:
+
+```bash
+git -C "$HOME/room-hub" rev-parse --is-inside-work-tree
+```
+
+비-Git 설치의 최초 전환과 이후 업데이트/rollback은 [V35 Git 관리형 업데이트](V35_GIT_UPDATE.md)를 사용하세요. 전환 뒤 상태 확인은:
+
+```bash
+bash "$HOME/room-hub/deploy/termux/update-from-git.sh" --check
+```
+
+업데이트는:
+
+```bash
+bash "$HOME/room-hub/deploy/termux/update-from-git.sh"
+```
+
+V35는 push하지 않는 배포 clone으로 유지합니다. `data/`, `.venv-v35/`, 모델, 토큰, TLS private material은 Git에서 제외합니다.
 
 ## 재부팅 후 자동 시작 — Tasker 권장
 
