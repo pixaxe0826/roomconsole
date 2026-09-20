@@ -290,12 +290,18 @@ def test_voice_transcription_to_llm_full_flow(tmp_path):
             stt=c.get('/api/speech/jobs/'+j['id']).json()
             if stt['status']=='succeeded':break
             time.sleep(.01)
-        assert stt['status']=='succeeded' and b.calls==[]
+        assert stt['status']=='succeeded'
         v=c.get('/api/admin/overview').json()['voice'][0]
-        llm=c.post('/api/llm/requests',json={'request_id':'full-flow-llm','voice_id':v['id'],'expected_text_sha256':v['text_sha256']}).json()
-        assert wait(c,llm['id'])['status']=='succeeded'
+        end=time.monotonic()+2;rid=None
+        while time.monotonic()<end:
+            with a.state.store.connect() as db:
+                row=db.execute('SELECT id FROM llm_requests WHERE source_voice_id=? ORDER BY created_at DESC LIMIT 1',(v['id'],)).fetchone()
+            if row:rid=row['id'];break
+            time.sleep(.01)
+        assert rid is not None and wait(c,rid)['status']=='succeeded'
+        assert len(b.calls)==1
         assert json.loads(b.calls[0][1])['messages'][-1]['content']==stt['text']
-        assert c.get('/api/speech/status').json()['threads']==6
+        status=c.get('/api/speech/status').json();assert status['threads']==6 and status['auto_submit_llm'] is True
         assert a.state.store.tasks()==[]
 
 def test_llm_invalidation_over_real_app_websocket(hub):

@@ -348,6 +348,16 @@ class LLMHub:
         meta={k:v[k] for k in ('source','locale','kind','created_at','status')}
         return await self._insert(req.request_id,sig,v['id'],v['id'],v['text'],meta,mode=req.mode)
 
+    async def submit_transcription(self, job_id: str, voice_id: str, text: str):
+        """Submit one successful STT result through the normal auto assistant route.
+
+        The speech job id is the idempotency key. Fast reads still stay local;
+        writes still stop at confirmation; only fallback/chat reaches the model.
+        """
+        req = LLMCreate(request_id='speech-auto:'+job_id, voice_id=voice_id, mode='auto',
+                        expected_text_sha256=sha(text))
+        return await self.submit(req)
+
     async def retry(self,rid,req):
         prev=self.get(rid)
         if prev['status'] in ACTIVE:raise HTTPException(409,'현재 요청을 완료하거나 취소한 뒤 재요청하세요.')
