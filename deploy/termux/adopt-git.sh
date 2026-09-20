@@ -110,6 +110,11 @@ for file in "$BACKUP"/.env "$BACKUP"/.env.*; do
 done
 shopt -u nullglob
 
+# Deployment clone: manual pulls must fast-forward, and accidental pushes from
+# the phone are disabled even if credentials later appear in Termux.
+git -C "$ROOT" config pull.ff only
+git -C "$ROOT" remote set-url --push origin 'disabled-v35://read-only-deployment'
+
 python "$ROOT/scripts/check_repo.py"
 DIRTY="$(git -C "$ROOT" status --porcelain --untracked-files=normal)"
 [ -z "$DIRTY" ] || { printf '%s\n' "$DIRTY" >&2; stop 'Unexpected non-ignored files exist after adoption.'; }
