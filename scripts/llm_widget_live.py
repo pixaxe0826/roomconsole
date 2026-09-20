@@ -85,7 +85,7 @@ def main():
     time.sleep(.08);pg.evaluate('widgetInvalidate()');pg.wait_for_selector('[data-llmr-input]')
     check('actual attempted request input rendered',pg.locator('[data-llmr-input]').inner_text()=='요청 1')
     check('running state shows no fake output','처리' in pg.locator('[data-llmr-output]').inner_text())
-    backend.hold.clear();wait_done(rid);pg.evaluate('widgetInvalidate()');pg.wait_for_function("document.querySelector('[data-llmr-output]')?.textContent.startsWith('[모의]')")
+    backend.hold.clear();wait_done(rid);pg.evaluate('widgetInvalidate()');pg.locator('[data-llmr-output]').filter(has_text='[모의]').wait_for()
     check('real API result reaches browser', '[모의]' in pg.locator('[data-llmr-output]').inner_text())
     check('response HTML is escaped',pg.locator('.llmr-content img').count()==0 and not pg.evaluate('!!window.HACKED'))
     check('reasoning is not exposed', 'SECRET_INTERNAL' not in pg.content())
