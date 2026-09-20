@@ -233,7 +233,7 @@ def deploy(root: Path, prefix: Path, home: Path, remote_name: str, remote_branch
             if health and str(health.get("version")) == expected:
                 print("\nUPDATED SUCCESSFULLY")
                 print(f"  HEAD    : {git_out(root, 'rev-parse', 'HEAD')}")
-                print(f"  tree    : {git_out(root, 'rev-parse', 'HEAD^{{tree}}')}")
+                print(f"  tree    : {git_out(root, 'rev-parse', 'HEAD^{tree}')}")
                 print(f"  version : {expected}")
                 print(f"  backup  : {backup}")
                 print(f"  health  : {json.dumps(health, ensure_ascii=False)}")
