@@ -48,6 +48,17 @@ class FakeRunner:
         finally:self.concurrent-=1
 
 
+class FakeLLM:
+    def __init__(self):self.calls=[]
+    async def generate(self,endpoint,body,timeout):
+        self.calls.append(json.loads(body))
+        response={'model':'test-double','choices':[{'message':{'content':'김치볶음밥이나 카레를 추천합니다. 간단하게 준비할 수 있습니다.'},'finish_reason':'stop'}],
+                  'usage':{'prompt_tokens':32,'completion_tokens':12},
+                  'timings':{'predicted_n':12,'predicted_ms':1200,'predicted_per_second':10,'prompt_ms':100}}
+        return response,json.dumps(response,ensure_ascii=False)
+    async def probe(self,cfg):return {'ok':True,'message':'test-only','models':[cfg.model]}
+
+
 @pytest.fixture
 def enabled(tmp_path):
     model=tmp_path/'test-model.bin';model.write_bytes(b'x'*2048)
@@ -142,6 +153,21 @@ def test_auto_submit_write_still_requires_confirmation(enabled):
     assert req['status']=='awaiting_confirmation'
     assert req['assistant']['proposal']['intent']=='todo.create'
     assert not app.state.store.tasks()
+
+
+def test_auto_submit_general_chat_reaches_enabled_llm_once(enabled):
+    app,c,r,a,_=enabled
+    backend=FakeLLM();app.state.llm.backend=backend
+    cfg=c.get('/api/llm/config',headers=a).json()['config'];cfg['enabled']=True
+    assert c.put('/api/llm/config',headers=a,json=cfg).status_code==200
+    r.text='저녁 메뉴 추천해 줘.'
+    job=wait(c,post(c,'auto-chat').json()['id'])
+    req=wait_llm(app,job['voice_id'])
+    assert req['status']=='succeeded'
+    assert len(backend.calls)==1
+    assert req['assistant']['mode']=='auto'
+    assert req['assistant']['routing']['route']=='LLM_FALLBACK'
+    assert req['assistant']['routing']['llm_called'] is True
 
 
 def test_auto_submit_failure_does_not_rewrite_successful_stt(enabled):
