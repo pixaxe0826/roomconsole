@@ -41,7 +41,7 @@ def load_bridged(page, api, kind):
     history.replaceState=()=>{};
     Room.connect=(role,handler,status)=>{window.assistantInvalidate=()=>handler({type:'invalidate'});queueMicrotask(()=>{status(true);handler({type:'hello'})});const timer=setInterval(()=>handler({type:'invalidate'}),350);return {send:()=>{},close:()=>clearInterval(timer)};};
     """
-    code+='\n'+(ROOT/'web/life.js').read_text('utf-8')+'\n'
+    code+='\n'+(ROOT/'web/life.js').read_text()+'\n'
     if kind=='client':
         code+='window.ROOM_WIDGETS={};\n'
         for mod in (ROOT/'widgets').glob('*/widget.js'):
@@ -134,13 +134,19 @@ def main():
                 tablet.screenshot(path=str(screenshots/'assistant_client.png'))
                 # Ensure manager's original preview size fix remains.
                 page.evaluate("RoomManager.navigate('overview')")
-                preview=page.locator('#previewBox')
-                preview.wait_for(state='visible')
-                w1=preview.evaluate("(e)=>e.getBoundingClientRect().width")
+                # Query and measure in one browser turn: the live invalidation
+                # handler can detach a previously resolved Locator element.
+                measure = """() => {
+                    const box = document.querySelector('#previewBox');
+                    if (!box) return false;
+                    const width = box.getBoundingClientRect().width;
+                    return width > 0 ? width : false;
+                }"""
+                w1=page.wait_for_function(measure,timeout=5000).json_value()
                 page.wait_for_timeout(1500)
-                preview.wait_for(state='visible')
-                w2=preview.evaluate("(e)=>e.getBoundingClientRect().width")
-                ok('preview width stable during live update',abs(w1-w2)<.2)
+                w2=page.wait_for_function(measure,timeout=5000).json_value()
+                results['preview_widths']=[w1,w2]
+                ok(f'preview width stable during live update ({w1}, {w2})',abs(w1-w2)<.2)
                 ok('browser no uncaught errors',not results['page_errors'])
                 browser.close();display.close()
         server.should_exit=True;th.join(timeout=10)
