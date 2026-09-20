@@ -96,8 +96,10 @@ def main():
       check('approved task stored',len(api.get('/api/state').json()['tasks'])==4)
       check('no edit UI added to iPad',tablet.locator('input,textarea,select,[data-llm=confirm-action]').count()==0)
       page.evaluate("RoomManager.navigate('overview')");page.wait_for_selector('#previewBox')
-      w=page.locator('#previewBox').bounding_box()['width'];page.wait_for_timeout(1500)
-      check('preview stable',abs(w-page.locator('#previewBox').bounding_box()['width'])<.2)
+      measure="""() => { const box=document.querySelector('#previewBox'); if(!box) return false; const width=box.getBoundingClientRect().width; return width>0?width:false; }"""
+      w=page.wait_for_function(measure,timeout=5000).json_value();page.wait_for_timeout(1500)
+      w2=page.wait_for_function(measure,timeout=5000).json_value()
+      check('preview stable',abs(w-w2)<.2)
       check('no uncaught browser exceptions',not out['page_errors'])
      browser.close()
   finally:server.should_exit=True;th.join(timeout=10)
