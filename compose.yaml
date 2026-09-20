@@ -1,7 +1,7 @@
 services:
   room-hub:
     build: .
-    image: room-hub:0.1.1
+    image: room-hub:0.1.6
     restart: unless-stopped
     ports:
       - "${HUB_PORT:-8088}:8088"

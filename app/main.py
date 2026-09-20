@@ -9,15 +9,21 @@ from fastapi import FastAPI,Request,Response,HTTPException,Depends,UploadFile,Fi
 from fastapi.responses import FileResponse,JSONResponse,RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from .models import *
+from . import llm_display
+from .clock_service import clock_context
+from .capabilities import manifest as capability_manifest
+from .assistant import Confirmation
 from .store import Store,uid,utcnow
 from .recurrence import occurrences
 from .widgets import discover
 from .weather import fetch_weather
+from .speech import SpeechHub
+from .llm import LLMHub, LLMConfig, LLMCreate, LLMRetry, sha as llm_sha
 ROOT=Path(__file__).resolve().parent.parent
 
 def hashed(value):return hashlib.sha256(value.encode()).hexdigest()
 
-def create_app(data_dir=None,weather_enabled=True):
+def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_runner=None,llm_backend=None):
  data=Path(data_dir or os.getenv('HUB_DATA_DIR',ROOT/'data')).resolve();data.mkdir(parents=True,exist_ok=True);(data/'audio').mkdir(exist_ok=True)
  widget_root=Path(os.getenv('HUB_WIDGET_DIR',ROOT/'widgets')).resolve()
  store=Store(data/'room-hub.sqlite3');connections={};attempts={};wx={'last_attempt':0.,'error':None};wx_lock=asyncio.Lock()
@@ -56,16 +62,24 @@ def create_app(data_dir=None,weather_enabled=True):
    settings=store.get('settings')
    if settings['latitude'] is not None and time.monotonic()-wx['last_attempt']>=settings['weather_interval_minutes']*60:await refresh_weather()
    await asyncio.sleep(20)
+ speech=SpeechHub(store,data,changed,config=speech_config,runner=speech_runner)
+ llm=LLMHub(store,changed,speech=speech,backend=llm_backend)
  @asynccontextmanager
  async def lifespan(app):
+  await speech.start()
+  await llm.start()
   task=asyncio.create_task(weather_loop()) if weather_enabled else None
   yield
+  await llm.close()
+  await speech.close()
   if task:
    task.cancel()
    with contextlib.suppress(asyncio.CancelledError):await task
   for ws in list(connections):
    with contextlib.suppress(Exception):await ws.close()
- app=FastAPI(title='Room Hub',version='0.1.1',lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
+ app=FastAPI(title='Room Hub',version='0.1.6',lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
+ app.state.speech=speech
+ app.state.llm=llm
  app.state.store=store;app.state.admin_token=admin_key;app.state.ingest_token=ingest_key;app.state.connections=connections
  @app.middleware('http')
  async def security(request,call_next):
@@ -86,8 +100,8 @@ def create_app(data_dir=None,weather_enabled=True):
   if not re.fullmatch(r'[A-Za-z0-9.\-\[\]:]+',authority):return JSONResponse({'detail':'잘못된 Host 헤더'},400)
   response=await call_next(request)
   response.headers.update({'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','X-Frame-Options':'SAMEORIGIN',
-   'Permissions-Policy':'microphone=(), camera=(), geolocation=()',
-   'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws://"+authority+" wss://"+authority+"; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"})
+   'Permissions-Policy':'microphone=(self), camera=(), geolocation=()',
+   'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws://"+authority+" wss://"+authority+"; frame-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"})
   if request.url.path.startswith('/api/') or request.url.path in ['/','/client','/manager']:response.headers['Cache-Control']='no-store'
   if request.url.path.startswith(('/static/','/widgets/')):response.headers['Cache-Control']='no-cache'
   return response
@@ -120,7 +134,7 @@ def create_app(data_dir=None,weather_enabled=True):
    db.execute('DELETE FROM sessions WHERE expires_at<?',(time.time(),));db.execute('INSERT INTO sessions VALUES(?,?,?,?)',(hashed(token),role,device_id,time.time()+days*86400))
   return token
  @app.get('/healthz')
- async def health():return {'status':'ok','version':'0.1.1'}
+ async def health():return {'status':'ok','version':'0.1.6'}
  @app.get('/')
  async def root():return RedirectResponse('/client')
  @app.get('/client')
@@ -144,19 +158,36 @@ def create_app(data_dir=None,weather_enabled=True):
   settings=store.get('settings');registry,errors=discover(widget_root);weather=store.get('weather')
   if weather:
    weather['stale']=(datetime.now(timezone.utc)-datetime.fromisoformat(weather['fetched_at'])).total_seconds()>settings['weather_interval_minutes']*120;weather['error']=wx['error']
-  return {'revision':store.get('revision'),'server_time':utcnow(),'today':datetime.now(ZoneInfo(settings['timezone'])).date().isoformat(),
+  stamp=utcnow();clock=clock_context(stamp,settings['timezone'])
+  return {'revision':store.get('revision'),'server_time':stamp,'today':clock['today'],'clock':clock,
    'settings':settings,'layout':store.get('layout'),'tasks':store.tasks(),'weather':weather,'weather_error':wx['error'],'widgets':registry,'widget_errors':errors,
-   'capabilities':{'task_completion':True},
+   'capabilities':{'task_completion':True,'speech_upload':True,'llm_response_widget':True},
+   'llm_display':llm_display.index(store),
    'widget_data':{w['id']:store.get('widget_data:'+w['id']) or {} for w in registry}}
+ @app.get('/api/clock')
+ async def current_clock(_=Depends(viewer)):
+  return clock_context(utcnow(),store.get('settings')['timezone'])
+ @app.get('/api/assistant/capabilities')
+ async def assistant_capabilities(_=Depends(admin)):
+  return capability_manifest()
+ @app.get('/api/assistant/tasks')
+ async def assistant_tasks(start:str,end:str,status:str='all',limit:int=50,_=Depends(admin)):
+  try:return store.query_tasks(start,end,status,limit)
+  except ValueError as exc:raise HTTPException(422,str(exc))
+ @app.get('/api/display/llm/{rid}')
+ async def llm_display_entry(rid:str,_=Depends(viewer)):
+  if not rid or len(rid)>80:raise HTTPException(422,'기록 ID를 확인하세요.')
+  return llm_display.entry(store,rid)
  @app.get('/api/admin/overview')
  async def overview(_=Depends(admin)):
   with store.connect() as db:
    devices=[dict(r) for r in db.execute('SELECT * FROM devices ORDER BY created_at DESC')];events=[dict(r) for r in db.execute('SELECT * FROM audit ORDER BY id DESC LIMIT 30')]
-   voice=[dict(r) for r in db.execute('SELECT id,request_id,source,kind,text,locale,status,created_at FROM voice ORDER BY created_at DESC LIMIT 100')]
+   voice=[dict(r) for r in db.execute('SELECT v.id,v.request_id,v.source,v.kind,v.text,v.locale,v.status,v.created_at,j.id AS job_id,j.status AS job_status,j.error AS transcription_error,j.elapsed AS transcription_elapsed,(SELECT count(*) FROM llm_requests l WHERE l.source_voice_id=v.id) AS llm_count FROM voice v LEFT JOIN speech_jobs j ON j.voice_id=v.id ORDER BY v.created_at DESC LIMIT 100')]
+  for v in voice:v['text_sha256']=llm_sha(v['text'])
   for dev in devices:
    active=[m for m in connections.values() if m.get('device_id')==dev['id']];dev['online']=bool(active);dev['view']=active[-1].get('view') if active else None;dev['last_command']=active[-1].get('last_command') if active else None
   registry,errors=discover(widget_root)
-  return {'devices':devices,'events':events,'voice':voice,'widgets':registry,'widget_errors':errors,'stats':{'connected':sum(d['online'] for d in devices),'tasks':len(store.tasks())}}
+  return {'devices':devices,'events':events,'voice':voice,'speech':speech.status(),'widgets':registry,'widget_errors':errors,'stats':{'connected':sum(d['online'] for d in devices),'tasks':len(store.tasks())}}
  @app.post('/api/devices/pair')
  async def pair(body:PairCreate,_=Depends(admin)):
   did=uid();code=secrets.token_urlsafe(24)
@@ -329,6 +360,7 @@ def create_app(data_dir=None,weather_enabled=True):
   return FileResponse(data/'audio'/row['filename'],media_type=row['media_type'],filename='voice-'+vid+'.bin')
  @app.patch('/api/voice/{vid}')
  async def review(vid:str,body:VoiceReview,_=Depends(admin)):
+  speech.ensure_not_running(vid)
   with store.connect() as db:
    row=db.execute('SELECT * FROM voice WHERE id=?',(vid,)).fetchone()
    if not row:raise HTTPException(404,'입력 이벤트가 없습니다.')
@@ -338,14 +370,68 @@ def create_app(data_dir=None,weather_enabled=True):
   await changed('voice.reviewed',vid);return {'ok':True}
  @app.delete('/api/voice/{vid}')
  async def delete_voice(vid:str,_=Depends(admin)):
+  speech.ensure_not_running(vid)
+  llm.ensure_voice_deletable(vid)
   with store.connect() as db:
    row=db.execute('SELECT filename FROM voice WHERE id=?',(vid,)).fetchone()
    if not row:raise HTTPException(404,'입력 이벤트가 없습니다.')
    db.execute('DELETE FROM voice WHERE id=?',(vid,))
   if row['filename']:(data/'audio'/row['filename']).unlink(missing_ok=True)
   await changed('voice.deleted',vid);return {'ok':True}
+ @app.get('/api/llm/config')
+ async def llm_config(_=Depends(admin)):return llm.status()
+ @app.put('/api/llm/config')
+ async def llm_config_set(body:LLMConfig,_=Depends(admin)):return await llm.configure(body)
+ @app.post('/api/llm/probe')
+ async def llm_probe(_=Depends(admin)):return await llm.probe()
+ @app.get('/api/llm/requests')
+ async def llm_list(limit:int=30,offset:int=0,status:str='',voice_id:str='',query:str='',_=Depends(admin)):
+  if not 1<=limit<=100 or offset<0 or len(query)>240 or len(voice_id)>80:raise HTTPException(422,'조회 범위를 확인하세요.')
+  return llm.listing(limit,offset,status,voice_id,query)
+ @app.post('/api/llm/requests',status_code=202)
+ async def llm_submit(body:LLMCreate,_=Depends(admin)):return await llm.submit(body)
+ @app.get('/api/llm/requests/{rid}')
+ async def llm_get(rid:str,_=Depends(admin)):return llm.get(rid)
+ @app.get('/api/llm/requests/{rid}/export')
+ async def llm_export(rid:str,_=Depends(admin)):
+  row=llm.get(rid)
+  return Response(json.dumps(row,ensure_ascii=False,indent=2),media_type='application/json',
+   headers={'Content-Disposition':'attachment; filename="room-hub-llm-'+row['id']+'.json"'})
+ @app.post('/api/llm/requests/{rid}/send')
+ async def llm_send(rid:str,_=Depends(admin)):return await llm.run_prepared(rid)
+ @app.post('/api/llm/requests/{rid}/retry',status_code=202)
+ async def llm_retry(rid:str,body:LLMRetry,_=Depends(admin)):return await llm.retry(rid,body)
+ @app.post('/api/assistant/{rid}/confirm')
+ async def assistant_confirm(rid:str,body:Confirmation,_=Depends(admin)):return await llm.confirm_action(rid,body)
+ @app.post('/api/llm/requests/{rid}/cancel')
+ async def llm_cancel(rid:str,_=Depends(admin)):return await llm.cancel(rid)
+ @app.delete('/api/llm/requests/{rid}')
+ async def llm_delete(rid:str,_=Depends(admin)):return await llm.delete(rid)
  @app.get('/api/admin/integration')
- async def integration(_=Depends(admin)):return {'schema_version':'1','ingest_token':ingest_key,'max_audio_mb':10,'transcription_enabled':False,'auto_execute':False}
+ async def integration(_=Depends(admin)):return {'schema_version':'1','ingest_token':ingest_key,'max_audio_mb':10,'transcription_enabled':speech.status()['ready'],'auto_execute':False}
+ @app.get('/api/speech/status')
+ async def speech_status(_=Depends(viewer)):return speech.status()
+ @app.get('/api/speech/jobs')
+ async def speech_recent(session=Depends(viewer)):return {'jobs':speech.recent(session)}
+ @app.post('/api/speech/jobs',status_code=202)
+ async def speech_upload(file:UploadFile=File(...),request_id:str=Form(...),session=Depends(viewer)):
+  blob=await file.read(10*1024*1024+1)
+  if not blob or len(blob)>10*1024*1024:raise HTTPException(413,'파일 크기를 확인하세요. 최대 10MB입니다.')
+  return await speech.submit(blob,file.content_type or '',request_id,session)
+ @app.get('/api/speech/jobs/{jid}')
+ async def speech_job(jid:str,session=Depends(viewer)):return speech.get(jid,session)
+ @app.post('/api/speech/jobs/{jid}/cancel')
+ async def speech_cancel(jid:str,session=Depends(viewer)):return await speech.cancel(jid,session)
+ @app.post('/api/speech/jobs/{jid}/retry')
+ async def speech_retry(jid:str,session=Depends(viewer)):return await speech.retry(jid,session)
+ @app.post('/api/speech/enqueue/{vid}',status_code=202)
+ async def speech_existing(vid:str,session=Depends(admin)):return await speech.enqueue_existing(vid,session)
+ @app.get('/roomhub-ca.cer')
+ async def local_ca():
+  # Only a generated PUBLIC certificate is available; never mount data/ as static files.
+  path=data/'https/public/roomhub-ca.cer'
+  if not path.is_file():raise HTTPException(404,'HTTPS 인증서를 먼저 생성하세요.')
+  return FileResponse(path,media_type='application/x-x509-ca-cert',filename='roomhub-ca.cer',headers={'Cache-Control':'no-store'})
  @app.websocket('/ws/{role}')
  async def websocket(ws:WebSocket,role:str):
   origin=ws.headers.get('origin')

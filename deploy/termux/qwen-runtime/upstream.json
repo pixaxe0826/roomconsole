@@ -1,0 +1,34 @@
+{
+  "package": "room-hub-0.1.4-qwen-runtime1",
+  "engine": {
+    "repository": "https://github.com/ggml-org/llama.cpp",
+    "tag": "b6000",
+    "commit": "4762ad7316dcdec20016ab5985fb46a27902204d",
+    "license": "MIT",
+    "note": "Pinned compatibility baseline, not a claim of latest version or tested V35 throughput."
+  },
+  "model": {
+    "repository": "Qwen/Qwen3-0.6B-GGUF",
+    "revision": "ef4088322893040952513f532f736ddeab518403",
+    "file": "Qwen3-0.6B-Q5_K_M.gguf",
+    "sha256": "925f6b806ce5686701d8b903299d398b8ece537d7ed03253d374e1eeadb585a6",
+    "approx_bytes": 551000000,
+    "exact_bytes": null,
+    "license": "Apache-2.0",
+    "page": "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/blob/ef4088322893040952513f532f736ddeab518403/Qwen3-0.6B-Q5_K_M.gguf",
+    "note": "Approximate size is for planning, not an exact-size assertion. Full SHA256 and GGUF header are checked before use. Weights are not included."
+  },
+  "operation": {
+    "cpu_only": true,
+    "threads": 6,
+    "threads_batch": 6,
+    "context": 1024,
+    "parallel": 1,
+    "host": "127.0.0.1",
+    "port": 8090,
+    "thinking": false,
+    "default_max_tokens": 256,
+    "download_during_setup_only": true,
+    "execute_actions": false
+  }
+}

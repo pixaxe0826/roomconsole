@@ -116,7 +116,7 @@ def test_completion_broadcasts_to_manager_and_display(clients):
 
 def test_capability_and_cache_headers(clients):
  _,_,display,_,_=clients
- assert display.get('/api/state').json()['capabilities']=={'task_completion':True}
- assert '?v=0.1.1' in display.get('/client').text
+ assert display.get('/api/state').json()['capabilities']=={'task_completion':True,'speech_upload':True,'llm_response_widget':True}
+ assert '?v=0.1.3' in display.get('/client').text
  assert display.get('/static/client.js').headers['cache-control']=='no-cache'
  assert display.get('/widgets/todos/widget.js').headers['cache-control']=='no-cache'

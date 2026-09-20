@@ -1,0 +1,22 @@
+name: 기능·위젯 제안
+description: 필요한 동작과 데이터 경계를 제안합니다.
+title: "[Feature] "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 해결하려는 상황
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 원하는 위젯과 조작
+      description: "권장 크기, 작은/확대 화면, 터치 동작, 관리자 설정을 구분해 주세요."
+    validations:
+      required: true
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: 데이터·권한·연결 끊김
+      description: "데이터 출처, 서버/클라이언트 역할, 추가 장치·서비스, 실패 시 동작을 적어 주세요."

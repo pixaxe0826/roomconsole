@@ -1,0 +1,63 @@
+# Runtime data and credentials (also excluded by the archive builder)
+data/
+backups/
+secrets/
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.sqlite-*
+*.db
+*.db-*
+*-token.txt
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+# Python and development tools
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+# Generated reports, packages and local files
+artifacts/
+dist/
+build/
+*.log
+*.zip
+/SOURCE_MANIFEST.json
+/docs/*-results.json
+/docs/*-results.xml
+/docs/preview-before-fix-samples.json
+node_modules/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.bak
+*.tmp
+# Do not vendor font binaries; the UI uses platform fonts.
+*.ttf
+*.otf
+*.woff
+*.woff2
+*.eot
+
+# V35 Debian virtual environment (not portable)
+.venv-v35/
+
+# Local speech engine sources, weights and builds; never publish runtime assets.
+/runtime/

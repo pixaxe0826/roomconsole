@@ -370,6 +370,22 @@
   ],
   "widgets": [
     {
+      "id": "all-todos",
+      "name": "전체 할 일",
+      "description": "과거·오늘·미래의 모든 등록 회차를 날짜·시간순으로 한 목록에 표시합니다. 완료 포함이 기본이며, 터치로 완료·취소하고 끝까지 이어 볼 수 있습니다.",
+      "icon": "todo",
+      "apiVersion": 1,
+      "version": "1.0.0",
+      "entry": "widget.js",
+      "style": "style.css",
+      "defaultSize": {
+        "w": 4,
+        "h": 4
+      },
+      "configDefaults": {},
+      "baseUrl": "/widgets/all-todos"
+    },
+    {
       "id": "calendar",
       "name": "달력",
       "description": "월간 달력과 날짜별 할 일 미리보기.",
@@ -400,6 +416,22 @@
       },
       "configDefaults": {},
       "baseUrl": "/widgets/clock"
+    },
+    {
+      "id": "llm-response",
+      "name": "LLM 응답",
+      "description": "4×2 · 요청별 LLM 답변 또는 실제 서버 조회·실행 결과. 변경 확인은 관리자 전용입니다.",
+      "icon": "note",
+      "apiVersion": 1,
+      "version": "1.1.0",
+      "entry": "widget.js",
+      "style": "style.css",
+      "defaultSize": {
+        "w": 4,
+        "h": 2
+      },
+      "configDefaults": {},
+      "baseUrl": "/widgets/llm-response"
     },
     {
       "id": "note",
@@ -525,6 +557,72 @@
   },
   "weather_error": null,
   "capabilities": {
-    "task_completion": true
+    "task_completion": true,
+    "llm_response_widget": true
+  },
+  "llm_display": {
+    "enabled": true,
+    "items": [
+      {
+        "id": "demo-llm-1",
+        "status": "succeeded",
+        "sent_at": "2026-09-17T00:36:00+00:00",
+        "updated_at": "2026-09-17T00:36:00+00:00"
+      },
+      {
+        "id": "demo-llm-2",
+        "status": "succeeded",
+        "sent_at": "2026-09-17T00:37:00+00:00",
+        "updated_at": "2026-09-17T00:37:00+00:00"
+      },
+      {
+        "id": "demo-llm-3",
+        "status": "succeeded",
+        "sent_at": "2026-09-17T00:38:00+00:00",
+        "updated_at": "2026-09-17T00:38:00+00:00"
+      }
+    ],
+    "total": 3
+  },
+  "llm_display_demo_details": {
+    "demo-llm-1": {
+      "id": "demo-llm-1",
+      "status": "succeeded",
+      "sent_at": "2026-09-17T00:36:00+00:00",
+      "updated_at": "2026-09-17T00:36:00+00:00",
+      "finished_at": "2026-09-17T00:36:00+00:00",
+      "model": "모의 응답 · 실제 LLM 아님",
+      "input": "내일 오후 세 시에 택배 보내기 추가해 줘.",
+      "output": "내일 오후 3시에 「택배 보내기」를 하려는 요청입니다.\n아직 할 일을 추가하지 않았습니다.",
+      "refusal": null,
+      "output_kind": "text",
+      "truncated": false
+    },
+    "demo-llm-2": {
+      "id": "demo-llm-2",
+      "status": "succeeded",
+      "sent_at": "2026-09-17T00:37:00+00:00",
+      "updated_at": "2026-09-17T00:37:00+00:00",
+      "finished_at": "2026-09-17T00:37:00+00:00",
+      "model": "모의 응답 · 실제 LLM 아님",
+      "input": "이번 주에 공부할 내용을 정리해 줘.",
+      "output": "할 일을 날짜별로 나누어 확인하고, 중요한 과제부터 순서를 정해 보세요.\n이 내용은 화면 확인용 예시 답변입니다.",
+      "refusal": null,
+      "output_kind": "text",
+      "truncated": false
+    },
+    "demo-llm-3": {
+      "id": "demo-llm-3",
+      "status": "succeeded",
+      "sent_at": "2026-09-17T00:38:00+00:00",
+      "updated_at": "2026-09-17T00:38:00+00:00",
+      "finished_at": "2026-09-17T00:38:00+00:00",
+      "model": "모의 응답 · 실제 LLM 아님",
+      "input": "오늘 할 일 전부 완료 처리해.",
+      "output": "오늘 할 일의 완료 처리를 요청하셨습니다.\n현재는 입력 확인 단계이며 실제 할 일은 변경하지 않았습니다.",
+      "refusal": null,
+      "output_kind": "text",
+      "truncated": false
+    }
   }
 }

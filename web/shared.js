@@ -11,8 +11,15 @@
  const cat=k=>`<span class="cat cat-${['personal','work','home','study'].includes(k)?k:'other'}">${esc(category(k))}</span>`;
  const weatherInfo=code=>code===0?['맑음','sun']:code<=3?['구름 조금','cloud']:code<=48?['안개','cloud']:(code>=71&&code<=77)||(code>=85&&code<=86)?['눈','snow']:code>=95?['뇌우','rain']:['비','rain'];
  const sortedTasks=(state,date)=>state.tasks.filter(t=>t.date===date).sort((a,b)=>Number(a.completed)-Number(b.completed)||(a.time||'99').localeCompare(b.time||'99')||a.title.localeCompare(b.title,'ko'));
+ // Calendar date/time order shared by the full-list widget and manager.
+ // Untimed tasks follow timed tasks of the same date. Completion never moves a row.
+ const chronologicalTasks=tasks=>[...tasks].sort((a,b)=>String(a.date).localeCompare(String(b.date))
+  ||(a.time||'24:00').localeCompare(b.time||'24:00')
+  ||String(a.created_at||'').localeCompare(String(b.created_at||''))
+  ||String(a.id).localeCompare(String(b.id)));
+ const taskStatusMatch=(task,status)=>status==='open'?!task.completed:status==='done'?!!task.completed:true;
  async function api(path,method='GET',body){const options={method,credentials:'same-origin',headers:{'X-Room-Request':'1'}};if(body instanceof FormData)options.body=body;else if(body!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(body)}const r=await fetch(path,options);if(!r.ok){let b={};try{b=await r.json()}catch{}const msg=Array.isArray(b.detail)?b.detail.map(x=>`${x.loc?.slice(1).join('.')}: ${x.msg}`).join('\n'):b.detail||`서버 오류 ${r.status}`;const e=new Error(msg);e.status=r.status;throw e}return r.status===204?null:r.json()}
  function toast(message){document.querySelector('.toast')?.remove();const e=document.createElement('div');e.className='toast';e.textContent=message;document.body.append(e);setTimeout(()=>e.remove(),4800)}
  function connect(role,handler,status){let ws,stopped=false,delay=700,timer,ping;function start(){if(stopped)return;ws=new WebSocket(`${location.protocol==='https:'?'wss:':'ws:'}//${location.host}/ws/${role}`);ws.onopen=()=>{delay=700;status?.(true);ping=setInterval(()=>{if(ws.readyState===1)ws.send(JSON.stringify({type:'ping'}))},20000)};ws.onmessage=e=>{try{handler(JSON.parse(e.data))}catch(err){console.error(err)}};ws.onclose=e=>{clearInterval(ping);status?.(false);if(e.code===4001){stopped=true;handler({type:'revoked'});return}timer=setTimeout(start,delay);delay=Math.min(delay*1.8,15000)};ws.onerror=()=>ws.close()};start();return {send:o=>{if(ws?.readyState===1)ws.send(JSON.stringify(o))},close:()=>{stopped=true;clearTimeout(timer);clearInterval(ping);ws?.close()}}}
- window.Room={esc,icon,dateParts,isoDate,dayDate,addDays,prettyDate,category,cat,weatherInfo,sortedTasks,api,toast,connect};
+ window.Room={esc,icon,dateParts,isoDate,dayDate,addDays,prettyDate,category,cat,weatherInfo,sortedTasks,chronologicalTasks,taskStatusMatch,api,toast,connect};
 })();

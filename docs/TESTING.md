@@ -68,3 +68,32 @@ Actions는 공식 저장소의 커밋 SHA에 고정하고 `contents: read`, chec
 Chromium `set_content` 검사는 실제 배포 서버에 브라우저를 접속시키는 E2E 검사가 아닙니다. 통신 모의 검사는 실제 LAN을 시험한 것이 아니며, 루프백 HTTP도 iPad/Safari를 시험한 것이 아닙니다. Docker CI 정의가 있는 것과 로컬에서 Docker를 실제 실행한 것은 구분합니다.
 
 실기기에서는 첫 연결, 세션 만료, Safari 가로/세로·홈 화면, Wi-Fi 끊김·복구, 서버 재시작, 장시간 사용, 실제 백업 복원, 사용할 NAS의 ACL을 별도로 확인하세요.
+
+
+## 0.1.2 추가 검사
+
+```bash
+python scripts/all_tasks_regression.py
+python scripts/all_tasks_transport_regression.py
+```
+
+새 위젯과 관리자에서 640개를 끝까지 탐색하는 UI 검사, 10,000개 공통 정렬 검사, 서버 스냅샷의 301/640/10,000개 무잘림 검사, 소스 업데이트 도구의 충돌/롤백 보호를 포함합니다. [현재 통합 검증](TEST_REPORT.md)를 확인하세요.
+
+## 0.1.4 LLM 테스트
+```bash
+python -m pytest -q tests/test_llm.py
+python scripts/llm_regression.py
+```
+탐색이 제한된 시험 환경에서는 `HUB_BROWSER_BRIDGE=1`을 명시하여 set_content + Python HTTP 브리지를 사용합니다. 그 경우 브라우저 WS는 모의이며, backend HTTP는 실제 루프백입니다. 실제 모델 추론은 하지 않고 테스트 응답만 사용합니다. 정상적인 배포 환경에서는 해당 환경변수 없이 직접 localhost 탐색으로 시험합니다.
+
+## LLM 클라이언트 위젯
+
+```bash
+python -m pytest -q tests/test_llm_display.py
+python scripts/llm_widget_regression.py
+python scripts/llm_widget_live.py
+```
+
+마지막 검사는 이 환경에서 직접 Chromium 루프백 탐색이 차단되어 명시적 HTTP 브리지를
+사용합니다. 실제 HTTP/API/SQLite + 모의 LLM, 브라우저 WS 이벤트 주입이며 물리 LAN 검사가 아닙니다.
+[현재 통합 검증](TEST_REPORT.md)
