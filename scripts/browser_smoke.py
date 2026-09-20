@@ -59,8 +59,13 @@ def run():
   check('Folder widget can be added to configurable grid',page.locator('.layout-tile').count()==5)
   page.locator('[data-op=size-widget][data-size="1,1"]').click();page.wait_for_timeout(50)
   note_id=page.locator('.layout-tile.selected').get_attribute('data-wid')
-  before_drag=page.locator(f'[data-wid="{note_id}"] small').inner_text()
-  page.locator(f'[data-wid="{note_id}"]').drag_to(page.locator('.grid-cell').last);page.wait_for_timeout(100)
+  tile=page.locator(f'[data-wid="{note_id}"]');target=page.locator('.grid-cell').last
+  before_drag=tile.locator('small').inner_text();start_box=tile.bounding_box();target_box=target.bounding_box()
+  assert start_box and target_box
+  page.mouse.move(start_box['x']+start_box['width']/2,start_box['y']+start_box['height']/2)
+  page.mouse.down()
+  page.mouse.move(target_box['x']+target_box['width']/2,target_box['y']+target_box['height']/2,steps=8)
+  page.mouse.up();page.wait_for_timeout(100)
   after_drag=page.locator(f'[data-wid="{note_id}"] small').inner_text()
   check('Drag and drop moves selected widget without position inputs',after_drag!=before_drag)
   page.locator('#widgetConfig').fill('{"text":"새 위젯 테스트","caption":"테스트"}');page.locator('[data-op=save-layout]').click();page.wait_for_timeout(150)
