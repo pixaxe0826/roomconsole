@@ -52,17 +52,16 @@ jobs:
       - name: Backend tests
         if: runner.os != 'Windows'
         run: python -m pytest -q --junitxml=artifacts/test-results/backend.xml
-      # V35 speech/Termux suites exercise POSIX process and deployment semantics.
-      # They are covered by both Linux jobs; Windows validates the portable server surface.
-      - name: Backend tests (Windows portable surface)
+      # Linux runs the complete behavioral suite, including V35/Termux paths.
+      # Windows is a portability smoke job for the supported generic Python server surface.
+      - name: Backend tests (Windows portable smoke)
         if: runner.os == 'Windows'
         run: >-
           python -m pytest -q
-          --ignore=tests/test_speech.py
-          --ignore=tests/test_speech_https.py
-          --ignore=tests/test_stt_accuracy.py
-          --ignore=tests/test_termux_migration.py
-          --ignore=tests/test_context_update.py
+          tests/test_backend.py
+          tests/test_display_completion.py
+          tests/test_all_tasks.py
+          tests/test_repo_packaging.py
           --timeout=30
           --timeout-method=thread
           --junitxml=artifacts/test-results/backend.xml
