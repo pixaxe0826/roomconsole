@@ -69,7 +69,7 @@ def run():
   pg.goto('about:blank');pg.set_content((ROOT/'previews/manager_preview.html').read_text('utf-8'),wait_until='domcontentloaded');pg.wait_for_selector('.kpis');pg.evaluate("RoomManager.navigate('layout')")
   check('manager discovers new folder widget',pg.locator('[data-op=add-widget][data-id=llm-response]').count()==1)
   pg.locator('[name=gridRows]').fill('8');pg.locator('[name=gridRows]').dispatch_event('change');pg.wait_for_timeout(60);pg.locator('[data-op=add-widget][data-id=llm-response]').click();pg.wait_for_timeout(80)
-  check('manager new widget uses 4x2',pg.locator('[name=widgetW]').input_value()=='4' and pg.locator('[name=widgetH]').input_value()=='2')
+  check('manager new widget uses 4x2','4 × 2' in pg.locator('.layout-tile.selected small').inner_text() and 'selected' in (pg.locator('[data-op=size-widget][data-size="4,2"]').get_attribute('class') or ''))
   check('manager explains opt-in shared projection','모든 표시 기기' in pg.locator('#content').inner_text())
   pg.locator('[data-op=save-layout]').click();pg.wait_for_timeout(80)
   check('manager saves layout without reset',pg.evaluate("RoomManager.getState().layout.widgets.some(w=>w.type==='llm-response')"))
