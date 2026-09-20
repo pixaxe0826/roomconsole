@@ -22,17 +22,20 @@ jobs:
   backend:
     name: Server / ${{ matrix.os }} / Python ${{ matrix.python }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 12
+    timeout-minutes: ${{ matrix.timeout_minutes }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-24.04
             python: '3.11'
+            timeout_minutes: 12
           - os: ubuntu-24.04
             python: '3.13'
+            timeout_minutes: 12
           - os: windows-latest
             python: '3.12'
+            timeout_minutes: 30
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
