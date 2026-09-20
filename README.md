@@ -37,9 +37,9 @@ Room Hub는 방에 남는 iPad를 시계·날씨·할 일·달력 허브로 사�
 
 ### 현재 운영 기준
 
-사용자가 확인한 설치는 **V35 Termux/PRoot roomhub + Room Hub 0.1.5 + STT 정확도 패치**, iPad HTTPS8443, Whisper multilingual Base / 한국어 / **6 threads / careful(beam 5)**, Qwen3-0.6B-Q5_K_M CPU6T/컨텍스트1024/non-thinking입니다.
+2026-09-20 사용자는 **V35 Termux/PRoot roomhub에 Room Hub 0.1.7 업데이트 패키지를 적용**했다고 확인했습니다. iPad HTTPS8443, Whisper multilingual Base / 한국어 / **6 threads / careful(beam 5)**, Qwen3-0.6B-Q5_K_M CPU6T/컨텍스트1024/non-thinking 구조는 유지합니다.
 
-**0.1.6은 위 실기기에서 아직 검증하지 않은 업데이트**입니다. 코드·로컬 DB/API·브라우저 테스트 결과는 아래 문서에서 구분합니다. 모델·STT·녹음 경로·인증서·운영 설정을 바꾸지 않습니다.
+현재 V35의 `~/room-hub`는 아직 패키지 설치 디렉터리라 Git commit/tree 동일성은 검증되지 않았습니다. [V35 Git 관리형 업데이트](docs/V35_GIT_UPDATE.md)로 전환한 뒤 `update-from-git.sh --check`를 소스 동일성 기준으로 사용합니다. 0.1.7 설치 완료와 실제 iPad 알람 소리·절전·장시간 운용 검증은 구분합니다.
 
 ### 0.1.6에서 달라진 것
 
