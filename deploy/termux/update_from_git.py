@@ -231,9 +231,15 @@ def deploy(root: Path, prefix: Path, home: Path, remote_name: str, remote_branch
             except Exception:
                 health = None
             if health and str(health.get("version")) == expected:
+                final_head = git_out(root, "rev-parse", "HEAD")
+                final_tree = git_out(root, "rev-parse", "HEAD^{tree}")
+                if final_head != info["remote"]:
+                    raise UpdateError(
+                        f"Post-update HEAD mismatch: expected {info['remote']}, got {final_head}"
+                    )
                 print("\nUPDATED SUCCESSFULLY")
-                print(f"  HEAD    : {git_out(root, 'rev-parse', 'HEAD')}")
-                print(f"  tree    : {git_out(root, 'rev-parse', 'HEAD^{{tree}}')}")
+                print(f"  HEAD    : {final_head}")
+                print(f"  tree    : {final_tree}")
                 print(f"  version : {expected}")
                 print(f"  backup  : {backup}")
                 print(f"  health  : {json.dumps(health, ensure_ascii=False)}")
