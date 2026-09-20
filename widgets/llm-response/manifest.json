@@ -1,0 +1,15 @@
+{
+  "id": "llm-response",
+  "name": "LLM 응답",
+  "description": "4×2 · 요청별 LLM 답변 또는 실제 서버 조회·실행 결과. 변경 확인은 관리자 전용입니다.",
+  "icon": "note",
+  "apiVersion": 1,
+  "version": "1.1.0",
+  "entry": "widget.js",
+  "style": "style.css",
+  "defaultSize": {
+    "w": 4,
+    "h": 2
+  },
+  "configDefaults": {}
+}

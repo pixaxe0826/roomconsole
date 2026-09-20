@@ -43,4 +43,21 @@ class Store:
  def task_dict(row):
     value=dict(row);value['completed']=bool(value['completed']);return value
  def tasks(self):
-    with self.connect() as db:return [self.task_dict(r) for r in db.execute('SELECT * FROM tasks ORDER BY date,time IS NULL,time,created_at')]
+    return self.query_tasks('0001-01-01','9999-12-31','all',10000)['items']
+
+ def query_tasks(self,start,end,status='all',limit=50):
+    """Shared server read service. Read count+items within one SQLite snapshot."""
+    from datetime import date
+    start=date.fromisoformat(start).isoformat();end=date.fromisoformat(end).isoformat()
+    if start>end or status not in {'all','pending','completed'} or not 1<=limit<=10000:
+     raise ValueError('잘못된 할 일 조회 범위입니다.')
+    where='date>=? AND date<=?';args=[start,end]
+    if status!='all':where+=' AND completed=?';args.append(int(status=='completed'))
+    with self.connect() as db:
+     db.execute('BEGIN')
+     total=db.execute('SELECT count(*) FROM tasks WHERE '+where,args).fetchone()[0]
+     rows=db.execute('SELECT * FROM tasks WHERE '+where+' ORDER BY date,time IS NULL,time,created_at,id LIMIT ?',(*args,limit)).fetchall()
+     rev=db.execute("SELECT value FROM kv WHERE key='revision'").fetchone()[0]
+    return {'ok':True,'source':'room_hub_sqlite','count':total,'items':[self.task_dict(r) for r in rows],
+            'range':[start,end],'status':status,'as_of':utcnow(),'revision':int(rev),
+            'limit':limit,'returned':len(rows),'truncated':total>len(rows)}

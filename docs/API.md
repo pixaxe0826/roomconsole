@@ -122,7 +122,7 @@ curl -X POST 'http://192.168.0.20:8088/api/voice/upload' \
   -F 'locale=ko-KR' -F 'file=@sample.wav;type=audio/wav'
 ```
 
-10MB 이하 오디오: audio/wav, audio/x-wav, audio/wave, audio/mpeg, audio/mp4, audio/x-m4a, audio/webm, audio/ogg, audio/flac, audio/aac. 오디오 원본은 `awaiting_transcription`으로 보관됩니다. UTF-8 TXT는 디코딩하여 text와 같은 수신함으로 보냅니다. 오디오 전사 서비스는 아직 없으며 MIME 검사는 완전한 음원 유효성 검증이 아닙니다. 본문 전체 제한 11MB입니다.
+10MB 이하 오디오: audio/wav, audio/x-wav, audio/wave, audio/mpeg, audio/mp4, audio/x-m4a, audio/webm, audio/ogg, audio/flac, audio/aac. 오디오 원본은 `awaiting_transcription`으로 보관됩니다. UTF-8 TXT는 디코딩하여 text와 같은 수신함으로 보냅니다. 이 경로 자체는 자동 전사하지 않습니다. 0.1.3의 관리자가 큐에 넣거나 iPad가 별도 음성 API를 사용하면 로컬 전사합니다. MIME 검사는 완전한 음원 유효성 검증이 아닙니다. 본문 전체 제한 11MB입니다.
 
 ## WebSocket
 
@@ -144,3 +144,26 @@ curl -X POST 'http://192.168.0.20:8088/api/voice/upload' \
 ```
 
 위 본문을 POST `/api/commands`로 보내면 서버가 명령 ID·전송 시각·30초 만료를 추가하여 온라인 화면에 전달합니다. action은 home/expand/select_date/reload. select_date에는 `date`가 필요합니다. device_id를 비우면 모든 표시 연결로 보냅니다. 브라우저는 중복 ID를 무시합니다. ACK는 렌더 처리 확인이며 사용자 열람 확인이 아닙니다. reload는 즉시 새 페이지를 열기 때문에 ACK를 보장하지 않습니다. 오프라인 큐는 없습니다.
+
+## 0.1.3 iPad 음성 업로드와 로컬 전사
+
+[SPEECH_API.md](SPEECH_API.md)를 참고하세요. 별도 기기 소유권/대기열/취소/재시도 경로를 사용합니다.
+
+## 0.1.4 LLM 인터페이스
+관리자 전용 API와 입력/출력·측정 규약은 [LLM_INTERFACE.md](LLM_INTERFACE.md)를 참고하세요.
+
+## LLM 응답 위젯 (0.1.4 추가 기능)
+
+기존 state에 `llm_display` 메타데이터 인덱스와 capability가 추가됩니다.
+새 `GET /api/display/llm/{id}`는 인증된 표시 세션으로 선택한 한 건의 사용자 입력·최종 출력만
+조회합니다. 공유 위젯 미배치=403, 미전송/삭제/없는 항목=404. 기존 관리자 API 권한 변경 없음.
+[정확한 필드·공유 범위](LLM_WIDGET.md)
+
+
+## 0.1.5 assistant extension
+
+`POST /api/llm/requests` accepts `mode: auto|chat|legacy`; omitted mode remains legacy for compatibility. UI explicitly submits auto by default. Retry accepts optional mode and inherits the assistant family for write idempotency.
+
+`POST /api/assistant/{id}/confirm` is admin-only, with `X-Room-Request: 1` as existing same-origin mutations require. Body: `{"preview_sha256":"64-hex value from current preview"}`. Read the current request detail first. A 409 means stale/expired/cancelled/changed input: obtain a new preview, do not blindly replay. Effects and receipts commit atomically; duplicate confirmations do not repeat effects. Display-only and ingest credentials cannot call this endpoint.
+
+Additional statuses: awaiting_confirmation and needs_clarification. Detail contains assistant (raw/normalized/route/proposal/validation/preview/calls/tool_result). Display projection still excludes these private fields and shows only original input, final output, status and public timestamps. See [ASSISTANT.md](ASSISTANT.md).

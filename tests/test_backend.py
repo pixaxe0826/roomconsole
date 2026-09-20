@@ -98,7 +98,7 @@ def test_fresh_no_weather_or_samples(setup):
  s=setup[1].get('/api/state').json();assert s['weather'] is None and not s['tasks'] and s['settings']['latitude'] is None
 
 def test_widget_data_reload(setup):
- _,c=setup;assert len(c.post('/api/widgets/reload').json()['widgets'])==5;assert c.put('/api/widgets/note/data',json={'data':{'text':'hello'}}).status_code==200;assert c.get('/api/state').json()['widget_data']['note']['text']=='hello';assert c.put('/api/widgets/nope/data',json={'data':{}}).status_code==404
+ _,c=setup;assert len(c.post('/api/widgets/reload').json()['widgets'])==7;assert c.put('/api/widgets/note/data',json={'data':{'text':'hello'}}).status_code==200;assert c.get('/api/state').json()['widget_data']['note']['text']=='hello';assert c.put('/api/widgets/nope/data',json={'data':{}}).status_code==404
 
 def test_voice_idempotent_and_conflict(setup):
  app,c=setup;body={'request_id':'same','source':'test','text':'안녕하세요'};r=c.post('/api/voice/text',json=body);assert r.status_code==202;assert c.post('/api/voice/text',json=body).json()['duplicate'];body['text']='다른 내용';assert c.post('/api/voice/text',json=body).status_code==409;assert c.get('/api/state').json()['tasks']==[]

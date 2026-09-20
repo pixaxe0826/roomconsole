@@ -36,7 +36,7 @@ def html_source(js):
  html=re.sub(r'<script defer[^>]*></script>','',html)
  html=re.sub(r'<link\b[^>]*>','',html)
  css='\n'.join((ROOT/'web'/f).read_text('utf-8') for f in ['base.css','manager.css'])
- code=(ROOT/'web/shared.js').read_text('utf-8')+'\n'+BRIDGE_JS+'\n'+js
+ code=(ROOT/'web/shared.js').read_text('utf-8')+'\n'+BRIDGE_JS+'\n'+(ROOT/'web/manager-llm.js').read_text('utf-8')+'\n'+js
  return html.replace('</head>','<style>'+css+'</style></head>').replace('</body>','<script>'+code.replace('</script','<\\/script')+'</script></body>')
 
 class Harness:
@@ -220,7 +220,7 @@ async def run(args):
        await page.locator('[data-op=logout]').click();await page.wait_for_timeout(1000)
        check('Logout clears pairing secret and ignores late result',await page.locator('#login').is_visible() and await page.locator('#pairLink').count()==0)
        check('No uncaught JS errors across regression cases',not h.errors)
-       check('New manager cache key served',(await h.client.get('/manager')).text.find('manager.js?v=0.1.1-pairfix1')>=0)
+       check('New manager cache key served',(await h.client.get('/manager')).text.find('manager.js?v=0.1.6-llm-widget1')>=0)
        result={'mode':'after-fix','checks':checks,'hold_seconds':args.hold_seconds,'page_errors':h.errors,'initial_samples':samples}
      finally:await h.close();await browser.close()
    finally:

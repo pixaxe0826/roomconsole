@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+  HUB_DATA_DIR: artifacts/runtime-data
+
+jobs:
+  backend:
+    name: Server / ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            python: '3.11'
+          - os: ubuntu-24.04
+            python: '3.13'
+          - os: windows-latest
+            python: '3.12'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Native speech media/certificate test tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg nginx openssl
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python scripts/check_repo.py --json artifacts/test-results/repository.json
+      - run: python -m pytest -q --junitxml=artifacts/test-results/backend.xml
+      - run: python scripts/live_smoke.py
+      - run: python scripts/build_previews.py
+      - run: git diff --exit-code -- previews/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: server-${{ matrix.os }}-${{ matrix.python }}
+          path: artifacts/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  browser:
+    name: Chromium regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m playwright install --with-deps chromium
+      - run: python scripts/build_previews.py
+      - run: python scripts/browser_smoke.py
+      - run: python scripts/todo_regression.py
+      - run: python scripts/all_tasks_regression.py
+      - run: python scripts/all_tasks_transport_regression.py
+      - run: python scripts/todo_transport_regression.py
+      - run: python scripts/preview_regression.py --seconds 65
+      - run: python scripts/llm_regression.py
+      - run: python scripts/llm_widget_regression.py
+      - run: python scripts/llm_widget_live.py
+      - run: python scripts/assistant_browser.py
+      - run: python scripts/context_browser.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: chromium-regression
+          path: |
+            artifacts/test-results/
+            artifacts/screenshots/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  docker:
+    name: Container build and health
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - run: docker compose config --quiet
+      - run: docker build --tag room-hub:ci .
+      - name: Start without publishing a host port
+        run: docker run -d --name room-hub-ci room-hub:ci
+      - name: Check non-root process and health
+        shell: bash
+        run: |
+          test "$(docker exec room-hub-ci id -u)" = 10001
+          for n in $(seq 1 30); do
+            if docker exec room-hub-ci python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8088/healthz', timeout=3)"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+      - name: Remove temporary container
+        if: always()
+        run: docker rm -f room-hub-ci || true

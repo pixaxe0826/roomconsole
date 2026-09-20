@@ -9,3 +9,5 @@ PC에서 파일을 내려받아 브라우저로 엽니다. GitHub 코드 보기 
 `sample_state.json`은 생성기가 사용하는 합성 데이터이며 운영 DB에서 내보낸 자료가 아닙니다.
 
 UI 수정 후 저장소 루트에서 `python scripts/build_previews.py`로 다시 생성합니다. 테스트 스크린샷은 `artifacts/screenshots/`에, README에 선별한 이미지는 `docs/assets/`에 둡니다.
+
+`llm_widget_preview.html`: 4×2 LLM 응답 전용 예시 배치. 합성 요청/응답 3개를 탐색하며 실제 LLM 호출은 하지 않습니다.

@@ -23,7 +23,7 @@ def run():
      time.sleep(.15)
     else:raise RuntimeError('Server did not start')
     checks.append('Real Uvicorn process and health endpoint')
-    for path in ['/client','/manager','/static/client.js','/static/manager.js','/widgets/calendar/widget.js']:
+    for path in ['/client','/manager','/static/client.js','/static/manager.js','/widgets/calendar/widget.js','/widgets/all-todos/manifest.json','/widgets/all-todos/widget.js','/widgets/all-todos/style.css']:
      assert c.get(path).status_code==200;checks.append('Served '+path)
     assert c.get('/api/state').status_code==401;checks.append('Anonymous data access denied')
     assert c.post('/api/auth/login',json={'token':env['HUB_ADMIN_TOKEN']}).status_code==200
@@ -52,6 +52,10 @@ def run():
      assert c.delete('/api/devices/'+pair['device_id']).status_code==200
      assert d.patch(endpoint,json={'version':3,'completed':True}).status_code==401
      checks.append('Revoked display cannot write completion')
+    many=c.post('/api/tasks',json={'title':'Full-list HTTP test','date':'2026-01-01','repeat':{'frequency':'daily','until':'2026-12-31'}})
+    assert many.status_code==201 and many.json()['count']==365
+    records=c.get('/api/state').json()['tasks'];assert len(records)==366 and set(many.json()['ids']).issubset({t['id'] for t in records})
+    checks.append('All 365 recurring occurrences returned without 300-row truncation')
   finally:
    process.terminate()
    try:process.wait(timeout=5)

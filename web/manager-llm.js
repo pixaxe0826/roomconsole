@@ -1,0 +1,128 @@
+/* Room Hub 0.1.4: manager-only LLM notebook. No model or task execution in browser. */
+(() => {
+'use strict';
+const E=Room.esc, I=Room.icon, $=(s,r=document)=>r.querySelector(s);
+const LABEL={awaiting_confirmation:'확인 대기 · 아직 미실행',needs_clarification:'추가 확인 필요',prepared:'미전송 · 모델 연결 대기',queued:'대기 중',running:'LLM 응답 대기',succeeded:'응답 완료',failed:'실패',cancelled:'취소됨',interrupted:'서버 종료로 중단'};
+const ACTIVE=new Set(['queued','running']);
+let root=null,cfg=null,list={items:[],total:0},selected=null,detail=null,status='',query='',voice='',limit=30,offset=0;
+let lastDetail='',loading=false,pendingRefresh=false,generation=0,timer=null,searchTimer=null,draft=null,filterKey='';
+let requestMode='auto';
+const sending=new Set(),keys=new Map();
+const requestKey=()=>globalThis.crypto?.randomUUID?.() || 'llm-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
+const fnum=(n,d=2)=>typeof n==='number'&&Number.isFinite(n)?n.toFixed(d):'—';
+const seconds=n=>typeof n==='number'&&Number.isFinite(n)?`${n.toFixed(2)}초`:'—';
+function when(s){if(!s)return '—';try{return new Intl.DateTimeFormat('ko-KR',{timeZone:window.RoomManager?.getState()?.settings?.timezone||'Asia/Seoul',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(new Date(s))}catch{return '—'}}
+const badge=s=>`<span class="llm-badge llm-${E(s)}">${E(LABEL[s]||s)}</span>`;
+const pretty=o=>JSON.stringify(o,null,2);
+function numField(name,label,value,attrs=''){return `<label>${label}<input name="${name}" type="number" value="${E(value)}" ${attrs}></label>`}
+async function api(path,method='GET',body){
+ if(window.ROOM_DEMO){
+  if(window.ROOM_LLM_DEMO)return window.ROOM_LLM_DEMO.api(path,method,body);
+  throw Error('이 미리보기에는 LLM 데이터가 없습니다. 실제 서버를 사용하세요.');
+ }
+ const ctrl=new AbortController(),to=setTimeout(()=>ctrl.abort(),15000);
+ try{
+  const res=await fetch(path,{method,credentials:'same-origin',headers:{'X-Room-Request':'1',...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:ctrl.signal});
+  const out=await res.json();if(!res.ok){const err=Error(typeof out.detail==='string'?out.detail:'요청 설정 또는 권한을 확인하세요.');err.status=res.status;throw err}return out;
+ }catch(err){if(err.name==='AbortError')throw Error('요청 응답 시간이 지났습니다. LLM 기록에서 접수 여부를 확인하세요. 자동 재전송하지 않습니다.');throw err}
+ finally{clearTimeout(to)}
+}
+function shell(){return `
+ <section class="llm-connection panel"><div class="llm-connection-main"><span class="llm-symbol">${I('note',22)}</span><div><div class="eyebrow">LOCAL MODEL / MANAGER ONLY</div><h2>전사 다음의 한 단계</h2><p>입력 한 건, 응답 한 건. 실제 전송 내용과 결과를 나란히 확인합니다.</p></div></div><div class="llm-connection-tools"><span id="llmConnectionBadge" class="badge">설정 확인 중</span><button type="button" class="btn small" data-llm="probe">연결 확인</button><button type="button" class="btn small" data-llm="settings">연결 설정</button></div></section>
+ <div class="assistant-mode-bar"><label>새 요청 처리 방식<select id="assistantMode"><option value="auto">자동 분기 · 조회 / 변경 확인 / 대화</option><option value="chat">일반 대화 · DB 작업 없음</option><option value="legacy">기존 직접 전송 · 이전 System 사용</option></select></label><p>명확한 조회는 실제 서버 데이터를 사용합니다. 추가·완료·완료취소·삭제는 관리자 확인 전까지 실행하지 않습니다.</p></div>
+ <div id="llmTopNotice" class="llm-notice" role="status"></div>
+ <section id="llmSettings" class="panel hidden llm-settings"><div class="panel-head"><div><h2>로컬 LLM 연결 설정</h2><p>모델 설치나 실행은 하지 않습니다. 준비된 서버의 API 연결만 설정합니다.</p></div><button type="button" class="icon-button" data-llm="settings" aria-label="설정 닫기">${I('close',18)}</button></div><div id="llmSettingsForm"></div></section>
+ <details class="panel llm-disclosure" data-section="capabilities"><summary>연결된 서버 기능 · 시간 기준</summary><p id="assistantClock" class="field-help">서버 시각은 연결 시 확인합니다.</p><div id="assistantCatalog">시간·할 일·날씨: 서버에서 확인 / 쓰기는 관리자 승인</div></details>
+<div class="llm-workspace"><section class="panel llm-history"><div class="panel-head"><div><h2>요청 기록 <span id="llmTotal" class="muted small">0</span></h2><p>음성 입력별로 쌓이는 LLM 처리 이력</p></div><button class="icon-button" data-llm="refresh" aria-label="LLM 목록 새로고침">${I('refresh',17)}</button></div><div class="llm-filters"><input id="llmSearch" type="search" placeholder="전사 내용 검색" aria-label="LLM 전사 내용 검색" maxlength="240" value="${E(query)}"><select id="llmStatus" aria-label="LLM 요청 상태"><option value="">모든 상태</option>${Object.entries(LABEL).map(([k,v])=>`<option value="${k}" ${status===k?'selected':''}>${E(v)}</option>`).join('')}</select></div><div id="llmSourceFilter"></div><div id="llmList" class="llm-history-scroll"><div class="empty">기록을 불러오는 중…</div></div><div class="llm-pages"><button class="btn llm-prev hidden" data-llm="prev">이전 30개</button><span id="llmPageCount" class="field-help"></span><button class="btn llm-more hidden" data-llm="more">다음 30개</button></div><p class="field-help">원본 전사가 수정되어도 이전 요청의 입력과 응답은 바뀌지 않습니다.</p></section>
+ <section id="llmDetail" class="llm-detail" aria-live="polite"><div class="panel empty">${I('note',36)}<strong>확인할 요청을 선택하세요</strong><span>음성 수신함의 ‘LLM으로 전송’으로 시작합니다.<br>모델 미연결 시에는 전송 예정 입력만 저장합니다.</span></div></section></div>`}
+function settingsForm(c){return `<form id="llmConfigForm"><div class="llm-form-grid"><label class="llm-wide">API 주소<input name="base_url" value="${E(c.base_url)}" required spellcheck="false"><span class="field-help">V35 내부의 127.0.0.1 또는 ::1만 허용합니다. 기존 8080·8088·8443·8022 포트는 변경하지 않습니다.</span></label><label class="llm-wide">모델 ID / llama-server 별칭<input name="model" value="${E(c.model)}" required maxlength="160" spellcheck="false"></label>${numField('max_tokens','최대 출력 토큰',c.max_tokens,'min="16" max="1024" required')}${numField('temperature','Temperature',c.temperature,'min="0" max="2" step="0.1" required')}${numField('timeout_seconds','응답 제한 시간 · 초',c.timeout_seconds,'min="10" max="600" required')}<div class="llm-checks"><label><input name="enabled" type="checkbox" ${c.enabled?'checked':''}> LLM 전송 사용</label><label><input name="non_thinking" type="checkbox" ${c.non_thinking?'checked':''}> non-thinking 요청</label><label><input name="include_time_context" type="checkbox" ${c.include_time_context?'checked':''}> 기준 시각·시간대 포함</label></div><label class="llm-wide">기존 직접 전송 모드의 System 입력<textarea name="system_prompt" rows="5" maxlength="6000">${E(c.system_prompt)}</textarea></label></div><p class="field-help">자동 분기는 기준 시각을 항상 포함합니다. 일반 대화는 temperature 0.7·top_p 0.8·top_k 20·min_p 0·presence 1.0, 최대 128토큰입니다. 파서는 temperature 0, 최대 256토큰입니다. 이 화면의 Temperature는 기존 직접 전송에 적용됩니다. 이 System은 기존 직접 전송 모드에만 적용됩니다. non-thinking은 API 옵션 요청이며 백엔드의 모델·템플릿 지원이 필요합니다. 컨텍스트 크기·LLM 스레드는 추후 모델 서버에서 설정합니다. Whisper Base/6T는 이 화면에서 변경하지 않습니다.</p><div class="form-actions"><button type="submit" class="btn primary">설정 저장</button><button type="button" class="btn" data-llm="settings-reset">저장된 설정 불러오기</button><span id="llmSettingsFeedback" class="field-help"></span></div></form>`}
+function collectDraft(){const f=$('#llmConfigForm');if(!f)return;const d=new FormData(f);draft={base_url:d.get('base_url'),model:d.get('model'),system_prompt:d.get('system_prompt'),max_tokens:Number(d.get('max_tokens')),temperature:Number(d.get('temperature')),timeout_seconds:Number(d.get('timeout_seconds')),enabled:f.elements.enabled.checked,non_thinking:f.elements.non_thinking.checked,include_time_context:f.elements.include_time_context.checked};}
+function updateConfig(){if(!root?.isConnected||!cfg)return;const c=cfg.config,p=cfg.last_probe;$('#llmConnectionBadge').textContent=c.enabled?'전송 사용 · '+(p?.ok?'연결 확인됨':'연결 확인 필요'):'모델 미연결 · 전송 꺼짐';
+ $('#llmTopNotice').innerHTML=window.ROOM_DEMO?'<strong>예시 화면</strong> · 숫자와 응답은 합성 데모입니다. 실제 모델은 실행하지 않습니다.':!c.enabled?'<strong>모델을 설치하지 않아도 화면을 먼저 사용할 수 있습니다.</strong> 모델이 필요한 요청은 미전송 기록으로 보관합니다. 정해진 조회와 변경 미리보기는 로컬에서 처리하며, 쓰기는 관리자 확인 후 실행합니다.':`<strong>${E(c.model)}</strong> · ${E(c.base_url)} · 요청은 한 번에 1개 · 읽기 즉시 / 쓰기 확인 후 실행${p?`<br><span>${E(p.message)} (${E(when(p.checked_at))})</span>`:''}`;
+ if(cfg.clock){const n=$('#assistantClock');if(n)n.textContent=`서버 현재 시각 ${cfg.clock.local_at} · ${cfg.clock.timezone} · OS 시계 기준`}
+ if(cfg.capability_catalog){const n=$('#assistantCatalog');if(n)n.innerHTML=cfg.capability_catalog.capabilities.map(c=>`<span class="badge">${E(c.name)} · ${c.confirmation?'확인 후 변경':'조회'}</span>`).join(' ')+'<p class="field-help">메모 저장·검색과 알람 예약 서비스는 아직 미연결입니다. 표시 위젯 추가만으로 실행 권한이 생기지 않습니다.</p>'}
+ if(!$('#llmConfigForm')){$('#llmSettingsForm').innerHTML=settingsForm(draft||c);bindSettings()}}
+function bindSettings(){const f=$('#llmConfigForm');if(!f)return;f.oninput=collectDraft;f.onchange=collectDraft;f.onsubmit=async e=>{e.preventDefault();collectDraft();const btn=$('[type=submit]',f);btn.disabled=true;try{cfg=await api('/api/llm/config','PUT',draft);draft=structuredClone(cfg.config);$('#llmSettingsFeedback').textContent='저장했습니다. 과거 미전송 기록은 자동 실행되지 않습니다.';updateConfig();await refresh()}catch(err){$('#llmSettingsFeedback').textContent=err.message}finally{if(btn.isConnected)btn.disabled=false}}}
+function paintList(){if(!root?.isConnected)return;$('#llmTotal').textContent=list.total;const box=$('#llmList'),scroll=box.scrollTop;
+ const html=list.items.map(j=>`<button class="llm-history-item ${selected===j.id?'selected':''}" data-llm="select" data-id="${E(j.id)}"><span class="llm-history-line">${badge(j.status)}<time>${E(when(j.created_at))}</time></span><strong>${E(j.source_preview)}</strong><span class="llm-history-model">${E(['rule','clarify'].includes(j.route)?'Room Hub 서버 · 모델 미호출':j.model)}${j.parent_id?' · 재요청':''}</span><span class="llm-history-metrics">${['succeeded','awaiting_confirmation','needs_clarification'].includes(j.status)?`${seconds(j.request_seconds)} <i>·</i> ${j.metrics.output_tokens??'—'} tokens <i>·</i> ${fnum(j.metrics.generation_tps,1)} tok/s`:j.error?E(j.error):j.status==='prepared'?'아직 LLM에 전송하지 않았습니다.':'결과를 기다리고 있습니다.'}</span></button>`).join('')||'<div class="empty"><strong>요청 기록이 없습니다</strong><span>음성 수신함에서 저장된 전사문을 보내세요.</span><button class="btn soft" data-llm="voice">음성 수신함 열기</button></div>';
+ if(box.innerHTML!==html)box.innerHTML=html;box.scrollTop=scroll;
+ $('.llm-more').classList.toggle('hidden',offset+list.items.length>=list.total);$('.llm-prev').classList.toggle('hidden',offset===0);$('#llmPageCount').textContent=list.total?`${offset+1}–${offset+list.items.length} / ${list.total}`:'0개';
+ $('#llmSourceFilter').innerHTML=voice?`<div class="llm-source-tag">선택한 음성의 요청만 표시 <button class="icon-button" data-llm="clear-source" aria-label="음성 필터 해제">${I('close',14)}</button></div>`:'';
+}
+function metric(label,value,unit,description){return `<div class="llm-metric"><span>${label}</span><strong>${value}<small>${unit}</small></strong><p>${description}</p></div>`}
+function agentPanel(a,d){
+ if(!a)return '';
+ const names={rule:'규칙 기반 · LLM 미호출',parser:'LLM 명령 파서',chat:'일반 대화',clarify:'안전 확인 · 미실행'};
+ const preview=a.preview;const changed=a.validation==='executed'||a.validation==='already_executed';
+ return `<section class="panel assistant-panel" data-agent-state="${E(a.state)}"><div class="panel-head"><div><span class="eyebrow">ROUTE → VALIDATION → RESULT</span><h3>${E(names[a.route]||a.route)}</h3></div><span class="badge ${changed?'green':''}">${changed?'서버 실행 확인':d.status==='awaiting_confirmation'?'아직 변경하지 않음':E(a.validation||'확인 중')}</span></div>
+ <dl class="llm-facts"><dt>명령 판단용 입력</dt><dd>${E(a.normalized)}</dd><dt>정규화</dt><dd>${E(a.normalization_notes?.join(' · ')||'원문 유지')}</dd><dt>작업 유형</dt><dd>${E(a.proposal?.intent||'대화 / 확인')}</dd><dt>기준 시각</dt><dd>${E(a.reference_at)} · ${E(a.timezone)}</dd><dt>한국 기준 시각</dt><dd>${E(a.time_context?.local_at||'이전 기록')} · 오늘 ${E(a.time_context?.today||'—')} / 내일 ${E(a.time_context?.tomorrow||'—')}</dd><dt>원문 날짜 → 해석</dt><dd>${E(a.resolved_date?.evidence||'날짜 미지정 · 요청일 기준')} → ${E(a.resolved_date?.start||'—')}${a.resolved_date?.end!==a.resolved_date?.start?' ~ '+E(a.resolved_date?.end||'—'):''}</dd><dt>실제 조회 데이터</dt><dd>${a.tool_result?.source?E(a.tool_result.source)+' · '+E(a.tool_result.status||'')+' · 조회 '+E(a.tool_result.as_of||'—'):'조회 전 또는 대상 없음'}</dd><dt>결과 범위</dt><dd>${a.tool_result?.count!=null?E(a.tool_result.count)+'개 · '+E(a.tool_result.returned??a.tool_result.count)+'개 표시'+(a.tool_result.truncated?' · 일부만 표시':''):'—'}</dd></dl>
+ ${a.quality&&!a.quality.ok?'<div class="llm-warning" data-quality-rejected="true">반복·잘림·에코 등으로 답변 채택을 중단했습니다. 원래 모델 출력은 아래 호출 기록에 보존합니다. 모델의 자동 재시도는 없습니다.</div>':''}
+ ${preview&&d.status==='awaiting_confirmation'?`<div class="assistant-confirm-box"><strong>실행 내용을 확인하세요</strong><p>확인 유효 시각: ${E(when(new Date(preview.expires_at*1000).toISOString()))}. 미리보기 이후 항목이 바뀌면 실행을 차단합니다.</p>${preview.task?`<p class="assistant-task">${E(preview.task.date)} · ${E(preview.task.time||'시간 미지정')} · <b>${E(preview.task.title)}</b></p>`:''}${preview.existing_same?'<p class="assistant-warning">동일한 작업이 이미 있습니다. 중복 추가인지 확인하세요.</p>':''}${preview.targets?.length?`<ul class="assistant-targets">${preview.targets.map(t=>`<li>${E(t.date)} · ${E(t.time||'시간 미지정')} · <strong>${E(t.title)}</strong><small>v${t.version}</small></li>`).join('')}</ul>`:''}<div class="form-actions"><button class="btn primary" data-llm="confirm-action" data-id="${E(d.id)}" data-preview="${E(a.preview_sha256)}">확인한 내용 실행</button><button class="btn" data-llm="cancel" data-id="${E(d.id)}">취소 · 변경하지 않음</button></div></div>`:''}
+ <details class="llm-disclosure" data-section="agent"><summary>원본 / 정규화 / 제안 / 검증 / 실행 결과</summary><pre>${E(pretty({raw:a.raw,normalized:a.normalized,time_context:a.time_context,source_received_at:a.source_received_at,execution_started_at:a.execution_started_at,resolved_date:a.resolved_date,constraints:a.constraints,capability:a.capability,route:a.route,proposal:a.proposal,validation:a.validation,preview:a.preview,tool_result:a.tool_result,quality:a.quality,state:a.state}))}</pre></details>
+ ${a.calls?.length?`<details class="llm-disclosure" data-section="agent-calls"><summary>LLM 실제 호출 ${a.calls.length}회 · 입력과 모델 원문</summary>${a.calls.map(c=>`<h4>${E(c.purpose)} · ${seconds(c.seconds)}</h4><pre>${E(pretty(c.request_payload))}</pre><h4>모델이 반환한 원문 · 실행 결과와 다름</h4><pre>${E(c.result?.output||c.response_raw||'미응답')}</pre>`).join('')}</details>`:'<p class="field-help">이 요청은 모델을 호출하지 않았습니다. 토큰 수와 생성 속도를 계산하지 않습니다.</p>'}</section>`;
+}
+function paintDetail(){if(!root?.isConnected||!detail)return;const d=detail,signature=JSON.stringify(d);if(lastDetail===signature)return;lastDetail=signature;
+ const r=d.response_json||{},m=r.metrics||{},sent=d.dispatch_attempted,a=d.assistant;
+ const openDetails=[...$('#llmDetail').querySelectorAll('details[open]')].map(x=>x.dataset.section);
+ const scrolls=[...$('#llmDetail').querySelectorAll('[data-llm-scroll]')].map(x=>[x.dataset.llmScroll,x.scrollTop]);
+ let output=['succeeded','awaiting_confirmation','needs_clarification'].includes(d.status)?`<pre class="llm-output" data-llm-scroll="output">${E(r.output??r.refusal??'최종 텍스트 없음')}</pre>`:`<div class="llm-output-empty">${I(ACTIVE.has(d.status)?'clock':'note',27)}<strong>${d.status==='prepared'?'모델 연결을 기다리고 있습니다.':d.status==='running'?'LLM이 응답을 생성하고 있습니다.':d.status==='queued'?'앞선 전사 또는 LLM 작업이 끝나기를 기다립니다.':E(LABEL[d.status]||d.status)}</strong><span>${d.status==='prepared'?'출력·시간·토큰 수는 실제 실행 후 표시합니다.':d.status==='running'?'완료 후 응답 전체를 표시합니다. 페이지를 닫아도 서버 처리는 계속됩니다.':E(d.error||'')}</span></div>`;
+ $('#llmDetail').innerHTML=`<div class="panel llm-detail-heading"><div><div class="eyebrow">REQUEST ${E(d.id.slice(0,8))}</div><h2>입력과 응답</h2><p>${E(when(d.created_at))} · ${E(a&&['rule','clarify'].includes(a.route)?'Room Hub 서버 · 모델 미호출':d.config_json.model)}${d.parent_id?' · 이전 입력으로 새 요청':''}</p></div>${badge(d.status)}</div>
+ <div class="llm-metrics">${metric(a?'요청 처리까지':'응답 수신까지',fnum(d.request_seconds),'초',a?'로컬 처리 + 필요 시 LLM · 대기열 제외':'HTTP 전송 시도 → 응답 완료 · 대기열 제외')}${metric('출력 토큰',m.output_tokens??'—','tokens',m.output_tokens_source?E(m.output_tokens_source):'백엔드 미제공 시 추정하지 않음')}${metric('토큰 생성 속도',fnum(m.generation_tps,2),'tok/s',m.generation_tps_source?'백엔드 생성 구간 통계':'순수 생성 시간 통계 필요')}${metric('입력 토큰',m.prompt_tokens??'—','tokens','백엔드 usage.prompt_tokens')}</div>
+ ${agentPanel(a,d)}
+ <section class="panel"><div class="panel-head"><div><span class="eyebrow">INPUT SNAPSHOT</span><h3>${a?(sent?'원본 전사 · 실제 모델 입력은 아래 호출 기록 참고':'원본 전사 · 로컬 처리 요청'):(sent?'LLM API에 전송 시도한 입력':'LLM으로 전송할 입력 · 아직 미전송')}</h3></div><span class="badge">${E(d.source_meta.source||'voice')}</span></div><p class="field-help">서버에 저장된 전사문 그대로입니다. System·기준 시각·옵션은 아래 JSON에서 확인합니다.</p><pre class="llm-transcript" data-llm-scroll="input">${E(d.source_text)}</pre>
+ <details data-section="system" class="llm-disclosure"><summary>System 입력 · 기준 시각</summary><pre>${E(d.request_payload.messages?.find(x=>x.role==='system')?.content||'')}</pre></details>
+ <details data-section="payload" class="llm-disclosure"><summary>실제 API 요청 JSON · 엔드포인트</summary><p class="field-help">${E(d.endpoint)}<br>Room Hub가 만든 정확한 JSON 본문입니다. 백엔드 내부의 chat template 확장·토큰열은 아닙니다. 전송 시도만으로 모델이 입력을 소비했다고 확정하지 않습니다.</p><pre data-llm-scroll="payload">${E(pretty(d.request_payload))}</pre><p class="llm-hash">SHA256 ${E(d.request_sha256)}</p></details></section>
+ <section class="panel"><div class="panel-head"><div><span class="eyebrow">MODEL OUTPUT</span><h3>${a&&r.output_source==='server'?'서버 확인 결과 · 조회 / 실행 상태':'LLM 출력'}</h3></div><span class="badge">${a&&r.output_source==='server'?'실제 서버 처리 상태':d.status==='succeeded'?(window.ROOM_DEMO?'예시 응답':'실제 백엔드 응답'):'응답 없음'}</span></div>${output}
+ ${r.warnings?.length?`<div class="llm-warning">${r.warnings.map(w=>`<p>${E(w)}</p>`).join('')}</div>`:''}
+ ${r.reasoning?`<details class="llm-disclosure" data-section="reasoning"><summary>백엔드가 반환한 reasoning · 최종 출력과 별도</summary><pre>${E(r.reasoning)}</pre></details>`:''}
+ ${r.tool_calls?`<details class="llm-disclosure" data-section="tools"><summary>반환된 도구 호출 · 실행하지 않음</summary><pre>${E(pretty(r.tool_calls))}</pre></details>`:''}
+ <details data-section="metrics" class="llm-disclosure"><summary>상세 시간 · 토큰 통계 · 원본 응답</summary><dl class="llm-facts"><dt>대기열</dt><dd>${seconds(d.wait_seconds)}</dd><dt>프롬프트 처리 · backend</dt><dd>${seconds(m.prompt_seconds)}</dd><dt>순수 생성 구간 · backend</dt><dd>${seconds(m.generation_seconds)}</dd><dt>요청 전체 기준 처리율</dt><dd>${fnum(m.end_to_end_tps)} tok/s · 생성 속도와 다름</dd><dt>전송 시도</dt><dd>${E(when(d.started_at))}</dd><dt>완료</dt><dd>${E(when(d.finished_at))}</dd><dt>응답 모델 ID</dt><dd>${E(r.response_model||'—')}</dd><dt>종료 이유</dt><dd>${E(r.finish_reason||d.error_code||'—')}</dd></dl><p class="field-help">출력 토큰은 백엔드 기준이며 reasoning·특수 토큰 포함 여부가 다를 수 있습니다. 미제공 값은 —입니다. 비스트리밍 요청으로 첫 토큰 지연은 측정하지 않습니다.</p><pre data-llm-scroll="raw">${E(d.response_raw||'아직 응답이 없습니다.')}</pre></details>
+ <div class="llm-detail-actions">${d.status==='prepared'?`<button class="btn primary" data-llm="send" data-id="${E(d.id)}" ${!cfg?.config.enabled?'disabled':''}>저장된 입력 전송</button>`:''}${!ACTIVE.has(d.status)?`<button class="btn" data-llm="retry" data-id="${E(d.id)}">현재 설정으로 새 요청</button>`:''}${ACTIVE.has(d.status)||['prepared','awaiting_confirmation'].includes(d.status)?`<button class="btn danger" data-llm="cancel" data-id="${E(d.id)}">요청 취소</button>`:''}<button class="btn" data-llm="export" data-id="${E(d.id)}">기록 내보내기</button>${!ACTIVE.has(d.status)?`<button class="btn danger" data-llm="delete" data-id="${E(d.id)}">기록 삭제</button>`:''}</div><p class="field-help">조회 결과는 서버 데이터 기준입니다. 변경은 위 확인 버튼을 누른 후에만 실행됩니다. 일반 대화와 기존 직접 전송은 DB를 변경하지 않습니다. 새 요청은 선택한 모드·원래 전사문으로 만들며, 실행한 요청의 재요청은 중복 변경하지 않습니다.</p></section>`;
+ for(const key of openDetails){const x=$(`details[data-section="${key}"]`);if(x)x.open=true}
+ for(const [key,y] of scrolls){const x=$(`[data-llm-scroll="${key}"]`);if(x)x.scrollTop=y}
+}
+async function refresh(){
+ if(!root?.isConnected||window.RoomManager?.getTab()!=='llm')return;
+ if(loading){pendingRefresh=true;return}loading=true;const gen=generation;
+ try{
+  const params=new URLSearchParams({limit:String(limit),offset:String(offset),status,query,voice_id:voice});
+  const [newcfg,newlist]=await Promise.all([api('/api/llm/config'),api('/api/llm/requests?'+params)]);
+  if(gen!==generation||!root?.isConnected)return;if(JSON.stringify(cfg?.config)!==JSON.stringify(newcfg.config))lastDetail='';cfg=newcfg;list=newlist;
+  if(!selected&&list.items.length)selected=list.items[0].id;
+  updateConfig();paintList();
+  if(selected){try{const d=await api('/api/llm/requests/'+selected);if(gen!==generation||d.id!==selected)return;detail=d;paintDetail()}catch(e){if(e.status===404){selected=null;detail=null;lastDetail='';$('#llmDetail').innerHTML='<section class="panel empty">삭제된 요청입니다. 다른 기록을 선택하세요.</section>'}else throw e}}
+ }catch(err){if(gen===generation&&root?.isConnected){$('#llmTopNotice').textContent=err.message;if(err.status===401)window.RoomManager?.refresh(false)}}
+ finally{loading=false;if(pendingRefresh){pendingRefresh=false;setTimeout(refresh,0)}}
+}
+function mount(el){if(!el)return;if(root===el){refresh();return}root=el;lastDetail='';root.innerHTML=shell();$('#assistantMode').value=requestMode;$('#assistantMode').onchange=e=>{requestMode=e.target.value};root.addEventListener('click',handle);$('#llmStatus').onchange=e=>{status=e.target.value;limit=30;offset=0;selected=null;generation++;refresh()};$('#llmSearch').oninput=e=>{query=e.target.value;clearTimeout(searchTimer);searchTimer=setTimeout(()=>{limit=30;offset=0;selected=null;generation++;refresh()},250)};clearInterval(timer);timer=setInterval(refresh,3000);refresh()}
+async function handle(e){const b=e.target.closest('[data-llm]');if(!b||b.disabled)return;const op=b.dataset.llm,id=b.dataset.id;try{
+ if(op==='select'){selected=id;detail=null;lastDetail='';generation++;paintList();await refresh();return}
+ if(op==='settings'){$('#llmSettings').classList.toggle('hidden');return}
+ if(op==='settings-reset'){draft=null;$('#llmSettingsForm').innerHTML=settingsForm(cfg.config);bindSettings();return}
+ if(op==='voice'){window.RoomManager.navigate('voice');return}
+ if(op==='refresh'){await refresh();return}
+ if(op==='clear-source'){voice='';offset=0;selected=null;generation++;await refresh();return}
+ if(op==='more'||op==='prev'){offset=Math.max(0,offset+(op==='more'?30:-30));selected=null;detail=null;lastDetail='';generation++;await refresh();return}
+ b.disabled=true;
+ if(op==='probe'){const result=await api('/api/llm/probe','POST');Room.toast(result.message);await refresh()}
+ if(op==='confirm-action'){try{detail=await api('/api/assistant/'+id+'/confirm','POST',{preview_sha256:b.dataset.preview});lastDetail='';await refresh();window.RoomManager?.refresh(false)}catch(err){Room.toast(err.message);await refresh()}return}
+ if(op==='send'){await api('/api/llm/requests/'+id+'/send','POST');lastDetail='';await refresh()}
+ if(op==='retry'){const key=keys.get('retry:'+id)||requestKey();keys.set('retry:'+id,key);const j=await api('/api/llm/requests/'+id+'/retry','POST',{request_id:key,mode:requestMode});keys.delete('retry:'+id);selected=j.id;detail=j;lastDetail='';status='';query='';limit=30;offset=0;await refresh()}
+ if(op==='cancel'){await api('/api/llm/requests/'+id+'/cancel','POST');lastDetail='';await refresh()}
+ if(op==='delete'){if(!confirm('이 LLM 입력·출력 기록을 삭제할까요? 원본 음성과 할 일은 삭제하지 않습니다.'))return;await api('/api/llm/requests/'+id,'DELETE');selected=null;detail=null;lastDetail='';$('#llmDetail').innerHTML='<section class="panel empty">기록을 삭제했습니다.</section>';await refresh()}
+ if(op==='export'){const j=await api('/api/llm/requests/'+id);const url=URL.createObjectURL(new Blob([pretty(j)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='room-hub-llm-'+id+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);Room.toast('전사문·출력이 포함된 개인 기록입니다. 공개 저장소에 올리지 마세요.')}
+ }catch(err){Room.toast(err.message)}finally{if(b.isConnected)b.disabled=false}}
+async function submitFromVoice(v,button){
+ if(sending.has(v.id))return;sending.add(v.id);button.disabled=true;
+ try{
+  const key=keys.get(v.id)||requestKey();keys.set(v.id,key);
+  const j=await api('/api/llm/requests','POST',{request_id:key,voice_id:v.id,mode:requestMode,expected_text_sha256:v.text_sha256||'0'.repeat(64)});
+  keys.delete(v.id);selected=j.id;detail=j;lastDetail='';voice='';status='';query='';limit=30;offset=0;generation++;
+  window.RoomManager.navigate('llm');await refresh();
+  Room.toast(j.status==='prepared'?'전송 예정 입력을 저장했습니다. 모델 연결 후 직접 전송하세요.':'요청을 접수했습니다. 변경은 실행 미리보기를 확인해 주세요.');
+ }catch(err){if(err.status===409)keys.delete(v.id);throw err}
+ finally{sending.delete(v.id);if(button.isConnected)button.disabled=false}
+}
+function reset(){generation++;root=null;cfg=null;list={items:[],total:0};selected=null;detail=null;draft=null;keys.clear();clearInterval(timer);timer=null}
+window.RoomLLM={getMode:()=>requestMode,setMode:v=>{if(['auto','chat','legacy'].includes(v))requestMode=v},mount,refresh,reset,submitFromVoice,filterVoice(id){voice=id;offset=0;selected=null;generation++},getSelection:()=>selected};
+})();

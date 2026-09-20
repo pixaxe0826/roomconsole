@@ -1,7 +1,7 @@
 (() => {
 'use strict';
 const R=Room,$=s=>document.querySelector(s),grid=$('#grid'),focus=$('#focus'),focusContent=$('#focusContent');
-const demo=!!window.ROOM_DEMO,commands=new Set(),pendingTasks=new Set(),demoRequests=new Map();
+const demo=!!window.ROOM_DEMO,commands=new Set(),pendingTasks=new Set(),demoRequests=new Map(),widgetViews=new Map();
 let state,selectedDate,month,expanded=null,offset=0,socket,renderId=0,cleanups=[],modules={},followToday=true,stopped=false,loading=false,online=false,refreshQueued=false;
 function notice(text){$('#notice').textContent=text||'';$('#notice').classList.toggle('hidden',!text)}
 function connection(ok,label){
@@ -27,7 +27,9 @@ async function loadWidgets(){
 function now(){return new Date(Date.now()+offset)}
 function canCompleteTasks(){return !stopped&&(demo||online&&state?.capabilities?.task_completion===true)}
 function context(instance,ex=false,compact=false){
+ if(!widgetViews.has(instance.id))widgetViews.set(instance.id,{});
  return {state,instance,selectedDate,month,expanded:ex,compact,now:now(),util:R,selectDate,changeMonth,expand:()=>openWidget(instance.id),openWidget,
+  viewState:widgetViews.get(instance.id),redraw:()=>render(),isDemo:demo,connected:demo||online,
   canCompleteTasks:canCompleteTasks(),setTaskCompletion,taskPending:id=>pendingTasks.has(id)};
 }
 function moduleFor(instance){const m=state.widgets.find(m=>m.id===instance.type);return m?modules[m.id+'@'+m.version]:null}
@@ -35,7 +37,7 @@ function widgetNode(instance,ex=false){
  const el=document.createElement('section');el.className='widget';el.dataset.widgetId=instance.id;el.setAttribute('aria-label',instance.title||instance.type);
  if(!ex){el.style.gridColumn=`${instance.x+1} / span ${instance.w}`;el.style.gridRow=`${instance.y+1} / span ${instance.h}`;el.tabIndex=0;el.setAttribute('role','button')}
  const rect=grid.getBoundingClientRect(),w=(rect.width-(state.layout.columns-1)*16)/state.layout.columns*instance.w,h=(rect.height-(state.layout.rows-1)*16)/state.layout.rows*instance.h;
- const compact=!ex&&(w<245||h<155||(instance.type==='calendar'&&(w<300||h<255))||(instance.type==='todos'&&h<255));
+ const compact=!ex&&(w<245||h<155||(instance.type==='calendar'&&(w<300||h<255))||(['todos','all-todos'].includes(instance.type)&&h<255));
  if(!ex&&(w<95||h<72))el.classList.add('micro');if(!ex&&h<45)el.classList.add('nano');
  const ctx=context(instance,ex,compact),mod=moduleFor(instance);
  try{el.innerHTML=mod?.render?mod.render(ctx):'<div class="empty">위젯 폴더를 확인하세요.</div>';const cleanup=mod?.bind?.(el,ctx);if(typeof cleanup==='function')cleanups.push(cleanup)}
@@ -51,7 +53,7 @@ async function render({preserveScroll=true}={}){
  if(!state||stopped)return;
  const generation=++renderId;await loadWidgets();if(generation!==renderId||stopped)return;
  const scrolls=new Map();
- if(preserveScroll)document.querySelectorAll('.widget .todo-list').forEach(el=>scrolls.set(scrollKey(el),el.scrollTop));
+ document.querySelectorAll('.widget .todo-list').forEach(el=>{if(preserveScroll||el.classList.contains('all-todos-list'))scrolls.set(scrollKey(el),el.scrollTop)});
  const active=document.activeElement,activeId=active?.dataset.completeTask,activeArea=active?.closest('#focus')?'#focus':'#grid';
  cleanups.forEach(fn=>fn());cleanups=[];
  document.body.classList.toggle('dark',state.settings.theme==='dark');$('#hubTitle').textContent=state.settings.title;
@@ -60,7 +62,7 @@ async function render({preserveScroll=true}={}){
  if(expanded&&!state.layout.widgets.some(w=>w.id===expanded))expanded=null;
  focus.classList.toggle('hidden',!expanded);$('#display').classList.toggle('hidden',!!expanded);focusContent.replaceChildren();
  if(expanded){const instance=state.layout.widgets.find(w=>w.id===expanded);$('#focusTitle').textContent=instance.title||state.widgets.find(w=>w.id===instance.type)?.name||instance.type;focusContent.append(widgetNode(instance,true))}
- if(preserveScroll)document.querySelectorAll('.widget .todo-list').forEach(el=>{el.scrollTop=scrolls.get(scrollKey(el))||0});
+ document.querySelectorAll('.widget .todo-list').forEach(el=>{el.scrollTop=scrolls.get(scrollKey(el))||0});
  if(activeId){const el=[...document.querySelectorAll(activeArea+' [data-complete-task]')].find(b=>b.dataset.completeTask===activeId);if(el&&!el.disabled)el.focus({preventScroll:true})}
  presence();
 }

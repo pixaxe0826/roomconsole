@@ -1,0 +1,12 @@
+# Linux (Debian in PRoot) only; not a native Android/Termux wheel requirements file.
+# Same application pins as Room Hub 0.1.4, with optional C/Rust server extras removed.
+fastapi==0.128.2
+uvicorn==0.48.0
+httpx==0.28.1
+python-multipart==0.0.29
+qrcode==8.2
+tzdata==2026.2
+# Explicit v2 for the v2 validators used by the app; binary wheel required.
+pydantic==2.13.4
+# Minimal uvicorn does not include a WebSocket protocol implementation.
+websockets==16.0

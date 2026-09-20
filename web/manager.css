@@ -7,3 +7,20 @@
 @media(max-width:1200px){.sidebar{width:185px;padding-left:14px;padding-right:14px}.manager-main{margin-left:185px;width:calc(100% - 185px);padding:28px 25px}.manager-header{align-items:flex-start}.manager-header>.row{flex-wrap:wrap;justify-content:flex-end;max-width:310px}.overview-columns{grid-template-columns:minmax(0,1fr) 245px}.split,.settings-columns{grid-template-columns:minmax(0,1fr) 300px}.kpi{padding:18px}.panel{padding:20px}.manager-header h1{font-size:27px}}
 @media(max-width:980px){.sidebar{width:170px}.manager-main{margin-left:170px;width:calc(100% - 170px);padding:25px 20px}.overview-columns,.split,.settings-columns{grid-template-columns:1fr}.overview-columns>.stack{display:grid;grid-template-columns:1fr 1fr}.manager-header{flex-direction:column}.manager-header>.row{max-width:none;justify-content:flex-start}.kpis{gap:10px}.kpi{padding:16px}.kpi-value{font-size:26px}.kpi-icon{display:none}.layout-board{max-height:600px}.manager-task .task-name{font-size:12px}}
 @media(max-width:650px){.sidebar{width:66px;padding:22px 7px}.sidebar>.brand{padding:0 7px 25px}.sidebar .brand>div,.nav-section-label,.sidebar-bottom .local-box,.sidebar-bottom .version,.nav-item .nav-text,.nav-pill{display:none}.nav-item{justify-content:center;padding:12px 8px;gap:0}.sidebar-bottom .nav-item{font-size:0}.sidebar-bottom .nav-item>span{font-size:22px}.manager-main{margin-left:66px;width:calc(100% - 66px);padding:22px 15px}.kpis{grid-template-columns:repeat(2,1fr)}.manager-header h1{font-size:25px}.manager-header>.row .badge{display:none}.manager-header>.row .btn{font-size:10px}.overview-columns>.stack{display:flex}.panel{padding:18px}.manager-task{gap:9px}.task-buttons{flex-direction:column}.form-grid{gap:11px}.layout-board{min-height:250px;gap:4px;padding:7px}.layout-tile strong{font-size:10px}.layout-tile svg{display:none}.layout-info{gap:8px}.layout-info label{width:65px}.layout-info .btn{font-size:10px;padding:10px}.activity-row{font-size:10px}.activity-row time{font-size:9px}.layout-foot{align-items:flex-start;gap:7px}.device-meta{flex-wrap:wrap;gap:8px}}
+
+/* 0.1.2: chronological all-task list. The pairing and preview-size fixes remain. */
+.all-task-toolbar{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.manager-list-tools{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:16px 0 8px;font-size:11px;color:var(--muted)}
+.manager-list-tools>div{display:flex;gap:5px;flex-shrink:0}
+.manager-task-scroll{max-height:65vh;min-height:240px;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding-right:7px;scroll-behavior:auto}
+.manager-date-heading{display:flex;align-items:center;gap:10px;position:sticky;top:0;background:var(--surface);z-index:1;padding:13px 0 10px;font-size:12px;font-weight:600;border-bottom:1px solid var(--line);color:var(--muted)}
+.manager-date-heading.is-today{color:var(--accent)}
+.manager-task-scroll .manager-task{min-height:76px}
+.manager-task-scroll .complete-button{width:44px;height:44px;flex:0 0 44px;border-radius:12px;display:flex;align-items:center;justify-content:center}
+.manager-task-scroll .task-name{overflow-wrap:anywhere}
+.manager-task-scroll .task-detail{flex-wrap:wrap}
+.task-more{width:100%;margin-top:12px;min-height:44px}
+.manager-list-end{text-align:center;color:var(--muted);font-size:12px;padding:24px 0}
+@media(max-width:650px){.manager-list-tools{align-items:flex-start;flex-direction:column}.manager-task-scroll{max-height:65vh}.all-task-toolbar{grid-template-columns:1fr 1fr}}
+
+.all-task-toolbar label,.all-task-toolbar .search-field{width:auto;min-width:0}
