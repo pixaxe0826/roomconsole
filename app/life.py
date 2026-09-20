@@ -487,3 +487,80 @@ def register_routes(app, service: LifeService, admin, viewer, changed):
         if not result['duplicate']:
             await changed('alarm.snoozed', eid)
         return result
+
+
+def memo_snapshot(store, selector='current'):
+    """Read-only assistant view of the existing note storage, in one snapshot.
+
+    Current means the first saved note-widget's DEFAULT card, not a fabricated
+    browser selection. Latest uses updated_at independently of pinned order.
+    Private notes may be read by the manager; llm_display must recheck sharing.
+    """
+    if selector not in {'current', 'last_modified'}:
+        raise ValueError('메모 조회 기준을 확인해 주세요.')
+    with store.connect() as db:
+        db.execute('BEGIN')
+        def kv(key, default):
+            row = db.execute('SELECT value FROM kv WHERE key=?', (key,)).fetchone()
+            return json.loads(row[0]) if row else default
+        layout = kv('layout', {})
+        widgets = [w for w in layout.get('widgets', []) if w.get('type') == 'note']
+        widget = widgets[0] if widgets else None
+        revision = db.execute('SELECT revision FROM hub_life_meta WHERE id=1').fetchone()[0]
+        result = {'ok': True, 'source': 'room_hub_sqlite.hub_notes', 'selector': selector,
+                  'selection_policy': 'default_widget_card', 'widget_id': widget['id'] if widget else None,
+                  'note_id': None, 'version': None, 'updated_at': None, 'shared': False,
+                  'count': 0, 'body': '', 'title': '', 'revision': revision, 'as_of': stamp(time.time())}
+        if selector == 'last_modified':
+            rows = db.execute('SELECT * FROM hub_notes ORDER BY updated_at DESC,id LIMIT 2').fetchall()
+            if len(rows) == 2 and rows[0]['updated_at'] == rows[1]['updated_at']:
+                raise ValueError('같은 시각에 수정된 메모가 여러 개라 방금 메모를 특정할 수 없습니다. 관리자 메모 목록에서 확인해 주세요.')
+            if rows:
+                note = LifeService.note(rows[0])
+                return result | {'selection_policy': 'updated_at', 'note_id': note['id'],
+                    'version': note['version'], 'updated_at': note['updated_at'], 'shared': note['shared'],
+                    'count': 1, 'body': note['body'], 'title': note['title']}
+        if not widget:
+            raise ValueError('배치된 메모 위젯이 없어 현재 메모를 특정할 수 없습니다. 관리자에서 메모 위젯을 추가해 주세요.')
+        cfg = widget.get('config') or {}
+        data = kv('widget_data:note', {}) or {}
+        legacy = data.get('text') if data.get('text') is not None else cfg.get('text', '')
+        if legacy is None:
+            legacy = ''
+        if not isinstance(legacy, str):
+            raise ValueError('기존 메모의 저장 형식을 확인해 주세요. 내용을 임의로 변환하지 않았습니다.')
+        if legacy:
+            title = cfg.get('caption') or '기존 고정 메모'
+            if not isinstance(title, str):
+                title = '기존 고정 메모'
+            return result | {'source': 'room_hub_sqlite.kv.note', 'count': 1,
+                             'body': legacy, 'title': title, 'shared': True}
+        row = db.execute('SELECT * FROM hub_notes WHERE shared=1 ORDER BY pinned DESC,updated_at DESC,id LIMIT 1').fetchone()
+        if row:
+            note = LifeService.note(row)
+            return result | {'note_id': note['id'], 'version': note['version'], 'updated_at': note['updated_at'],
+                             'shared': True, 'count': 1, 'body': note['body'], 'title': note['title']}
+        return result
+
+
+def memo_result_is_public(store, snapshot):
+    """Recheck visibility before projecting a saved memo reply to any display."""
+    if not snapshot.get('shared') or not snapshot.get('count'):
+        return False
+    with store.connect() as db:
+        db.execute('BEGIN')
+        row = db.execute("SELECT value FROM kv WHERE key='layout'").fetchone()
+        widgets = [w for w in json.loads(row[0]).get('widgets', []) if w.get('type') == 'note'] if row else []
+        if not widgets:
+            return False
+        if snapshot.get('note_id'):
+            note = db.execute('SELECT shared,version FROM hub_notes WHERE id=?', (snapshot['note_id'],)).fetchone()
+            return bool(note and note['shared'] and note['version'] == snapshot.get('version'))
+        widget = next((w for w in widgets if w['id'] == snapshot.get('widget_id')), None)
+        if not widget or snapshot.get('source') != 'room_hub_sqlite.kv.note':
+            return False
+        data = db.execute("SELECT value FROM kv WHERE key='widget_data:note'").fetchone()
+        data = (json.loads(data[0]) if data else {}) or {}
+        cfg = widget.get('config') or {}
+        body = data.get('text') if data.get('text') is not None else cfg.get('text', '')
+        return isinstance(body, str) and body == snapshot.get('body')

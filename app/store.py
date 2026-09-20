@@ -45,7 +45,7 @@ class Store:
  def tasks(self):
     return self.query_tasks('0001-01-01','9999-12-31','all',10000)['items']
 
- def query_tasks(self,start,end,status='all',limit=50):
+ def query_tasks(self,start,end,status='all',limit=50,*,period=None):
     """Shared server read service. Read count+items within one SQLite snapshot."""
     from datetime import date
     start=date.fromisoformat(start).isoformat();end=date.fromisoformat(end).isoformat()
@@ -53,11 +53,18 @@ class Store:
      raise ValueError('잘못된 할 일 조회 범위입니다.')
     where='date>=? AND date<=?';args=[start,end]
     if status!='all':where+=' AND completed=?';args.append(int(status=='completed'))
+    if period not in {None,'morning','afternoon'}:raise ValueError('잘못된 오전/오후 조회 범위입니다.')
+    base_where,base_args=where,list(args)
+    if period:
+     where+=' AND time IS NOT NULL AND time>=? AND time<?'
+     args+=['00:00','12:00'] if period=='morning' else ['12:00','24:00']
     with self.connect() as db:
      db.execute('BEGIN')
+     untimed=db.execute('SELECT count(*) FROM tasks WHERE '+base_where+' AND time IS NULL',base_args).fetchone()[0] if period else 0
      total=db.execute('SELECT count(*) FROM tasks WHERE '+where,args).fetchone()[0]
      rows=db.execute('SELECT * FROM tasks WHERE '+where+' ORDER BY date,time IS NULL,time,created_at,id LIMIT ?',(*args,limit)).fetchall()
      rev=db.execute("SELECT value FROM kv WHERE key='revision'").fetchone()[0]
     return {'ok':True,'source':'room_hub_sqlite','count':total,'items':[self.task_dict(r) for r in rows],
             'range':[start,end],'status':status,'as_of':utcnow(),'revision':int(rev),
-            'limit':limit,'returned':len(rows),'truncated':total>len(rows)}
+            'limit':limit,'returned':len(rows),'truncated':total>len(rows),
+            **({'period':period,'untimed_count':untimed} if period else {})}

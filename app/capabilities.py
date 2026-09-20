@@ -1,7 +1,7 @@
 """Trusted server capability registry; no Python imports from widget folders.
 
 All exposed names resolve to a server-owned handler. No model-selected SQL,
-URL or class name is ever evaluated. Notes/alarms UI services exist, but are NOT registered LLM tools.
+URL or class name is ever evaluated. Memo reads are deterministic only. Note/alarm writes are NOT registered LLM tools.
 """
 from dataclasses import dataclass, asdict
 
@@ -19,6 +19,7 @@ class Capability:
         return asdict(self)
 
 _CAPS = (
+    Capability('memo.read','기본/최근 메모 읽기; 서버 Fast-path 전용','read','notes.snapshot',()),
     Capability('todo.list','등록된 할 일 조회·브리핑','read','tasks.query',('date_ref','status')),
     Capability('calendar.query','Room Hub 일정 조회; 외부 캘린더 아님','read','tasks.query',('date_ref','status')),
     Capability('time.query','서버 현재 시각','read','clock.now',()),
@@ -41,10 +42,10 @@ def require(name):
 
 def manifest():
     return {'version':1,'capabilities':[c.public() for c in _CAPS],
-            'unavailable':['notes','alarms'],'unavailable_scope':'voice_assistant_tools',
+            'unavailable':['notes.write','alarms'],'unavailable_scope':'voice_assistant_tools',
             'ui_services':['notes','alarms'],
             'policy':'읽기는 서버 데이터, 모든 쓰기는 관리자 확인. 위젯 코드와 실행 권한은 별개.'}
 
 
 def parser_description():
-    return '; '.join(c.name+'='+c.description for c in _CAPS)
+    return '; '.join(c.name+'='+c.description for c in _CAPS if c.name != 'memo.read')

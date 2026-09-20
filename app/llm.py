@@ -363,13 +363,15 @@ class LLMHub:
             duplicate=self._duplicate(key,sig)
             if duplicate:return duplicate
             cfg=self.config();now=utcnow();rid=uid();body=self.make_payload(cfg,text,now)
-            agent=detect(text,now,self.store.get('settings')['timezone'],mode) if mode!='legacy' else None
+            agent=detect(text,now,self.store.get('settings')['timezone'],mode)
+            if mode=='legacy' and not agent.get('fast_read'):agent=None
             if agent:
                 agent['source_received_at']=meta.get('created_at')
                 agent['reference_policy']='new request uses request-created clock; previous voice timestamp recorded separately'
                 body=assistant_payload(agent,cfg) or encoded({'local_plan':agent.get('proposal'),'route':agent['route']})
             local=bool(agent and agent['route'] in {'rule','clarify'})
-            status='queued' if cfg.enabled or local else 'prepared'
+            fast=bool(agent and agent.get('fast_read'))
+            status='running' if fast else 'queued' if cfg.enabled or local else 'prepared'
             with self.store.connect() as db:
                 db.execute('BEGIN IMMEDIATE')
                 if db.execute('SELECT count(*) FROM llm_requests').fetchone()[0]>=MAX_HISTORY:
@@ -380,10 +382,11 @@ class LLMHub:
                   source_text,source_sha256,source_meta,config_json,request_body,request_sha256,endpoint,status,
                   created_at,updated_at,queued_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                   (rid,key,sig,voice_id,source_id,parent,text,sha(text),encoded(meta),encoded(cfg.model_dump()),
-                   body,sha(body),cfg.base_url+'/chat/completions' if not local else 'local://room-hub',status,now,now,now if status=='queued' else None))
+                   body,sha(body),cfg.base_url+'/chat/completions' if not local else 'local://room-hub',status,now,now,now if status in {'queued','running'} else None))
                 if agent:self.assistant.attach(db,rid,agent,parent)
             if status=='queued':self._ensure_worker()
             self.wake.set()
+        if fast:await self._execute_fast_read(rid)
         await self.notify('llm.request_created',rid)
         return self.get(rid)|{'duplicate':False}
 
@@ -525,6 +528,37 @@ class LLMHub:
         await self.notify('assistant.executed' if result['changed'] else 'assistant.already_executed',rid)
         return self.get(rid)|{'execution':result}
 
+    async def _execute_fast_read(self,rid):
+        """Finish bounded reads independently of the model/speech worker.
+
+        Do not touch active_id/call: a concurrent model job owns those handles.
+        Business data is read only; history and audit remain the existing store.
+        """
+        start=time.perf_counter();started=utcnow();d=self.get(rid);record=d['assistant']
+        with self.store.connect() as db:
+            db.execute('UPDATE llm_requests SET started_at=?,updated_at=?,wait_seconds=0 WHERE id=?',
+                       (started,started,rid))
+        try:
+            if sha(d['request_body'])!=d['request_sha256']:
+                raise LLMFailure('저장된 조회 계획의 무결성을 확인하지 못했습니다.','snapshot_invalid')
+            record['execution_started_at']=started
+            record=self.assistant.stage(rid,record,record['proposal'])
+            elapsed=time.perf_counter()-start
+            record['routing']['fast_path_seconds']=elapsed+record['routing']['router_seconds']
+            self.assistant.put(rid,record)
+            result={'output':record['final_text'],'output_source':'server','action_state':record['state'],
+                    'metrics':{},'warnings':[],'assistant_seconds':elapsed}
+            with self.store.connect() as db:
+                db.execute('UPDATE llm_requests SET status=?,response_json=?,request_seconds=?,finished_at=?,updated_at=? WHERE id=?',
+                           (record['state'],encoded(result),elapsed,utcnow(),utcnow(),rid))
+        except Exception:
+            # A DB/service error is not an empty list or an excuse for LLM guessing.
+            record.update(state='failed',validation='source_read_failed',final_text=None)
+            self.assistant.put(rid,record)
+            with self.store.connect() as db:
+                db.execute("UPDATE llm_requests SET status='failed',error='저장된 데이터를 읽지 못했습니다. 서버 상태를 확인해 주세요.',error_code='source_read_failed',finished_at=?,updated_at=? WHERE id=?",
+                           (utcnow(),utcnow(),rid))
+
     async def _execute_assistant(self,rid,d):
         record=d['assistant'];saved=LLMConfig.model_validate(d['config_json'])
         if sha(d['request_body'])!=d['request_sha256']:
@@ -561,7 +595,7 @@ class LLMHub:
                 if endpoint!=d['endpoint']:raise LLMFailure('저장된 엔드포인트가 다릅니다.','snapshot_invalid')
                 call={'purpose':record['route'],'endpoint':endpoint,'request_payload':d['request_payload'],
                       'request_sha256':d['request_sha256'],'started_at':utcnow(),'result':None}
-                record['calls']=[call];self.assistant.put(rid,record)
+                record['calls']=[call];record.setdefault('routing',{})['llm_called']=True;self.assistant.put(rid,record)
                 with self.store.connect() as db:db.execute('UPDATE llm_requests SET dispatch_attempted=1 WHERE id=?',(rid,))
                 call_start=time.perf_counter()
                 self.call=asyncio.create_task(self.backend.generate(endpoint,d['request_body'],saved.timeout_seconds))
@@ -570,6 +604,7 @@ class LLMHub:
                 elapsed=time.perf_counter()-call_start;result=parse_result(body,elapsed)
                 call.update(result=json.loads(encoded(result)),response_raw=raw,finished_at=utcnow(),seconds=elapsed)
                 record['calls']=[call]
+                record.setdefault('routing',{})['llm_seconds']=elapsed
                 with self.store.connect() as db:db.execute('UPDATE llm_requests SET response_raw=?,http_status=200 WHERE id=?',(raw,rid))
                 if record['route']=='chat':
                     output=result.get('output')

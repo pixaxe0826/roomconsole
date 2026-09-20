@@ -163,7 +163,7 @@ def test_new_endpoints_permissions_and_catalog(hub):
  assert anon.get('/api/clock').status_code==401
  assert anon.get('/api/assistant/capabilities').status_code==401
  cats=c.get('/api/assistant/capabilities').json()
- assert cats['unavailable']==['notes','alarms']
+ assert cats['unavailable']==['notes.write','alarms']
  assert all(v['confirmation'] for v in cats['capabilities'] if v['access']=='write')
  state=c.get('/api/state').json()
  assert state['clock']['today']==state['today'] and state['clock']['reference_at']==state['server_time']
