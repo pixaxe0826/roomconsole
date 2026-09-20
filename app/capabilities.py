@@ -1,7 +1,7 @@
 """Trusted server capability registry; no Python imports from widget folders.
 
 All exposed names resolve to a server-owned handler. No model-selected SQL,
-URL or class name is ever evaluated. Notes/alarms are NOT registered services.
+URL or class name is ever evaluated. Notes/alarms UI services exist, but are NOT registered LLM tools.
 """
 from dataclasses import dataclass, asdict
 
@@ -41,7 +41,8 @@ def require(name):
 
 def manifest():
     return {'version':1,'capabilities':[c.public() for c in _CAPS],
-            'unavailable':['notes','alarms'],
+            'unavailable':['notes','alarms'],'unavailable_scope':'voice_assistant_tools',
+            'ui_services':['notes','alarms'],
             'policy':'읽기는 서버 데이터, 모든 쓰기는 관리자 확인. 위젯 코드와 실행 권한은 별개.'}
 
 

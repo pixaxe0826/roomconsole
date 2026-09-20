@@ -66,3 +66,6 @@ Every assistant write requires an authenticated manager confirmation, including 
 Task mutations and execution receipts are committed in a single SQLite transaction; receipt key follows a retry family. Deleting the visible notebook does not delete the execution ledger, which prevents accidental replay but retains a brief result containing task IDs/titles. Treat DB backups as private. Rollback of program files does not undo already confirmed mutations.
 
 The new mode is automatic routing, not automatic writes or automatic audio sending. Imported legacy records are never reinterpreted or silently reexecuted. Generic chat cannot query data or change tasks. Stored task content is never treated as a system instruction. See [assistant scope](docs/ASSISTANT.md).
+
+## 0.1.7 확장
+메모/알람 예약 CRUD는 관리자 전용입니다. 메모는 기본 비공개이고 `shared` 및 note 위젯 배치로만 공개됩니다. 기존 고정 메모 문구는 이미 공개된 위젯 설정이므로 별도로 유지합니다. 알람 위젯 배치는 예약/활성 회차를 연결 화면 모두에 공유하는 opt-in입니다. 표시 기기는 버전·요청 ID가 검증된 기존 발생 회차의 확인 또는 5분 미루기만 가능합니다. 실제 소리 재생·시스템 알람·Web Push를 보장하지 않습니다. 새 테이블/내보내기에도 개인 정보가 있으므로 백업/DB를 공개하지 마세요.

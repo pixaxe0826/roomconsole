@@ -109,3 +109,6 @@ Content-Type: application/json
 `viewState`로 한 쌍씩 읽으며, 표시용 읽기 전용 endpoint 외에 관리자 API를 호출하지 않습니다.
 공유 범위는 임의 widget_data가 아니라 서버의 제한된 투영이 결정합니다.
 [LLM 위젯 계약](LLM_WIDGET.md)
+
+## 0.1.7 note / alarms
+`note`는 같은 ID로 저장형 메모를 표시하며 기존 config.text/widget_data 문구를 유지합니다. `alarms`는 새 4×2 위젯입니다. 실제 데이터는 state.life의 명시적 공유 DTO를 사용하며 위젯 설치 자체가 관리자 권한을 주지 않습니다. [기능](NOTES_ALARMS.md)

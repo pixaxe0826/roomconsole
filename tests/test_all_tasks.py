@@ -18,15 +18,15 @@ def hub(tmp_path):
 
 def test_release_health_and_cache_keys(hub):
  _,a,d=hub
- assert a.get('/healthz').json()['version']=='0.1.6'
+ assert a.get('/healthz').json()['version']=='0.1.7'
  assert 'shared.js?v=0.1.3' in d.get('/client').text
- assert 'manager.js?v=0.1.6-llm-widget1' in a.get('/manager').text
+ assert 'manager.js?v=0.1.7' in a.get('/manager').text
 
 def test_new_folder_discovered_without_altering_layout(hub):
  _,a,d=hub;s=d.get('/api/state').json()
  assert s['layout']==DEFAULT_LAYOUT
  assert {'todos','all-todos'}<={m['id'] for m in s['widgets']}
- assert len(s['widgets'])==7 and not s['widget_errors']
+ assert len(s['widgets'])==8 and not s['widget_errors']
  for path in ['manifest.json','widget.js','style.css']:
   assert a.get('/widgets/all-todos/'+path).status_code==200
 

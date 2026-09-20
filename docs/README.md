@@ -27,3 +27,6 @@
 
 ## 0.1.5
 [비서 기능](ASSISTANT.md) · [업데이트](ASSISTANT_UPDATE.md) · [검증](ASSISTANT_TEST_REPORT.md)
+
+## 0.1.7
+[메모·알람](NOTES_ALARMS.md) · [업데이트와 롤백](UPDATE_017.md) · [검증 기록](TEST_REPORT_017.md)

@@ -167,3 +167,6 @@ curl -X POST 'http://192.168.0.20:8088/api/voice/upload' \
 `POST /api/assistant/{id}/confirm` is admin-only, with `X-Room-Request: 1` as existing same-origin mutations require. Body: `{"preview_sha256":"64-hex value from current preview"}`. Read the current request detail first. A 409 means stale/expired/cancelled/changed input: obtain a new preview, do not blindly replay. Effects and receipts commit atomically; duplicate confirmations do not repeat effects. Display-only and ingest credentials cannot call this endpoint.
 
 Additional statuses: awaiting_confirmation and needs_clarification. Detail contains assistant (raw/normalized/route/proposal/validation/preview/calls/tool_result). Display projection still excludes these private fields and shows only original input, final output, status and public timestamps. See [ASSISTANT.md](ASSISTANT.md).
+
+## 0.1.7 메모·알람
+[메모·알람 계약](NOTES_ALARMS.md)의 `/api/life/*`를 추가했습니다. 표시용 GET, 관리자 CRUD, 기존 회차 ack/snooze의 권한과 version/request_id를 구분합니다. `/api/state.life`는 공유 가능한 DTO이며 private 메모를 포함하지 않습니다.

@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse,JSONResponse,RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from .models import *
 from . import llm_display
+from .life import LifeService, register_routes as register_life_routes
 from .clock_service import clock_context
 from .capabilities import manifest as capability_manifest
 from .assistant import Confirmation
@@ -64,12 +65,18 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
    await asyncio.sleep(20)
  speech=SpeechHub(store,data,changed,config=speech_config,runner=speech_runner)
  llm=LLMHub(store,changed,speech=speech,backend=llm_backend)
+ life=LifeService(store,changed)
  @asynccontextmanager
  async def lifespan(app):
   await speech.start()
   await llm.start()
   task=asyncio.create_task(weather_loop()) if weather_enabled else None
-  yield
+  alarm_task=asyncio.create_task(life.run(),name="room-hub-alarms")
+  try:
+   yield
+  finally:
+   alarm_task.cancel()
+   with contextlib.suppress(asyncio.CancelledError):await alarm_task
   await llm.close()
   await speech.close()
   if task:
@@ -77,7 +84,8 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
    with contextlib.suppress(asyncio.CancelledError):await task
   for ws in list(connections):
    with contextlib.suppress(Exception):await ws.close()
- app=FastAPI(title='Room Hub',version='0.1.6',lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
+ app=FastAPI(title='Room Hub',version='0.1.7',lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
+ app.state.life=life
  app.state.speech=speech
  app.state.llm=llm
  app.state.store=store;app.state.admin_token=admin_key;app.state.ingest_token=ingest_key;app.state.connections=connections
@@ -128,13 +136,14 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
   auth=request.headers.get('authorization','')
   if auth.startswith('Bearer ') and hmac.compare_digest(auth[7:],ingest_key):return {'role':'ingest'}
   return authenticate(request,'admin')
+ register_life_routes(app,life,admin,viewer,changed)
  def new_session(role,device_id,days):
   token=secrets.token_urlsafe(32)
   with store.connect() as db:
    db.execute('DELETE FROM sessions WHERE expires_at<?',(time.time(),));db.execute('INSERT INTO sessions VALUES(?,?,?,?)',(hashed(token),role,device_id,time.time()+days*86400))
   return token
  @app.get('/healthz')
- async def health():return {'status':'ok','version':'0.1.6'}
+ async def health():return {'status':'ok','version':'0.1.7'}
  @app.get('/')
  async def root():return RedirectResponse('/client')
  @app.get('/client')
@@ -162,7 +171,7 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
   return {'revision':store.get('revision'),'server_time':stamp,'today':clock['today'],'clock':clock,
    'settings':settings,'layout':store.get('layout'),'tasks':store.tasks(),'weather':weather,'weather_error':wx['error'],'widgets':registry,'widget_errors':errors,
    'capabilities':{'task_completion':True,'speech_upload':True,'llm_response_widget':True},
-   'llm_display':llm_display.index(store),
+   'llm_display':llm_display.index(store),'life':life.display(),
    'widget_data':{w['id']:store.get('widget_data:'+w['id']) or {} for w in registry}}
  @app.get('/api/clock')
  async def current_clock(_=Depends(viewer)):
@@ -301,7 +310,8 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
  @app.get('/api/admin/export')
  async def export(_=Depends(admin)):
   with store.connect() as db:series=[dict(r) for r in db.execute('SELECT * FROM series')]
-  payload={'schema_version':1,'exported_at':utcnow(),'settings':store.get('settings'),'layout':store.get('layout'),'tasks':store.tasks(),'series':series}
+  payload={'schema_version':1,'exported_at':utcnow(),'settings':store.get('settings'),'layout':store.get('layout'),'tasks':store.tasks(),'series':series,
+   'life':{'schema_version':1,'notes':life.notes(),'alarms':life.alarms(),'alarm_events':life.events()}}
   return Response(json.dumps(payload,ensure_ascii=False,indent=2),media_type='application/json',headers={'Content-Disposition':'attachment; filename="room-hub-export.json"'})
  @app.get('/api/admin/backup')
  async def backup(_=Depends(admin)):
