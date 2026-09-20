@@ -64,6 +64,7 @@ fi
 rm -f -- "$WIDGET_DIFF"
 
 rollback_swap() {
+  rc=$?
   trap - ERR
   set +e
   printf '\nAdoption failed after the directory swap; restoring the previous installation...\n' >&2
@@ -77,6 +78,7 @@ rollback_swap() {
     done
     shopt -s nullglob
     for file in "$ROOT"/.env "$ROOT"/.env.*; do
+      [ -e "$file" ] || continue
       [ "$(basename "$file")" = '.env.example' ] && continue
       [ -e "$BACKUP/$(basename "$file")" ] || mv -- "$file" "$BACKUP/" || true
     done
@@ -86,6 +88,7 @@ rollback_swap() {
   fi
   sv up "$SERVICE" >/dev/null 2>&1 || true
   printf 'Previous installation restored. Failed clone kept at: %s\n' "$FAILED" >&2
+  exit "$rc"
 }
 trap rollback_swap ERR
 
@@ -104,6 +107,7 @@ for name in "${PRESERVE[@]}"; do
 done
 shopt -s nullglob
 for file in "$BACKUP"/.env "$BACKUP"/.env.*; do
+  [ -e "$file" ] || continue
   [ "$(basename "$file")" = '.env.example' ] && continue
   [ ! -e "$ROOT/$(basename "$file")" ] || stop "Clone unexpectedly contains private env file: $(basename "$file")"
   mv -- "$file" "$ROOT/"
@@ -119,9 +123,38 @@ python "$ROOT/scripts/check_repo.py"
 DIRTY="$(git -C "$ROOT" status --porcelain --untracked-files=normal)"
 [ -z "$DIRTY" ] || { printf '%s\n' "$DIRTY" >&2; stop 'Unexpected non-ignored files exist after adoption.'; }
 
+verify_adopted_git() {
+  [ -d "$ROOT/.git" ] || return 1
+  [ "$(git -C "$ROOT" branch --show-current)" = "$BRANCH" ] || return 1
+  local local_head remote_head
+  local_head="$(git -C "$ROOT" rev-parse HEAD)" || return 1
+  remote_head="$(git -C "$ROOT" rev-parse "origin/$BRANCH")" || return 1
+  [ "$local_head" = "$remote_head" ] || return 1
+  [ -z "$(git -C "$ROOT" status --porcelain --untracked-files=normal)" ] || return 1
+}
+
+health_matches_version() {
+  local payload="$1" expected
+  expected="$(cat "$ROOT/VERSION")"
+  python - "$expected" "$payload" <<'PY'
+import json, sys
+expected, payload = sys.argv[1], sys.argv[2]
+try:
+    value = json.loads(payload)
+except json.JSONDecodeError:
+    raise SystemExit(2)
+raise SystemExit(0 if str(value.get('version')) == expected else 3)
+PY
+}
+
+HEALTH_ATTEMPTS="${ROOM_HUB_ADOPT_HEALTH_ATTEMPTS:-30}"
+HEALTH_SLEEP="${ROOM_HUB_ADOPT_HEALTH_SLEEP:-1}"
 sv up "$SERVICE"
-for _ in $(seq 1 30); do
-  if curl -fsS --max-time 2 http://127.0.0.1:8088/healthz >/dev/null; then
+for _ in $(seq 1 "$HEALTH_ATTEMPTS"); do
+  HEALTH=''
+  if HEALTH="$(curl -fsS --max-time 2 http://127.0.0.1:8088/healthz 2>/dev/null)" &&
+     verify_adopted_git &&
+     health_matches_version "$HEALTH"; then
     trap - ERR
     printf '\nGit adoption complete.\n'
     printf '  local HEAD : %s\n' "$(git -C "$ROOT" rev-parse HEAD)"
@@ -133,7 +166,7 @@ for _ in $(seq 1 30); do
     printf '  bash %q --check\n' "$ROOT/deploy/termux/update-from-git.sh"
     exit 0
   fi
-  sleep 1
+  sleep "$HEALTH_SLEEP"
 done
 printf 'Health check failed after Git adoption.\n' >&2
 false
