@@ -60,6 +60,8 @@ jobs:
           --ignore=tests/test_stt_accuracy.py
           --ignore=tests/test_termux_migration.py
           --ignore=tests/test_context_update.py
+          --timeout=30
+          --timeout-method=thread
           --junitxml=artifacts/test-results/backend.xml
       - run: python scripts/live_smoke.py
       - run: python scripts/build_previews.py
