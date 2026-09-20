@@ -130,7 +130,13 @@ def main():
                 ok('no inputs/confirm controls added to tablet',tablet.locator('input,textarea,select,[data-llm=confirm-action]').count()==0)
                 tablet.screenshot(path=str(screenshots/'assistant_client.png'))
                 # Ensure manager's original preview size fix remains.
-                page.evaluate("RoomManager.navigate('overview')");page.wait_for_selector('#previewBox');w1=page.locator('#previewBox').bounding_box()['width'];page.wait_for_timeout(1500);w2=page.locator('#previewBox').bounding_box()['width']
+                page.evaluate("RoomManager.navigate('overview')")
+                preview=page.locator('#previewBox')
+                preview.wait_for(state='visible')
+                w1=preview.evaluate("(e)=>e.getBoundingClientRect().width")
+                page.wait_for_timeout(1500)
+                preview.wait_for(state='visible')
+                w2=preview.evaluate("(e)=>e.getBoundingClientRect().width")
                 ok('preview width stable during live update',abs(w1-w2)<.2)
                 ok('browser no uncaught errors',not results['page_errors'])
                 browser.close();display.close()
