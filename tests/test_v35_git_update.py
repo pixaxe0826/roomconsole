@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import shutil
+import importlib.util
 import subprocess
 import sys
 
@@ -28,6 +29,10 @@ def make_git_pair(tmp_path: Path):
     git(remote, "config", "user.email", "ci@example.invalid")
     (remote / "VERSION").write_text("0.1.7\n", encoding="utf-8")
     (remote / "payload.txt").write_text("one\n", encoding="utf-8")
+    (remote / "deploy/termux").mkdir(parents=True)
+    (remote / "deploy/termux/requirements-v35.txt").write_text("example==1\n", encoding="utf-8")
+    (remote / "scripts").mkdir()
+    (remote / "scripts/check_repo.py").write_text("raise SystemExit(0)\n", encoding="utf-8")
     git(remote, "add", "-A")
     git(remote, "commit", "-m", "initial")
 
@@ -103,3 +108,40 @@ def test_check_rejects_dirty_tracked_source(tmp_path: Path):
     )
     assert result.returncode == 2
     assert "working tree : DIRTY" in result.stdout
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Git/Termux deploy-path regression")
+def test_successful_update_reports_tree_without_rolling_back(tmp_path: Path, monkeypatch, capsys):
+    remote, local, env = make_git_pair(tmp_path)
+    before = git(local, "rev-parse", "HEAD")
+
+    (remote / "payload.txt").write_text("two\n", encoding="utf-8")
+    git(remote, "add", "payload.txt")
+    git(remote, "commit", "-m", "next")
+    target = git(remote, "rev-parse", "HEAD")
+
+    spec = importlib.util.spec_from_file_location("room_hub_update_from_git", SCRIPT)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    monkeypatch.setattr(module, "stop_room_hub", lambda root, service: None)
+    monkeypatch.setattr(module, "start_room_hub", lambda service: None)
+    monkeypatch.setattr(module, "http_health", lambda: {"status": "ok", "version": "0.1.7"})
+
+    rc = module.deploy(
+        local,
+        Path(env["PREFIX"]),
+        Path(env["HOME"]),
+        "origin",
+        "main",
+    )
+    captured = capsys.readouterr()
+
+    assert rc == 0, captured.out + captured.err
+    assert git(local, "rev-parse", "HEAD") == target
+    assert git(local, "rev-parse", "HEAD") != before
+    tree = git(local, "rev-parse", "HEAD^{tree}")
+    assert "UPDATED SUCCESSFULLY" in captured.out
+    assert f"tree    : {tree}" in captured.out
+    assert "UPDATE FAILED" not in captured.err
