@@ -23,7 +23,9 @@ def main():
     class Backend(BaseHTTPRequestHandler):
         def log_message(self,*a):pass
         def send_json(self,obj):
-            data=json.dumps(obj,ensure_ascii=False).encode();self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(data)));self.end_headers()\n            try:self.wfile.write(data)\n            except (BrokenPipeError,ConnectionResetError):pass
+            data=json.dumps(obj,ensure_ascii=False).encode();self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(data)));self.end_headers()
+            try:self.wfile.write(data)
+            except (BrokenPipeError,ConnectionResetError):pass
         def do_GET(self):self.send_json({'data':[{'id':'Qwen3-0.6B-Q5_K_M.gguf'}]})
         def do_POST(self):
             body=self.rfile.read(int(self.headers['Content-Length']));captured.append(body)
