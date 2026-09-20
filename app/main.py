@@ -65,11 +65,14 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
    await asyncio.sleep(20)
  speech=SpeechHub(store,data,changed,config=speech_config,runner=speech_runner)
  llm=LLMHub(store,changed,speech=speech,backend=llm_backend)
+ speech.set_transcript_sink(llm.submit_transcription)
  life=LifeService(store,changed)
  @asynccontextmanager
  async def lifespan(app):
-  await speech.start()
+  # Start the consumer first so a queued speech job cannot publish into an
+  # LLM hub that is still running its restart-interruption cleanup.
   await llm.start()
+  await speech.start()
   task=asyncio.create_task(weather_loop()) if weather_enabled else None
   alarm_task=asyncio.create_task(life.run(),name="room-hub-alarms")
   try:
@@ -77,8 +80,9 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
   finally:
    alarm_task.cancel()
    with contextlib.suppress(asyncio.CancelledError):await alarm_task
-  await llm.close()
+  # Stop the producer first; no new transcript request can arrive after LLM close.
   await speech.close()
+  await llm.close()
   if task:
    task.cancel()
    with contextlib.suppress(asyncio.CancelledError):await task
@@ -418,7 +422,7 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
  @app.delete('/api/llm/requests/{rid}')
  async def llm_delete(rid:str,_=Depends(admin)):return await llm.delete(rid)
  @app.get('/api/admin/integration')
- async def integration(_=Depends(admin)):return {'schema_version':'1','ingest_token':ingest_key,'max_audio_mb':10,'transcription_enabled':speech.status()['ready'],'auto_execute':False}
+ async def integration(_=Depends(admin)):return {'schema_version':'1','ingest_token':ingest_key,'max_audio_mb':10,'transcription_enabled':speech.status()['ready'],'auto_submit_llm':True,'auto_execute':False}
  @app.get('/api/speech/status')
  async def speech_status(_=Depends(viewer)):return speech.status()
  @app.get('/api/speech/jobs')

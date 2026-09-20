@@ -36,6 +36,7 @@ def wav_bytes(seconds=1, silent=False):
 class FakeRunner:
     def __init__(self):
         self.hold=threading.Event();self.calls=[];self.concurrent=0;self.peak=0;self.fail=False
+        self.text='내일 택배 보내기 <script>not executable</script>'
     async def transcribe(self,source,cfg,cancel,temp_root):
         self.concurrent+=1;self.peak=max(self.peak,self.concurrent);self.calls.append(str(source))
         try:
@@ -43,7 +44,7 @@ class FakeRunner:
                 if cancel.is_set():raise asyncio.CancelledError
                 await asyncio.sleep(.02)
             if self.fail:raise TranscriptionError('테스트 전사 실패')
-            return '내일 택배 보내기 <script>not executable</script>',1.0
+            return self.text,1.0
         finally:self.concurrent-=1
 
 
@@ -74,6 +75,17 @@ def wait(c,jid,statuses=('succeeded','failed','cancelled'),timeout=4):
     raise AssertionError('job did not settle: '+str(row))
 
 
+def wait_llm(app, voice_id, timeout=4):
+    end=time.monotonic()+timeout
+    while time.monotonic()<end:
+        with app.state.store.connect() as db:
+            row=db.execute('SELECT id,status FROM llm_requests WHERE source_voice_id=? ORDER BY created_at DESC LIMIT 1',(voice_id,)).fetchone()
+        if row and row['status'] not in {'queued','running'}:
+            return app.state.llm.get(row['id'])
+        time.sleep(.025)
+    raise AssertionError('automatic assistant request did not settle')
+
+
 def test_disabled_upload_no_file(tmp_path):
     a=create_app(tmp_path,weather_enabled=False)
     with TestClient(a) as c:
@@ -101,6 +113,47 @@ def test_complete_idempotent_no_task_and_private(enabled):
     assert c.get('/api/voice/'+job['voice_id']+'/audio',headers=a).content==wav_bytes()
     voice=c.get('/api/admin/overview',headers=a).json()['voice'][0]
     assert voice['job_status']=='succeeded' and voice['status']=='pending_review'
+
+
+
+def test_success_auto_submits_exactly_once_and_fast_read_skips_model(enabled):
+    app,c,r,a,_=enabled
+    r.text='오늘 할 일 확인해줘'
+    assert c.get('/api/speech/status').json()['auto_submit_llm'] is True
+    first=post(c,'auto-fast');assert first.status_code==202,first.text
+    job=wait(c,first.json()['id'])
+    req=wait_llm(app,job['voice_id'])
+    assert req['status']=='succeeded'
+    assert req['source_text']==r.text and req['assistant']['mode']=='auto'
+    assert req['assistant']['routing']['route']=='FAST_PATH'
+    assert req['assistant']['routing']['llm_called'] is False
+    assert not req['dispatch_attempted']
+    duplicate=post(c,'auto-fast').json()
+    assert duplicate['duplicate'] and duplicate['id']==job['id']
+    with app.state.store.connect() as db:
+        assert db.execute('SELECT count(*) FROM llm_requests WHERE source_voice_id=?',(job['voice_id'],)).fetchone()[0]==1
+
+
+def test_auto_submit_write_still_requires_confirmation(enabled):
+    app,c,r,a,_=enabled
+    r.text='오늘 할 일에 우유 사기 추가해'
+    job=wait(c,post(c,'auto-write').json()['id'])
+    req=wait_llm(app,job['voice_id'])
+    assert req['status']=='awaiting_confirmation'
+    assert req['assistant']['proposal']['intent']=='todo.create'
+    assert not app.state.store.tasks()
+
+
+def test_auto_submit_failure_does_not_rewrite_successful_stt(enabled):
+    app,c,r,a,_=enabled
+    async def broken(*_):
+        raise RuntimeError('test-only sink failure')
+    app.state.speech.set_transcript_sink(broken)
+    job=wait(c,post(c,'auto-sink-fail').json()['id'])
+    assert job['status']=='succeeded' and job['text']
+    assert 'Assistant 자동 전달에 실패' in app.state.speech.last_error
+    with app.state.store.connect() as db:
+        assert db.execute('SELECT count(*) FROM llm_requests').fetchone()[0]==0
 
 
 def test_device_ownership_and_revoke(enabled):
@@ -147,6 +200,7 @@ def test_cancel_running_and_retry(enabled):
 def test_failed_no_automatic_retry(enabled):
     app,c,r,a,_=enabled;r.fail=True;j=post(c).json();assert wait(c,j['id'])['status']=='failed'
     time.sleep(.1);assert len(r.calls)==1
+    with app.state.store.connect() as db:assert db.execute('SELECT count(*) FROM llm_requests').fetchone()[0]==0
     for n in [2,3]:
         assert c.post('/api/speech/jobs/'+j['id']+'/retry').status_code==200
         assert wait(c,j['id'])['attempts']==n

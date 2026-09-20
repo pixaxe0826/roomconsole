@@ -241,6 +241,7 @@ class SpeechHub:
         self.active_id = None
         self.active_cancel = None
         self.last_error = ''
+        self.on_transcribed = None
         with store.connect() as db:
             db.execute('''CREATE TABLE IF NOT EXISTS speech_jobs (
                 id TEXT PRIMARY KEY, voice_id TEXT NOT NULL UNIQUE REFERENCES voice(id) ON DELETE CASCADE,
@@ -253,6 +254,10 @@ class SpeechHub:
                 job_id TEXT NOT NULL REFERENCES speech_jobs(id) ON DELETE CASCADE,
                 attempt INTEGER NOT NULL, report TEXT NOT NULL, created_at TEXT NOT NULL,
                 PRIMARY KEY(job_id,attempt))''')
+
+    def set_transcript_sink(self, callback: Callable[[str, str, str], Awaitable[object]] | None) -> None:
+        """Connect successful STT to the existing assistant request pipeline."""
+        self.on_transcribed = callback
 
     def config(self) -> SpeechConfig:
         return self.override or SpeechConfig.read(self.data / 'speech-config.json')
@@ -275,7 +280,8 @@ class SpeechHub:
                 'max_seconds': cfg.max_seconds, 'max_bytes': cfg.max_bytes,
                 'max_pending': cfg.max_pending, 'queued': counts.get('queued', 0),
                 'running': counts.get('running', 0), 'reason': reason,
-                'auto_execute': False, 'local_only': True, 'accuracy': accuracy.public()}
+                'auto_execute': False, 'auto_submit_llm': self.on_transcribed is not None,
+                'local_only': True, 'accuracy': accuracy.public()}
 
     @staticmethod
     def owner(session: dict) -> str:
@@ -485,6 +491,7 @@ class SpeechHub:
                 text, duration = await self.runner.transcribe(source, self.config(), self.active_cancel, self.data/'speech-tmp')
             if self.active_cancel.is_set():
                 raise asyncio.CancelledError
+            succeeded = False
             with self.store.connect() as db:
                 if db.execute("UPDATE speech_jobs SET status='succeeded',duration=?,elapsed=?,updated_at=? WHERE id=? AND status='running'", (duration,time.monotonic()-start,utcnow(),jid)).rowcount:
                     db.execute("UPDATE voice SET text=?,status='pending_review' WHERE id=?", (text,vid))
@@ -492,7 +499,18 @@ class SpeechHub:
                         attempt = db.execute('SELECT attempts FROM speech_jobs WHERE id=?', (jid,)).fetchone()[0]
                         db.execute('INSERT INTO speech_diagnostics(job_id,attempt,report,created_at) VALUES(?,?,?,?)',
                                    (jid,attempt,serialize_report(report),utcnow()))
-            await self.changed('speech.succeeded', jid)
+                    succeeded = True
+            if succeeded:
+                await self.changed('speech.succeeded', jid)
+                if self.on_transcribed:
+                    try:
+                        # The sink reuses LLMHub.submit() with a deterministic key.
+                        # A sink failure must never rewrite successful STT as failed.
+                        await self.on_transcribed(jid, vid, text)
+                    except Exception:
+                        self.last_error = '전사는 완료됐지만 Assistant 자동 전달에 실패했습니다. 관리자 기록에서 수동 재전송하세요.'
+                        with contextlib.suppress(Exception):
+                            await self.changed('speech.auto_submit_failed', jid)
         except asyncio.CancelledError:
             # User cancellation has already changed status; shutdown becomes interrupted/failed.
             with self.store.connect() as db:

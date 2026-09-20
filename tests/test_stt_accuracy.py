@@ -195,7 +195,8 @@ def test_real_api_pipeline_report_access_and_delete(tmp_path):
         rich=c.get('/api/speech/jobs/'+jid,headers=admin).json();assert rich['text']=='manual edit' and rich['stt_diagnostics']['raw_transcript']!='manual edit'
         assert not c.get('/api/state').json()['tasks']
         with app.state.store.connect() as db:
-            assert db.execute('select count(*) from llm_requests').fetchone()[0]==0
+            llm_row=db.execute('select status,dispatch_attempted from llm_requests where source_voice_id=?',(job['voice_id'],)).fetchone()
+            assert llm_row is not None and llm_row['status']=='succeeded' and not llm_row['dispatch_attempted']
         assert c.delete('/api/voice/'+job['voice_id'],headers=admin).status_code==200
         with app.state.store.connect() as db:assert db.execute('select count(*) from speech_diagnostics').fetchone()[0]==0
 
