@@ -7,7 +7,7 @@
 | [프로젝트 README](../README.md) | 기능·빠른 시작·범위 |
 | [현재 상태](CURRENT_STATUS.md) | 실기기 운영 기준, 구현/미구현 경계 |
 | [설치](SETUP.md) | 일반 Python/Docker와 기존 데이터 유지 원칙 |
-| [V35/Termux](V35_TERMUX.md) | V35 상시 서버, runit, Tasker 부팅 자동화, 음성/HTTPS |
+| [V35/Termux](V35_TERMUX.md) | V35 상시 서버, runit, Tasker 부팅 자동화, 음성/HTTPS |\n| [V35 Git 업데이트](V35_GIT_UPDATE.md) | 기존 설치 Git 전환, main 동기화, 안전한 fast-forward·rollback |
 | [배포와 백업](DEPLOYMENT.md) | Windows/Docker/V35/TrueNAS 운영·백업 |
 | [GitHub 업로드](GITHUB_PUBLISH.md) | 최초 push와 보안 점검 |
 | [구조](ARCHITECTURE.md) | 상태·데이터 모델·권한 경계 |
