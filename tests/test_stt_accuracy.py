@@ -234,6 +234,11 @@ def test_profiles_preserve_speech_config(tmp_path):
 def test_cli_compare_same_input_and_no_db_or_config_edits(tmp_path,monkeypatch):
     mod=load_cli();root,cfg,store=tool_fixture(tmp_path);monkeypatch.setattr(mod,'BASE_SHA',mod.sha256(Path(cfg.model)))
     monkeypatch.setattr(mod,'port_closed',lambda:None)
+    # Establish the fixture's committed bytes before checking read-only behavior.
+    # A deferred WAL checkpoint during connection GC is not a compare() write.
+    from contextlib import closing
+    with closing(store.connect()) as snapshot_db:
+        assert tuple(snapshot_db.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()) == (0, 0, 0)
     db_before=(root/'data/room-hub.sqlite3').read_bytes();cfg_before=(root/'data/speech-config.json').read_bytes();policy_before=(root/'data/stt-accuracy.json').read_bytes()
     ref=root/'ref.txt';ref.write_text('오늘 남은 할 일 확인해줘')
     mod.compare(root,['legacy','hint','balanced'],1,reference_file=ref)

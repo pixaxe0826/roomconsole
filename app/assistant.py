@@ -18,7 +18,8 @@ from typing import Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, ValidationError
+from .fast_reads import match_read, execute_read, INTENT_NAMES
 from .models import TaskCreate
 from .store import uid, utcnow
 
@@ -33,10 +34,11 @@ CHAT_PROMPT = ('한국어로 질문에 직접 답하는 개인 비서다. 입력
                '할 일 DB나 실시간 정보는 이 대화에 제공되지 않았다. 조회·변경을 했다고 주장하지 마라.')
 PARSER_PROMPT = ('한국어 Room Hub 명령을 JSON으로 분류한다. 실행·답변하지 마라. '
                  '사용 가능: '+parser_description()+'. '
-                 'date_ref는 원문 날짜, title은 원문 제목. 모르면 null. '
+                 'date_ref는 원문 날짜, title은 원문 제목. date_ref/title/time이 없거나 모르면 JSON null. '
+                 'time은 HH:MM 또는 null만 사용. unknown 문자열을 슬롯에 쓰지 마라. '
                  '남은/미완료=pending, 완료된=completed, 그 외 all. '
                  'scope는 명시적 전체 변경만 all, 그 외 one. '
-                 '날짜·조건을 지어내지 마라. 부정·모호·미지원은 unknown. JSON만 출력.')
+                 '날짜·조건을 지어내지 마라. 부정·모호·미지원은 intent만 unknown. JSON만 출력.')
 
 
 def dump(x):
@@ -49,13 +51,22 @@ def digest(x):
 
 class Proposal(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
-    intent: Literal['todo.create','todo.list','todo.complete','todo.uncomplete','todo.delete',
+    intent: Literal['memo.read','todo.create','todo.list','todo.complete','todo.uncomplete','todo.delete',
                     'calendar.query','time.query','weather.query','chat.general','unknown']
     date_ref: str | None = Field(default=None, max_length=40)
     title: str | None = Field(default=None, max_length=240)
     time: str | None = Field(default=None, pattern=r'^([01]\d|2[0-3]):[0-5]\d$')
     status: Literal['all','pending','completed'] = 'all'
     scope: Literal['one','all'] = 'one'
+
+    @field_validator('time', 'date_ref', mode='before')
+    @classmethod
+    def missing_optional_slot(cls, value):
+        # Missing is null, not a fabricated clock/date. Other invalid values
+        # still fail strict validation and become a normal clarification.
+        if isinstance(value, str) and value.strip().casefold() in {'', 'unknown', 'none', 'null', 'n/a'}:
+            return None
+        return value
 
 
 class Confirmation(BaseModel):
@@ -66,9 +77,9 @@ class Confirmation(BaseModel):
 def schema():
     # Flat/short schema is deliberately small for a 1024-token local model.
     return {'type':'object','properties':{
-        'intent':{'type':'string','enum':INTENTS},
+        'intent':{'type':'string','enum':[i for i in INTENTS if i != 'memo.read']},
         'date_ref':{'type':['string','null']}, 'title':{'type':['string','null']},
-        'time':{'type':['string','null']},
+        'time':{'type':['string','null'],'pattern':r'^([01]\d|2[0-3]):[0-5]\d$'},
         'status':{'type':'string','enum':['all','pending','completed']},
         'scope':{'type':'string','enum':['one','all']}},
         'required':['intent','date_ref','title','time','status','scope'],'additionalProperties':False}
@@ -113,13 +124,21 @@ def ambiguous(text):
     return False
 
 
-def detect(raw, at, tz, mode='auto'):
+def _detect(raw, at, tz, mode='auto'):
     normalized, notes=normalize(raw)
     s=re.sub(r'[?？!！.。]+$','',normalized).strip()
     base={'protocol':PROTOCOL,'mode':mode,'raw':raw,'normalized':normalized,'normalization_notes':notes,
           'reference_at':at,'timezone':tz,'calls':[],'route':'chat','proposal':None,'validation':None,
           'state':'new','final_text':None,'origin':'llm','action_key':None,
           'time_context':clock_context(at,tz),'capability_version':1}
+    # Clear read requests win even if an old client selected chat/legacy mode.
+    # Unknown inputs and all writes still follow the existing mode contract.
+    try:
+        plan=match_read(s,at,tz)
+        if plan:
+            return base|{'route':'rule','origin':'server','proposal':plan.proposal(),'fast_read':plan.data()}
+    except ValueError as exc:
+        return base|{'route':'clarify','state':'needs_clarification','origin':'server','final_text':str(exc)}
     if mode=='chat':return base
     unavailable=unsupported_personal(s)
     if unavailable:
@@ -160,9 +179,7 @@ def detect(raw, at, tz, mode='auto'):
     if p is None and re.search(r'(몇\s*시|현재\s*시간|지금\s*시간|오늘\s*날짜|며칠|무슨\s*요일)',s):p=Proposal(intent='time.query',date_ref=day)
     if p is None and re.fullmatch(r'(?:(?:오늘|내일|모레)\s*)?(?:현재\s*)?날씨(?:를|가)?\s*(?:어때|알려\s*줘|알려\s*주세요|보여\s*줘|확인해\s*줘)(?:요)?',s):p=Proposal(intent='weather.query',date_ref=day)
     if p is None and re.fullmatch(r'(?:오늘\s*)?(?:비|눈)\s*(?:와|오나|올까|오나요)',s):p=Proposal(intent='weather.query',date_ref='오늘' if '오늘' in s else None)
-    if p is None and re.search(r'달력|일정',s) and re.search(r'보여|확인|알려|조회',s):
-        if re.search(r'이번\s*주|이번\s*달',s):p=Proposal(intent='calendar.query',date_ref='이번 주' if re.search(r'이번\s*주',s) else '이번 달')
-        elif dm:p=Proposal(intent='calendar.query',date_ref=day)
+    # Calendar reads must match the anchored grammar above; do not drop filters.
     if p:
         return base|{'route':'rule','proposal':p.model_dump(),'origin':'server'}
     if domain:
@@ -173,6 +190,18 @@ def detect(raw, at, tz, mode='auto'):
                          'final_text':'어느 날짜의 할 일을 볼까요? 오늘·내일 또는 정확한 날짜로 다시 요청하세요.'}
         return base|{'route':'parser','origin':'server'}
     return base
+
+
+def detect(raw, at, tz, mode='auto'):
+    start=time.perf_counter()
+    record=_detect(raw,at,tz,mode)
+    plan=record.get('fast_read')
+    route='FAST_PATH' if plan else 'LLM_FALLBACK' if record['route'] in {'parser','chat'} else 'EXISTING_RULE'
+    record['routing']={'route':route,'route_reason':plan['pattern'] if plan else record['route'],
+                       'resolved_intent':INTENT_NAMES.get(plan['intent']) if plan else (record.get('proposal') or {}).get('intent'),
+                       'resolved_context':{},'source_of_truth':None,'llm_called':False,
+                       'router_seconds':time.perf_counter()-start,'llm_seconds':0.0}
+    return record
 
 
 def payload(record, cfg):
@@ -198,6 +227,8 @@ def payload(record, cfg):
 def grounded(proposal, record):
     """Server allowlist + source grounding, even for schema-valid model output."""
     p=Proposal.model_validate(proposal);s=record['normalized'];flat=re.sub(r'\s+','',s)
+    if p.intent=='memo.read':
+        raise ValueError('메모 읽기는 서버의 명확한 읽기 전용 분기에서만 처리합니다. 메모를 읽어 달라고 다시 요청하세요.')
     if p.intent in WRITES:
         if ambiguous(s):raise ValueError('부정·조건·반복·인용 요청은 실행하지 않습니다. 한 작업으로 다시 말해 주세요.')
         evidence={'todo.create':r'추가|등록','todo.complete':r'완료','todo.uncomplete':r'완료\s*취소|미완료','todo.delete':r'삭제|지워'}
@@ -210,6 +241,8 @@ def grounded(proposal, record):
     if p.intent in READS or p.intent in WRITES:
         if p.intent in {'todo.list','calendar.query'}:
             if not is_personal_task_request(s): raise ValueError('원문에서 할 일 조회 요청을 확인하지 못했습니다.')
+            if re.search(r'오전|오후|아침|저녁|밤|낮|\d+\s*시',s):
+                raise ValueError('시간대 필터를 안전하게 해석하지 못했습니다. 오늘 오전/오후 일정처럼 다시 요청하세요.')
             if ambiguous(s) and known_read(s,record['reference_at'],record['timezone']) is None:raise ValueError('부정·조건·반복·인용 요청의 범위가 불명확합니다. 한 요청으로 다시 말해 주세요.')
             if re.search(r'추가|등록|삭제|지워|완료\s*(?:처리|해)|미완료로',s):raise ValueError('변경 요청을 목록 조회로 바꿀 수 없습니다.')
             if re.search(r'제외|빼고|말고|그중|중에서|카테고리|우선순위|제목|관련|만\s*(?:보여|알려|확인)|부터|까지',s):
@@ -235,6 +268,8 @@ def grounded(proposal, record):
                 elif p.status!='all':raise ValueError('원문에 없는 일괄 필터를 제안했습니다.')
     if p.intent in {'todo.create','todo.complete','todo.uncomplete','todo.delete'} and p.scope=='one' and not p.title:
         raise ValueError('변경할 할 일의 제목을 정확히 말해 주세요.')
+    if p.intent=='todo.create' and p.time is None and re.search(r'(?:\d{1,2}|한|두|세|네|다섯|여섯|일곱|여덟|아홉|열한|열두|열)\s*(?:시|:)',s):
+        raise ValueError('원문 시각이 분석 결과에서 누락되었습니다. 오전·오후와 시간을 다시 확인해 주세요.')
     # Time returned by the model must match an actual time expression in source.
     if p.time:
         found=False
@@ -286,9 +321,23 @@ class AssistantEngine:
                 delta=(aware(record['executed_at'],record['timezone'])-aware(record['reference_at'],record['timezone'])).total_seconds()
                 if proposal.get('intent')!='time.query' and (abs(delta)>900 or aware(record['reference_at'],record['timezone']).date()!=aware(record['executed_at'],record['timezone']).date()):
                     raise ValueError('요청 기준 시각이 오래되었거나 날짜가 바뀌었습니다. 현재 시각으로 새 요청을 만드세요.')
+            if record.get('fast_read'):
+                plan=match_read(record['normalized'],record['reference_at'],record['timezone'])
+                if plan is None or plan.data()!=record['fast_read'] or plan.proposal()!=proposal:
+                    raise ValueError('조회 계획이 원문과 다릅니다. 새 요청으로 다시 확인해 주세요.')
+                snapshot,text,context=execute_read(self.store,plan,record['reference_at'],record['timezone'])
+                record.update(state='succeeded',validation='server_read',proposal=plan.proposal(),
+                              capability=require(plan.intent).public(),tool_result=snapshot,final_text=text)
+                record['routing'].update(resolved_context=context,source_of_truth=snapshot['source'],llm_called=False)
+                if plan.intent!='memo.read':
+                    record['resolved_date']=resolve_range(plan.date_ref,record['reference_at'],record['timezone']).data()
+                if plan.intent=='memo.read':record['memo_read']=True
+                self.put(rid,record)
+                return record
             p=grounded(proposal,record)
             if p.intent in READS|WRITES:record['capability']=require(p.intent).public()
             record['proposal']=p.model_dump()
+            record.setdefault('routing',{}).update(resolved_intent=INTENT_NAMES.get(p.intent,p.intent))
             if p.intent=='unknown':raise ValueError('요청을 확실히 이해하지 못했습니다. 작업 제목과 날짜를 한 문장으로 다시 말해 주세요.')
             if p.intent=='chat.general':raise ValueError('일반 대화라면 전송 모드를 일반 대화로 선택해 다시 보내 주세요.')
             if p.intent=='time.query':
@@ -338,6 +387,7 @@ class AssistantEngine:
                     if lines:text+='\n'+'\n'.join(lines)
                     if snapshot['truncated']:text+='\n처음 50개를 표시했습니다. 전체 목록은 할 일 위젯에서 확인하세요.'
                     record.update(state='succeeded',validation='server_read',tool_result=snapshot,final_text=text)
+                    record.setdefault('routing',{}).update(source_of_truth=snapshot['source'],resolved_context={'range':snapshot['range'],'status':p.status,'timezone':record['timezone']})
                 else:
                     with self.store.connect() as db:
                         receipt=db.execute('SELECT receipt_json FROM assistant_effects WHERE action_key=?',(record['action_key'],)).fetchone()
@@ -371,6 +421,10 @@ class AssistantEngine:
                             preview['expires_at']=time.time()+600;preview['reference_timezone']=record['timezone']
                             record.update(state='awaiting_confirmation',validation='confirmation_required',preview=preview,preview_sha256=digest(preview),
                                           final_text=summary+'\n아직 변경하지 않았습니다. 관리자에서 내용을 확인하고 실행하세요.')
+        except ValidationError as exc:
+            record.update(state='needs_clarification',validation='invalid_model_proposal',
+                          validation_fields=[list(e['loc']) for e in exc.errors()],
+                          final_text='필요한 값이 없거나 형식이 맞지 않습니다. 날짜·제목·시간을 확인해 다시 요청해 주세요. 변경하지 않았습니다.')
         except (ValueError,TypeError) as exc:
             record.update(state='needs_clarification',validation='rejected',final_text=str(exc)[:1200])
         self.put(rid,record);return record

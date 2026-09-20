@@ -7,6 +7,8 @@ No model calls or database mutations occur on either read path.
 """
 from __future__ import annotations
 import json
+import sqlite3
+from .life import memo_result_is_public
 from fastapi import HTTPException
 
 WIDGET_TYPE = 'llm-response'
@@ -48,6 +50,9 @@ def entry(store, rid: str) -> dict:
             WHERE id=? AND started_at IS NOT NULL AND (dispatch_attempted=1 OR (id IN (SELECT request_id FROM assistant_runs) AND status NOT IN ('prepared','queued')))""", (rid,)).fetchone()
     if row is None:
         raise HTTPException(404, '전송된 LLM 기록이 없거나 삭제되었습니다.')
+    with store.connect() as db:
+        agent = db.execute('SELECT record_json FROM assistant_runs WHERE request_id=?', (rid,)).fetchone()
+    agent = _object(agent[0]) if agent else {}
     result = _object(row['response_json'])
     cfg = _object(row['config_json'])
     output = result.get('output')
@@ -55,6 +60,16 @@ def entry(store, rid: str) -> dict:
     # Never stringify an object that could contain extra/raw provider fields.
     output = output if isinstance(output, str) else None
     refusal = refusal if isinstance(refusal, str) else None
+    input_text = row['source_text']
+    if agent.get('memo_read'):
+        try:
+            visible = memo_result_is_public(store, agent.get('tool_result') or {})
+        except (ValueError, TypeError, sqlite3.Error):
+            visible = False
+        if not visible:
+            input_text = '메모 조회'
+            output = '이 메모 조회 결과는 관리자 기록에서 확인해 주세요. 현재 공유되지 않은 메모 내용은 표시하지 않습니다.'
+            refusal = None
     if output:
         kind = 'text'
     elif refusal:
@@ -69,6 +84,6 @@ def entry(store, rid: str) -> dict:
         'id': row['id'], 'status': row['status'], 'sent_at': row['started_at'],
         'updated_at': row['updated_at'], 'finished_at': row['finished_at'],
         'model': cfg.get('model') if isinstance(cfg.get('model'), str) else '',
-        'input': row['source_text'], 'output': output, 'refusal': refusal,
+        'input': input_text, 'output': output, 'refusal': refusal,
         'output_kind': kind, 'truncated': result.get('finish_reason') == 'length',
     }
