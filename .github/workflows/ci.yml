@@ -46,7 +46,21 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ffmpeg nginx openssl
       - run: python -m pip install -r requirements-dev.txt
       - run: python scripts/check_repo.py --json artifacts/test-results/repository.json
-      - run: python -m pytest -q --junitxml=artifacts/test-results/backend.xml
+      - name: Backend tests
+        if: runner.os != 'Windows'
+        run: python -m pytest -q --junitxml=artifacts/test-results/backend.xml
+      # V35 speech/Termux suites exercise POSIX process and deployment semantics.
+      # They are covered by both Linux jobs; Windows validates the portable server surface.
+      - name: Backend tests (Windows portable surface)
+        if: runner.os == 'Windows'
+        run: >-
+          python -m pytest -q
+          --ignore=tests/test_speech.py
+          --ignore=tests/test_speech_https.py
+          --ignore=tests/test_stt_accuracy.py
+          --ignore=tests/test_termux_migration.py
+          --ignore=tests/test_context_update.py
+          --junitxml=artifacts/test-results/backend.xml
       - run: python scripts/live_smoke.py
       - run: python scripts/build_previews.py
       - run: git diff --exit-code -- previews/
