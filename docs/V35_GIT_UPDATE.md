@@ -166,7 +166,7 @@ git checkout feature/...
 git reset --hard origin/main
 ```
 
-V35에서 임시로 코드를 수정하면 다음 업데이트가 의도적으로 중단됩니다. 필요한 수정은 개발 브랜치 → PR → Merge 절차로 GitHub에 먼저 반영하세요.
+V35에서 임시로 코드를 수정하면 다음 업데이트가 의도적으로 중단됩니다. 필요한 수정은 개발 브랜치 → PR → Merge 절차로 GitHub에 먼저 반영하세요.\n\n최초 전환 스크립트는 로컬 저장소에 `pull.ff=only`를 설정하고 `origin`의 **push URL을 비활성화**합니다. fetch/pull URL은 정상 GitHub 주소를 유지하므로 업데이트는 가능하지만 V35에서의 실수 push는 실패합니다.
 
 ## 7. 현재 배포 경로를 유지하는 이유
 
