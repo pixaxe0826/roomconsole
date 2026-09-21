@@ -127,6 +127,10 @@ widgets/
 
 미리보기는 합성 데이터이고 실제 운영 데이터와 동기화되지 않습니다.
 
+## Widget 서비스 호출 규격
+
+[Widget Protocol 1.0](docs/WIDGET_PROTOCOL.md)은 기존 Memo/Todo/Calendar 서비스 위의 typed Adapter 계층입니다. 관리자 인증된 읽기 API와 신뢰된 서버 호출용 CRUD를 제공하며, LLM 연결·새 승인 UI·Android 알람 제어는 포함하지 않습니다.
+
 ## 개발과 검증
 
 ```bash

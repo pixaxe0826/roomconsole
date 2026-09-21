@@ -489,7 +489,7 @@ def register_routes(app, service: LifeService, admin, viewer, changed):
         return result
 
 
-def memo_snapshot(store, selector='current'):
+def memo_snapshot(store, selector='current', *, widget_id=None):
     """Read-only assistant view of the existing note storage, in one snapshot.
 
     Current means the first saved note-widget's DEFAULT card, not a fabricated
@@ -506,6 +506,12 @@ def memo_snapshot(store, selector='current'):
         layout = kv('layout', {})
         widgets = [w for w in layout.get('widgets', []) if w.get('type') == 'note']
         widget = widgets[0] if widgets else None
+        if widget_id is not None:
+            widget = next((w for w in widgets if w['id'] == widget_id), None)
+            if widget is None:
+                raise LookupError('배치된 메모 위젯이 없습니다.')
+            if selector != 'current':
+                raise ValueError('명시한 메모 위젯의 현재 카드만 조회할 수 있습니다.')
         revision = db.execute('SELECT revision FROM hub_life_meta WHERE id=1').fetchone()[0]
         result = {'ok': True, 'source': 'room_hub_sqlite.hub_notes', 'selector': selector,
                   'selection_policy': 'default_widget_card', 'widget_id': widget['id'] if widget else None,
