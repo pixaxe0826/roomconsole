@@ -11,7 +11,6 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import importlib
-import gc
 import json
 import os
 from pathlib import Path
@@ -20,6 +19,8 @@ import time
 from types import SimpleNamespace
 from unittest.mock import patch
 import uuid
+
+from .storage import owned_sqlite
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +64,7 @@ class Runtime:
             clean['HUB_LLM_API_KEY'] = os.environ['HUB_LLM_API_KEY']
         clean['HUB_DATA_DIR'] = str(self.root / 'import-only')
         self.stack.enter_context(patch.dict(os.environ, clean, clear=True))
+        self.stack.enter_context(owned_sqlite(self.root))
         from app.main import create_app
         from app.llm import ChatBackend, LLMConfig, LLMFailure
         self.LLMFailure = LLMFailure
@@ -393,5 +395,4 @@ class Runtime:
                 await self.hub.close()
         finally:
             self.stack.close()
-            gc.collect()  # release sqlite context-manager cycles before Windows rmtree
             self.tmp.cleanup()

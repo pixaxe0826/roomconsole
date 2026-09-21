@@ -245,3 +245,12 @@ Rollback is a reviewed revert PR plus the existing Git updater after its merge.
 The benchmark has no production schema migration or service changes. Its result
 folders are independent, can be archived or explicitly removed, and are not
 required to run the application. Never delete the production `data/` directory.
+
+## Portable SQLite cleanup
+
+The isolated worker installs an owned SQLite connection factory before application
+creation, including its import-time disposable app. Transaction contexts retain
+SQLite commit/rollback behavior and close their handle on exit. This prevents
+exception tracebacks from retaining open files on Windows. The factory rejects
+paths outside the temporary tree and is restored on Runtime.close(); deployed
+application connections and business semantics are not modified.

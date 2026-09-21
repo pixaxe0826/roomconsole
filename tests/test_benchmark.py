@@ -322,3 +322,50 @@ def test_group_consistency_is_separate_from_group_success(suite, tmp_path):
     assert metrics['paraphrase_group_success']['rate'] == 0
     second['actual']['slots']['memo_id'] = 'different-target'
     assert summarize([first,second])['paraphrase_consistency']['rate'] == 0
+
+
+@pytest.mark.parametrize('fail_transaction', [False, True])
+def test_owned_sqlite_closes_retained_handles_and_preserves_transactions(tmp_path, fail_transaction):
+    import sqlite3
+    from benchmarks.storage import owned_sqlite
+    original = sqlite3.connect
+    path = tmp_path / 'owned.sqlite3'
+    retained = []
+    with owned_sqlite(tmp_path):
+        with sqlite3.connect(path) as setup:
+            setup.execute('CREATE TABLE evidence(value INTEGER)')
+        try:
+            with sqlite3.connect(path) as db:
+                retained.append(db)  # Strong reference survives cleanup and GC.
+                db.execute('INSERT INTO evidence VALUES(1)')
+                if fail_transaction: raise ValueError('synthetic transaction failure')
+        except ValueError:
+            pass
+        with pytest.raises(sqlite3.ProgrammingError):
+            retained[0].execute('SELECT 1')
+        with sqlite3.connect(path) as check:
+            assert check.execute('SELECT count(*) FROM evidence').fetchone()[0] == int(not fail_transaction)
+        outside = tmp_path.parent / 'not-owned.sqlite3'
+        with pytest.raises(RuntimeError, match='outside'):
+            sqlite3.connect(outside)
+        assert not outside.exists()
+    assert sqlite3.connect is original
+    path.unlink()  # Also exercises Windows file-handle release.
+
+
+def test_runtime_cleanup_closes_retained_store_context(suite):
+    import sqlite3
+    original = sqlite3.connect
+    async def run():
+        runtime = Runtime(suite.fixtures, suite.manifest['reference_datetime'], suite.manifest['timezone'], {'llm':'disabled'})
+        root = runtime.root
+        try:
+            with runtime.store.connect() as retained:
+                retained.execute('SELECT 1')
+            await runtime.run(TextInput('메모 내용 좀 읽어 볼래', suite.manifest['reference_datetime'], {}))
+        finally:
+            await runtime.close()
+        assert not root.exists()
+        with pytest.raises(sqlite3.ProgrammingError): retained.execute('SELECT 1')
+    asyncio.run(run())
+    assert sqlite3.connect is original
