@@ -76,7 +76,8 @@ The new mode is automatic routing, not automatic writes or automatic audio sendi
 1–600-second local countdowns may execute immediately after authenticated server
 validation. The existing note/task/calendar/alarm confirmation checks are unchanged.
 Paired displays may call only `/api/timers` start/stop when a timer widget is installed;
-this does not grant general Protocol or other CRUD access. Timers are shared in this
-single-user workspace. Duration/target grounding, actor-scoped durable idempotency,
+this does not grant general Protocol or other CRUD access. A placed widget ID owns
+one running timer; scoped controls cannot target another card. The same ID remains
+shared across displays in this single-user workspace. Duration/target grounding, actor-scoped durable idempotency,
 CSRF, revocation and resource caps remain enforced. Foreground audio is opt-in and
 is not an OS alarm or a guarantee of background delivery. See [TIMERS](docs/TIMERS.md).

@@ -1,5 +1,17 @@
 {
-  "id": "timers", "name": "타이머", "description": "1~600초, 1초 단위 카운트다운. 여러 타이머를 동시에 시작·종료합니다. 현재 타이머는 가장 최근 시작한 실행 중 타이머입니다.",
-  "icon": "clock", "apiVersion": 1, "version": "1.0.0", "entry": "widget.js", "style": "style.css",
-  "defaultSize": {"w": 2, "h": 2}, "configDefaults": {"duration_seconds": 240}
+  "id": "timers",
+  "name": "타이머",
+  "description": "위젯 하나당 독립 타이머 하나. 1초~10분을 분·초로 설정하고 한 화면에서 각각 시작·종료합니다.",
+  "icon": "clock",
+  "apiVersion": 1,
+  "version": "1.1.0",
+  "entry": "widget.js",
+  "style": "style.css",
+  "defaultSize": {
+    "w": 2,
+    "h": 2
+  },
+  "configDefaults": {
+    "duration_seconds": 240
+  }
 }

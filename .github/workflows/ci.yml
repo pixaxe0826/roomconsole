@@ -72,6 +72,7 @@ jobs:
           tests/test_routing_confidence.py
           tests/test_remote_update.py
           tests/test_timers.py
+          tests/test_timer_instances.py
           tests/test_timer_bridge.py
           --timeout=30
           --timeout-method=thread

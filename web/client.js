@@ -55,7 +55,7 @@ async function render({preserveScroll=true}={}){
  const generation=++renderId;await loadWidgets();if(generation!==renderId||stopped)return;
  const scrolls=new Map();
  document.querySelectorAll('.widget .todo-list').forEach(el=>{if(preserveScroll||el.classList.contains('all-todos-list'))scrolls.set(scrollKey(el),el.scrollTop)});
- const timerFocus=document.activeElement?.hasAttribute('data-timer-duration')?document.activeElement.closest('[data-widget-id]')?.dataset.widgetId:null;
+ const timerFocus=document.activeElement?.hasAttribute('data-timer-duration')?{id:document.activeElement.closest('[data-widget-id]')?.dataset.widgetId,field:document.activeElement.dataset.timerField}:null;
  const active=document.activeElement,activeId=active?.dataset.completeTask,activeArea=active?.closest('#focus')?'#focus':'#grid';
  cleanups.forEach(fn=>fn());cleanups=[];
  document.body.classList.toggle('dark',state.settings.theme==='dark');$('#hubTitle').textContent=state.settings.title;
@@ -66,7 +66,7 @@ async function render({preserveScroll=true}={}){
  if(expanded){const instance=state.layout.widgets.find(w=>w.id===expanded);$('#focusTitle').textContent=instance.title||state.widgets.find(w=>w.id===instance.type)?.name||instance.type;focusContent.append(widgetNode(instance,true))}
  document.querySelectorAll('.widget .todo-list').forEach(el=>{el.scrollTop=scrolls.get(scrollKey(el))||0});
  if(activeId){const el=[...document.querySelectorAll(activeArea+' [data-complete-task]')].find(b=>b.dataset.completeTask===activeId);if(el&&!el.disabled)el.focus({preventScroll:true})}
- if(timerFocus){const el=[...document.querySelectorAll(activeArea+' [data-widget-id]')].find(e=>e.dataset.widgetId===timerFocus)?.querySelector('[data-timer-duration]');if(el&&!el.disabled)el.focus({preventScroll:true});}
+ if(timerFocus){const el=[...document.querySelectorAll(activeArea+' [data-widget-id]')].find(e=>e.dataset.widgetId===timerFocus.id)?.querySelector('[data-timer-field="'+timerFocus.field+'"]');if(el&&!el.disabled)el.focus({preventScroll:true});}
  presence();
 }
 function presence(){socket?.send({type:'presence',view:expanded||'home',viewport:`${innerWidth}x${innerHeight}`})}
@@ -195,7 +195,8 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!demo)ref
 window.RoomDisplay={selectDate,openWidget,home,refresh,getState:()=>state,updateTimers:next=>{
  if(stopped||!state||!next||!state.capabilities?.timer_control)return;
  if(state.timers&&(state.timers.revision>next.revision||state.timers.revision===next.revision&&state.timers.server_time>next.server_time))return;
- const changed=JSON.stringify(state.timers?.items)!==JSON.stringify(next.items);state.timers=next;window.RoomTimers?.sync(next,demo||online);if(changed)render();
+ const stable=items=>JSON.stringify((items||[]).map(({remaining_seconds,...item})=>item));
+ const changed=stable(state.timers?.items)!==stable(next.items)||state.timers?.scheduler_error!==next.scheduler_error;state.timers=next;window.RoomTimers?.sync(next,demo||online);if(changed)render();
 },updateLife:next=>{
  if(stopped||!state||!next||state.life&&state.life.revision>next.revision)return;
  const changed=JSON.stringify(state.life?.notes)!==JSON.stringify(next.notes)||JSON.stringify(state.life?.alarms)!==JSON.stringify(next.alarms)||state.life?.scheduler?.error!==next.scheduler?.error;

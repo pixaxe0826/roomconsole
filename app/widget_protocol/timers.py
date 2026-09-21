@@ -12,6 +12,7 @@ from ..timers import TimerInput, TimerStart, TimerStop
 
 class TimerData(Contract):
     id: str
+    widget_id: str | None = None
     label: str
     duration_seconds: int = Field(ge=1, le=600)
     state: Literal['running', 'stopped', 'expired']
