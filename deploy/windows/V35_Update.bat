@@ -19,7 +19,8 @@ echo ========================================
 echo       LG V35 Room Hub Git Update
 echo ========================================
 echo Host: %HOST%  Port: %PORT%  User: %USER%
-echo Merge the reviewed PR first. This tool waits for successful main CI.
+echo Run this only after reviewing and merging the PR and confirming main CI is green.
+echo This tool does NOT query GitHub Actions; it deploys the current origin/main.
 echo SSH may ask for your existing password or a first-use host key check.
 echo Never accept a changed host key without verifying the V35.
 echo.
@@ -31,15 +32,15 @@ rem Extract the embedded script as UTF-8 WITHOUT BOM and with LF (not CRLF).
 powershell.exe -NoProfile -Command "$ErrorActionPreference='Stop'; $s=[IO.File]::ReadAllText($env:RH_SELF); $m=':__ROOM_HUB_REMOTE__'; $p=$s.Substring($s.LastIndexOf($m)+$m.Length).TrimStart([char]13,[char]10).Replace([string][char]13,''); [IO.File]::WriteAllText($env:RH_PAYLOAD,$p,(New-Object Text.UTF8Encoding($false)))"
 if errorlevel 1 goto :extract_failed
 
-echo Connecting and updating. Do not close this window during deployment...
+echo Connecting and updating current origin/main. Do not close this window...
 ssh.exe -T -p %PORT% -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=8 %USER%@%HOST% "bash -s" < "%RH_PAYLOAD%"
 set "RH_RC=%ERRORLEVEL%"
 del /q "%RH_PAYLOAD%" >nul 2>&1
 if not "%RH_RC%"=="0" goto :update_failed
 
 echo.
-echo [SUCCESS] Git update, health and stable runit RUN verified. SSH has closed.
-echo Closing this window in 5 seconds...
+echo [SUCCESS] Git update, exact source sync, health and stable runit RUN verified.
+echo SSH has closed. Closing this window in 5 seconds...
 timeout /t 5 /nobreak >nul 2>&1
 exit /b 0
 
@@ -85,6 +86,7 @@ esac
 export GIT_TERMINAL_PROMPT=0
 git -C "$ROOT" fetch --prune origin main
 TARGET="$(git -C "$ROOT" rev-parse origin/main)"
+echo "[TARGET] origin/main $TARGET"
 TEMP_RUN="$(mktemp -d "$HOME/.room-hub-ssh-update.XXXXXX")"
 trap 'rm -rf -- "$TEMP_RUN"' EXIT
 # Git objects only: never patch operational tracked files to repair an updater.
