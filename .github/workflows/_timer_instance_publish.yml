@@ -1,0 +1,93 @@
+name: Temporary independent timer source publication
+on:
+  push:
+    branches: [automation/timer-instance-publish-20260922]
+    paths: [.github/workflows/_timer_instance_publish.yml]
+permissions:
+  contents: write
+jobs:
+  materialize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ca70421e53e7b36fff442d5e0f5bca94b0ef025f
+          persist-credentials: false
+      - name: Reconstruct and verify source blobs without modifying refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYTHONDONTWRITEBYTECODE: '1'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, os, pathlib, subprocess, urllib.request
+          base = 'ca70421e53e7b36fff442d5e0f5bca94b0ef025f'
+          expected_tree = '3148047b3e5861f603f0454484732f9681e11427'
+          def git(*args):
+              return subprocess.check_output(['git', *args])
+          def digest(data):
+              return hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+          def api(path, payload=None):
+              req = urllib.request.Request('https://api.github.com/repos/pixaxe0826/roomconsole/' + path,
+                  data=None if payload is None else json.dumps(payload, ensure_ascii=False).encode('utf-8'),
+                  headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                           'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json',
+                           'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'roomconsole-timer-publication'})
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  return json.load(response)
+          assert git('rev-parse', 'HEAD').decode().strip() == base
+          chunks = ['ffc610600b92ad5714d9d73c15ae8cb8ade05608',
+                    'ce51deb351e897ef59a5c56c97ee35b46ddd9ed8',
+                    '7a9294bb22d4ea9728d1f0f9155325d83dd5f5b6']
+          encoded = []
+          for sha in chunks:
+              raw = base64.b64decode(api('git/blobs/' + sha)['content'])
+              assert digest(raw) == sha
+              encoded.append(raw.decode('ascii'))
+          payload = lzma.decompress(base64.b64decode(''.join(encoded), validate=True))
+          assert len(payload) == 65540
+          assert hashlib.sha256(payload).hexdigest() == 'f4aaf45ad610ab6ede7a105ed171846deaedb83e1a89afd485a245ead5556b61'
+          files = json.loads(payload)
+          allowed = {'.github/workflows/ci.yml', 'AGENTS.md', 'README.md', 'SECURITY.md',
+                     'app/main.py', 'app/timers.py', 'app/widget_protocol/timers.py',
+                     'docs/TIMERS.md', 'docs/WIDGET_PROTOCOL.md',
+                     'scripts/timer_transport_regression.js', 'scripts/timers_browser.py',
+                     'tests/test_timer_instances.py', 'web/client.html', 'web/client.js',
+                     'web/timers.js', 'widgets/timers/manifest.json',
+                     'widgets/timers/style.css', 'widgets/timers/widget.js'}
+          previews = {'previews/all_tasks_preview.html', 'previews/client_preview.html',
+                      'previews/llm_widget_preview.html', 'previews/manager_preview.html',
+                      'previews/notes_alarms_preview.html', 'previews/sample_state.json'}
+          assert set(files) == allowed
+          for path, spec in files.items():
+              target = pathlib.Path(path)
+              if spec['base_blob'] is None:
+                  assert not target.exists()
+                  old = b''
+              else:
+                  old = git('show', base + ':' + path)
+                  assert digest(old) == spec['base_blob']
+              lines = old.decode('utf-8').splitlines(keepends=True)
+              for start, end, text in reversed(spec['edits']):
+                  assert 0 <= start <= end <= len(lines)
+                  lines[start:end] = text.splitlines(keepends=True)
+              data = ''.join(lines).encode('utf-8')
+              assert digest(data) == spec['result_blob'], path
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(data)
+          subprocess.run(['python3', 'scripts/build_previews.py'], check=True)
+          subprocess.run(['git', 'add', '--', *sorted(allowed | previews)], check=True)
+          assert git('write-tree').decode().strip() == expected_tree, 'Validated tree mismatch'
+          changed = set(git('diff', '--cached', '--name-only').decode().splitlines())
+          assert changed == allowed | previews
+          subprocess.run(['git', 'diff', '--cached', '--check'], check=True)
+          for path in sorted(changed):
+              data = pathlib.Path(path).read_bytes()
+              expected = digest(data)
+              result = api('git/blobs', {'content': data.decode('utf-8'), 'encoding': 'utf-8'})
+              assert result['sha'] == expected, path
+              print(path, expected, flush=True)
+          print('SOURCE_BLOBS_VERIFIED=24; TREE=' + expected_tree)
+          print('No branch refs, PRs, deployments, production data or benchmark code were modified by this job.')
+          PY
