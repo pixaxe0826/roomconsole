@@ -1,0 +1,23 @@
+{
+  "name": "Room Hub Assistant Benchmark V1",
+  "version": "1.0.0",
+  "language": "ko-KR",
+  "created_for": "Room Hub local voice assistant",
+  "reference_datetime": "2026-09-21T09:00:00+09:00",
+  "timezone": "Asia/Seoul",
+  "case_count": 250,
+  "unique_instruction_count": 100,
+  "paraphrase_count": 150,
+  "audio_included": false,
+  "scoring_intent": "Evaluate semantic/task correctness independent of implementation route; route_hint is advisory unless a future runner opts into route scoring.",
+  "third_party_utterances_copied": false,
+  "notes": "All utterances are newly authored synthetic Korean examples. Public corpora/projects were used only to inform coverage, intent/slot annotation, and paraphrase/test design.",
+  "suite": "room_hub_v1",
+  "case_files": [
+    "all_250.jsonl"
+  ],
+  "schema_file": "schema.json",
+  "fixtures_file": "fixtures.json",
+  "registry_file": "unique_tasks_registry_v1.json",
+  "projection_file": "projection.json"
+}

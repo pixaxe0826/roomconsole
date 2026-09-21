@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 from typing import Iterator
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_DIRS = {'.github', 'app', 'web', 'widgets', 'docs', 'deploy', 'examples', 'scripts', 'tests', 'previews'}
+SOURCE_DIRS = {'.github', 'app', 'web', 'widgets', 'docs', 'deploy', 'examples', 'scripts', 'tests', 'previews', 'benchmarks'}
 ROOT_FILES = {
     '.gitignore', '.gitattributes', '.editorconfig', '.dockerignore', '.env.example',
     'README.md', 'README_KO.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'SECURITY.md',
@@ -61,6 +61,8 @@ def source_path_allowed(path: str | PurePosixPath) -> bool:
         return False
     if len(p.parts) == 1:
         return p.name in ROOT_FILES
+    if p.suffix.lower() == '.jsonl':
+        return len(p.parts) >= 4 and p.parts[:2] == ('benchmarks', 'suites')
     return p.parts[0] in SOURCE_DIRS and p.suffix.lower() in SOURCE_SUFFIXES
 
 

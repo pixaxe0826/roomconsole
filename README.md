@@ -166,3 +166,14 @@ python scripts/llm_widget_regression.py
 ### 타이머 위젯
 
 기본 **2×2**, **1~600초 / 1초 단위**, 여러 타이머 동시 실행을 지원합니다. 서버 DB의 종료 시각으로 재시작 뒤에도 남은 시간을 복원합니다. `4분 타이머 시작`, `현재 타이머 종료`는 기존 자동 전사 전달에서 **타이머만 즉시 실행**하며 LLM 0회입니다. 다른 쓰기 작업의 확인 정책은 유지합니다. 소리는 활성 브라우저의 명시적 허용이 필요합니다. [동작·Protocol·한도·적용 안내](docs/TIMERS.md).
+
+## Assistant Benchmark Harness V1
+
+운영 Assistant Core를 임시 fixture/Fake Adapter로 평가하는 텍스트 전용 도구입니다. 250문항·100개 고유 업무·150개 표현 변형을 포함하며, 새 suite와 holdout을 파일로 추가할 수 있습니다. 운영 DB·음성·UI·모델을 변경하지 않습니다.
+
+```bash
+python -m benchmarks validate --suite room_hub_v1
+python -m benchmarks run --suite room_hub_v1 --name baseline-v1 --llm disabled
+```
+
+`--llm disabled`에서 모델이 필요한 문항은 실패가 아니라 미평가입니다. 실제 로컬 모델 평가에는 `--llm local`을 명시합니다. [구조·모드·지표·V35 실행·한계](docs/ASSISTANT_BENCHMARK.md) · [데이터셋 추가와 검증](benchmarks/suites/room_hub_v1/README.md).

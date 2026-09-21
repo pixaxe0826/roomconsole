@@ -1,0 +1,956 @@
+{
+  "required_fields": [
+    "id",
+    "parent_id",
+    "source_type",
+    "variant_style",
+    "input_text",
+    "expected_response",
+    "expected",
+    "difficulty",
+    "tags",
+    "reference_datetime"
+  ],
+  "expected_fields": {
+    "domain": "semantic domain/widget family",
+    "capability": "canonical action such as todo.add",
+    "slots": "canonical expected slot values",
+    "policy": "EXECUTE|CONFIRM|CLARIFY|CANCEL",
+    "status": "success|needs_confirmation|needs_clarification|cancelled|unsupported",
+    "adapter": "expected adapter family",
+    "adapter_should_execute": "whether benchmark sandbox should execute the adapter in this turn",
+    "route_hint": "advisory route category; not strict",
+    "route_strict": "false in V1",
+    "actions": "for multi-intent/cross-widget cases"
+  },
+  "scoring_recommendation": {
+    "primary": [
+      "task_success",
+      "capability_accuracy",
+      "slot_accuracy",
+      "policy_accuracy",
+      "false_execution_rate"
+    ],
+    "secondary": [
+      "route_distribution",
+      "unnecessary_llm_call_rate",
+      "latency_ms"
+    ],
+    "critical_rule": "Any wrong write/control execution should be counted as a critical failure even if intent classification was partially correct."
+  },
+  "slot_schemas": {
+    "alarm.cancel": {
+      "type": "object",
+      "properties": {
+        "alarm_id": {
+          "type": [
+            "null",
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "alarm.disable": {
+      "type": "object",
+      "properties": {
+        "alarm_id": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "alarm.enable": {
+      "type": "object",
+      "properties": {
+        "alarm_id": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "alarm.list": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": [
+            "boolean"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "alarm.next": {
+      "type": "object",
+      "properties": {
+        "alarm_id": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "alarm.rename": {
+      "type": "object",
+      "properties": {
+        "alarm_id": {
+          "type": [
+            "string"
+          ]
+        },
+        "new_label": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "alarm.set": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": [
+            "string"
+          ]
+        },
+        "time": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "label": {
+          "type": [
+            "null"
+          ]
+        },
+        "requested_date": {
+          "type": [
+            "string"
+          ]
+        },
+        "requested_time": {
+          "type": [
+            "string"
+          ]
+        },
+        "past_time": {
+          "type": [
+            "boolean"
+          ]
+        },
+        "relative_minutes": {
+          "type": [
+            "integer"
+          ]
+        },
+        "repeat": {
+          "type": [
+            "string"
+          ]
+        },
+        "vague_time": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "alarm.update": {
+      "type": "object",
+      "properties": {
+        "alarm_id": {
+          "type": [
+            "string"
+          ]
+        },
+        "new_time": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "calendar.add": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": [
+            "string"
+          ]
+        },
+        "time": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "title": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "all_day": {
+          "type": [
+            "boolean"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "calendar.check_free": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": [
+            "string"
+          ]
+        },
+        "time": {
+          "type": [
+            "string"
+          ]
+        },
+        "free": {
+          "type": [
+            "boolean"
+          ]
+        },
+        "conflict_event_id": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "calendar.count": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "calendar.delete": {
+      "type": "object",
+      "properties": {
+        "event_id": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "calendar.list": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": [
+            "string"
+          ]
+        },
+        "period": {
+          "type": [
+            "string"
+          ]
+        },
+        "after": {
+          "type": [
+            "string"
+          ]
+        },
+        "start_date": {
+          "type": [
+            "string"
+          ]
+        },
+        "end_date": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "calendar.move": {
+      "type": "object",
+      "properties": {
+        "event_id": {
+          "type": [
+            "string"
+          ]
+        },
+        "new_start": {
+          "type": [
+            "string"
+          ]
+        },
+        "new_end": {
+          "type": [
+            "string"
+          ]
+        },
+        "new_date": {
+          "type": [
+            "string"
+          ]
+        },
+        "time": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "calendar.next": {
+      "type": "object",
+      "properties": {
+        "after": {
+          "type": [
+            "string"
+          ]
+        },
+        "event_id": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "calendar.rename": {
+      "type": "object",
+      "properties": {
+        "event_id": {
+          "type": [
+            "string"
+          ]
+        },
+        "new_title": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "calendar.search": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": [
+            "string"
+          ]
+        },
+        "event_id": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "calendar.update": {
+      "type": "object",
+      "properties": {
+        "event_id": {
+          "type": [
+            "string"
+          ]
+        },
+        "new_end": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "conditional.unsupported": {
+      "type": "object",
+      "properties": {
+        "condition": {
+          "type": [
+            "string"
+          ]
+        },
+        "then": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "context.cancel": {
+      "type": "object",
+      "properties": {
+        "cancels_pending": {
+          "type": [
+            "boolean"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "context.cancel_all": {
+      "type": "object",
+      "properties": {
+        "cancel_scope": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "context.confirm": {
+      "type": "object",
+      "properties": {
+        "resolves_pending": {
+          "type": [
+            "string"
+          ]
+        },
+        "date": {
+          "type": [
+            "string"
+          ]
+        },
+        "time": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "context.edit_pending": {
+      "type": "object",
+      "properties": {
+        "pending_action": {
+          "type": [
+            "string"
+          ]
+        },
+        "new_time": {
+          "type": [
+            "string"
+          ]
+        },
+        "date": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "context.fill_slot": {
+      "type": "object",
+      "properties": {
+        "pending_action": {
+          "type": [
+            "string"
+          ]
+        },
+        "time": {
+          "type": [
+            "string"
+          ]
+        },
+        "date": {
+          "type": [
+            "string"
+          ]
+        },
+        "title": {
+          "type": [
+            "string"
+          ]
+        },
+        "text": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "context.reference": {
+      "type": "object",
+      "properties": {
+        "reference": {
+          "type": [
+            "string"
+          ]
+        },
+        "task_id": {
+          "type": [
+            "string"
+          ]
+        },
+        "event_id": {
+          "type": [
+            "string"
+          ]
+        },
+        "offset_minutes": {
+          "type": [
+            "integer"
+          ]
+        },
+        "memo_id": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "memo.append": {
+      "type": "object",
+      "properties": {
+        "memo_id": {
+          "type": [
+            "string"
+          ]
+        },
+        "text": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "memo.clear": {
+      "type": "object",
+      "properties": {
+        "memo_id": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "memo.count_lines": {
+      "type": "object",
+      "properties": {
+        "memo_id": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "memo.create": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "content": {
+          "type": [
+            "null",
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "memo.delete": {
+      "type": "object",
+      "properties": {
+        "memo_id": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "memo.read": {
+      "type": "object",
+      "properties": {
+        "memo_id": {
+          "type": [
+            "string"
+          ]
+        },
+        "selector": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "memo.read_line": {
+      "type": "object",
+      "properties": {
+        "memo_id": {
+          "type": [
+            "string"
+          ]
+        },
+        "line": {
+          "type": [
+            "integer",
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "memo.rename": {
+      "type": "object",
+      "properties": {
+        "memo_id": {
+          "type": [
+            "string"
+          ]
+        },
+        "new_title": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "memo.search": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": [
+            "string"
+          ]
+        },
+        "memo_ids": {
+          "type": [
+            "array"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "memo.write": {
+      "type": "object",
+      "properties": {
+        "memo_id": {
+          "type": [
+            "string"
+          ]
+        },
+        "text": {
+          "type": [
+            "string"
+          ]
+        },
+        "mode": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "negative_scope": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": [
+            "string"
+          ]
+        },
+        "position": {
+          "type": [
+            "integer"
+          ]
+        },
+        "event_id": {
+          "type": [
+            "string"
+          ]
+        },
+        "prohibited_action": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "todo.add": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "text": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "time": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "todo.complete": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": [
+            "string"
+          ]
+        },
+        "text": {
+          "type": [
+            "string"
+          ]
+        },
+        "query": {
+          "type": [
+            "string"
+          ]
+        },
+        "matches": {
+          "type": [
+            "array"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "todo.complete_batch": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": [
+            "string"
+          ]
+        },
+        "task_ids": {
+          "type": [
+            "array"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "todo.count": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": [
+            "string"
+          ]
+        },
+        "status": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "todo.delete": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": [
+            "string"
+          ]
+        },
+        "text": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "todo.delete_completed": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": [
+            "string"
+          ]
+        },
+        "task_ids": {
+          "type": [
+            "array"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "todo.get": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": [
+            "string"
+          ]
+        },
+        "position": {
+          "type": [
+            "integer"
+          ]
+        },
+        "task_id": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "todo.list": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": [
+            "string"
+          ]
+        },
+        "status": {
+          "type": [
+            "string"
+          ]
+        },
+        "filter": {
+          "type": [
+            "string"
+          ]
+        },
+        "start_date": {
+          "type": [
+            "string"
+          ]
+        },
+        "end_date": {
+          "type": [
+            "string"
+          ]
+        },
+        "before": {
+          "type": [
+            "string"
+          ]
+        },
+        "after": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "todo.move": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": [
+            "string"
+          ]
+        },
+        "new_date": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "todo.rename": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": [
+            "string"
+          ]
+        },
+        "old_text": {
+          "type": [
+            "string"
+          ]
+        },
+        "new_text": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "todo.reopen": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": [
+            "string"
+          ]
+        },
+        "text": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "todo.search": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": [
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "fixture_slot_references": [
+    "task_id",
+    "task_ids",
+    "event_id",
+    "conflict_event_id",
+    "memo_id",
+    "memo_ids",
+    "alarm_id",
+    "matches"
+  ],
+  "harness_schema_notes": "Slot schemas describe the supplied V1 annotations, not production capabilities. Update data/schema when extending the suite. No expected value enters the assistant."
+}

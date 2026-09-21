@@ -1,0 +1,3805 @@
+{
+  "registry_version": "1.0",
+  "benchmark_dataset": "room_hub_benchmark_v1_250",
+  "reference_datetime": "2026-09-21T09:00:00+09:00",
+  "purpose": "Room Hub Benchmark V1의 100개 고유 업무를 등록·조회하기 위한 단일 레지스트리. 각 task_id는 original unique_100.jsonl의 canonical case를 가리키며, paraphrase_ids는 paraphrases_150.jsonl의 변형 문장을 연결한다.",
+  "counts": {
+    "registered_unique_tasks": 100,
+    "unique_capabilities": 52,
+    "linked_paraphrases": 150
+  },
+  "capability_catalog": {
+    "alarm.cancel": {
+      "domain": "alarm",
+      "adapter": "AlarmAdapter",
+      "task_ids": [
+        "B080",
+        "B085"
+      ],
+      "observed_slot_keys": [
+        "alarm_id"
+      ],
+      "policies": [
+        "CLARIFY",
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_clarification",
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "alarm.disable": {
+      "domain": "alarm",
+      "adapter": "AlarmAdapter",
+      "task_ids": [
+        "B079"
+      ],
+      "observed_slot_keys": [
+        "alarm_id"
+      ],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "alarm.enable": {
+      "domain": "alarm",
+      "adapter": "AlarmAdapter",
+      "task_ids": [
+        "B078"
+      ],
+      "observed_slot_keys": [
+        "alarm_id"
+      ],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "alarm.list": {
+      "domain": "alarm",
+      "adapter": "AlarmAdapter",
+      "task_ids": [
+        "B071",
+        "B072"
+      ],
+      "observed_slot_keys": [
+        "enabled"
+      ],
+      "policies": [
+        "EXECUTE"
+      ],
+      "expected_statuses": [
+        "success"
+      ],
+      "adapter_execution_values": [
+        true
+      ]
+    },
+    "alarm.next": {
+      "domain": "alarm",
+      "adapter": "AlarmAdapter",
+      "task_ids": [
+        "B073"
+      ],
+      "observed_slot_keys": [
+        "alarm_id"
+      ],
+      "policies": [
+        "EXECUTE"
+      ],
+      "expected_statuses": [
+        "success"
+      ],
+      "adapter_execution_values": [
+        true
+      ]
+    },
+    "alarm.rename": {
+      "domain": "alarm",
+      "adapter": "AlarmAdapter",
+      "task_ids": [
+        "B081"
+      ],
+      "observed_slot_keys": [
+        "alarm_id",
+        "new_label"
+      ],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "alarm.set": {
+      "domain": "alarm",
+      "adapter": "AlarmAdapter",
+      "task_ids": [
+        "B074",
+        "B075",
+        "B076",
+        "B077",
+        "B083",
+        "B084"
+      ],
+      "observed_slot_keys": [
+        "date",
+        "label",
+        "past_time",
+        "relative_minutes",
+        "repeat",
+        "requested_date",
+        "requested_time",
+        "time",
+        "vague_time"
+      ],
+      "policies": [
+        "CLARIFY",
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_clarification",
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "alarm.update": {
+      "domain": "alarm",
+      "adapter": "AlarmAdapter",
+      "task_ids": [
+        "B082"
+      ],
+      "observed_slot_keys": [
+        "alarm_id",
+        "new_time"
+      ],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "calendar.add": {
+      "domain": "calendar",
+      "adapter": "CalendarAdapter",
+      "task_ids": [
+        "B047",
+        "B048",
+        "B049",
+        "B050"
+      ],
+      "observed_slot_keys": [
+        "all_day",
+        "date",
+        "time",
+        "title"
+      ],
+      "policies": [
+        "CLARIFY",
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_clarification",
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "calendar.check_free": {
+      "domain": "calendar",
+      "adapter": "CalendarAdapter",
+      "task_ids": [
+        "B045",
+        "B046"
+      ],
+      "observed_slot_keys": [
+        "conflict_event_id",
+        "date",
+        "free",
+        "time"
+      ],
+      "policies": [
+        "EXECUTE"
+      ],
+      "expected_statuses": [
+        "success"
+      ],
+      "adapter_execution_values": [
+        true
+      ]
+    },
+    "calendar.count": {
+      "domain": "calendar",
+      "adapter": "CalendarAdapter",
+      "task_ids": [
+        "B040"
+      ],
+      "observed_slot_keys": [
+        "date"
+      ],
+      "policies": [
+        "EXECUTE"
+      ],
+      "expected_statuses": [
+        "success"
+      ],
+      "adapter_execution_values": [
+        true
+      ]
+    },
+    "calendar.delete": {
+      "domain": "calendar",
+      "adapter": "CalendarAdapter",
+      "task_ids": [
+        "B053"
+      ],
+      "observed_slot_keys": [
+        "event_id"
+      ],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "calendar.list": {
+      "domain": "calendar",
+      "adapter": "CalendarAdapter",
+      "task_ids": [
+        "B031",
+        "B032",
+        "B033",
+        "B034",
+        "B035",
+        "B036",
+        "B037",
+        "B039",
+        "B043",
+        "B044"
+      ],
+      "observed_slot_keys": [
+        "after",
+        "date",
+        "end_date",
+        "period",
+        "start_date"
+      ],
+      "policies": [
+        "EXECUTE"
+      ],
+      "expected_statuses": [
+        "success"
+      ],
+      "adapter_execution_values": [
+        true
+      ]
+    },
+    "calendar.move": {
+      "domain": "calendar",
+      "adapter": "CalendarAdapter",
+      "task_ids": [
+        "B051",
+        "B054"
+      ],
+      "observed_slot_keys": [
+        "event_id",
+        "new_date",
+        "new_end",
+        "new_start",
+        "time"
+      ],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "calendar.next": {
+      "domain": "calendar",
+      "adapter": "CalendarAdapter",
+      "task_ids": [
+        "B038"
+      ],
+      "observed_slot_keys": [
+        "after",
+        "event_id"
+      ],
+      "policies": [
+        "EXECUTE"
+      ],
+      "expected_statuses": [
+        "success"
+      ],
+      "adapter_execution_values": [
+        true
+      ]
+    },
+    "calendar.rename": {
+      "domain": "calendar",
+      "adapter": "CalendarAdapter",
+      "task_ids": [
+        "B052"
+      ],
+      "observed_slot_keys": [
+        "event_id",
+        "new_title"
+      ],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "calendar.search": {
+      "domain": "calendar",
+      "adapter": "CalendarAdapter",
+      "task_ids": [
+        "B041",
+        "B042"
+      ],
+      "observed_slot_keys": [
+        "event_id",
+        "query"
+      ],
+      "policies": [
+        "EXECUTE"
+      ],
+      "expected_statuses": [
+        "success"
+      ],
+      "adapter_execution_values": [
+        true
+      ]
+    },
+    "calendar.update": {
+      "domain": "calendar",
+      "adapter": "CalendarAdapter",
+      "task_ids": [
+        "B055"
+      ],
+      "observed_slot_keys": [
+        "event_id",
+        "new_end"
+      ],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "conditional.unsupported": {
+      "domain": "context",
+      "adapter": "ContextResolver",
+      "task_ids": [
+        "B097"
+      ],
+      "observed_slot_keys": [
+        "condition",
+        "then"
+      ],
+      "policies": [
+        "CLARIFY"
+      ],
+      "expected_statuses": [
+        "unsupported"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "context.cancel": {
+      "domain": "context",
+      "adapter": "ContextResolver",
+      "task_ids": [
+        "B087"
+      ],
+      "observed_slot_keys": [
+        "cancels_pending"
+      ],
+      "policies": [
+        "CANCEL"
+      ],
+      "expected_statuses": [
+        "cancelled"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "context.cancel_all": {
+      "domain": "context",
+      "adapter": "ContextResolver",
+      "task_ids": [
+        "B100"
+      ],
+      "observed_slot_keys": [
+        "cancel_scope"
+      ],
+      "policies": [
+        "CANCEL"
+      ],
+      "expected_statuses": [
+        "cancelled"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "context.confirm": {
+      "domain": "context",
+      "adapter": "AlarmAdapter",
+      "task_ids": [
+        "B086"
+      ],
+      "observed_slot_keys": [
+        "date",
+        "resolves_pending",
+        "time"
+      ],
+      "policies": [
+        "EXECUTE"
+      ],
+      "expected_statuses": [
+        "success"
+      ],
+      "adapter_execution_values": [
+        true
+      ]
+    },
+    "context.edit_pending": {
+      "domain": "context",
+      "adapter": "ContextResolver",
+      "task_ids": [
+        "B088"
+      ],
+      "observed_slot_keys": [
+        "date",
+        "new_time",
+        "pending_action"
+      ],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "context.fill_slot": {
+      "domain": "context",
+      "adapter": "ContextResolver",
+      "task_ids": [
+        "B089",
+        "B090"
+      ],
+      "observed_slot_keys": [
+        "date",
+        "pending_action",
+        "text",
+        "time",
+        "title"
+      ],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "context.reference": {
+      "domain": "context",
+      "adapter": "TodoAdapter",
+      "task_ids": [
+        "B091",
+        "B092",
+        "B093",
+        "B094"
+      ],
+      "observed_slot_keys": [
+        "event_id",
+        "memo_id",
+        "offset_minutes",
+        "reference",
+        "task_id"
+      ],
+      "policies": [
+        "CONFIRM",
+        "EXECUTE"
+      ],
+      "expected_statuses": [
+        "needs_confirmation",
+        "success"
+      ],
+      "adapter_execution_values": [
+        false,
+        true
+      ]
+    },
+    "cross_widget.transfer": {
+      "domain": "context",
+      "adapter": "MultiAdapter",
+      "task_ids": [
+        "B098"
+      ],
+      "observed_slot_keys": [],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "memo.append": {
+      "domain": "memo",
+      "adapter": "MemoAdapter",
+      "task_ids": [
+        "B064"
+      ],
+      "observed_slot_keys": [
+        "memo_id",
+        "text"
+      ],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "memo.clear": {
+      "domain": "memo",
+      "adapter": "MemoAdapter",
+      "task_ids": [
+        "B066"
+      ],
+      "observed_slot_keys": [
+        "memo_id"
+      ],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "memo.count_lines": {
+      "domain": "memo",
+      "adapter": "MemoAdapter",
+      "task_ids": [
+        "B063"
+      ],
+      "observed_slot_keys": [
+        "memo_id"
+      ],
+      "policies": [
+        "EXECUTE"
+      ],
+      "expected_statuses": [
+        "success"
+      ],
+      "adapter_execution_values": [
+        true
+      ]
+    },
+    "memo.create": {
+      "domain": "memo",
+      "adapter": "MemoAdapter",
+      "task_ids": [
+        "B067",
+        "B070"
+      ],
+      "observed_slot_keys": [
+        "content",
+        "title"
+      ],
+      "policies": [
+        "CLARIFY",
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_clarification",
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "memo.delete": {
+      "domain": "memo",
+      "adapter": "MemoAdapter",
+      "task_ids": [
+        "B069"
+      ],
+      "observed_slot_keys": [
+        "memo_id"
+      ],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "memo.list": {
+      "domain": "memo",
+      "adapter": "MemoAdapter",
+      "task_ids": [
+        "B058"
+      ],
+      "observed_slot_keys": [],
+      "policies": [
+        "EXECUTE"
+      ],
+      "expected_statuses": [
+        "success"
+      ],
+      "adapter_execution_values": [
+        true
+      ]
+    },
+    "memo.read": {
+      "domain": "memo",
+      "adapter": "MemoAdapter",
+      "task_ids": [
+        "B056",
+        "B057",
+        "B059"
+      ],
+      "observed_slot_keys": [
+        "memo_id",
+        "selector"
+      ],
+      "policies": [
+        "EXECUTE"
+      ],
+      "expected_statuses": [
+        "success"
+      ],
+      "adapter_execution_values": [
+        true
+      ]
+    },
+    "memo.read_line": {
+      "domain": "memo",
+      "adapter": "MemoAdapter",
+      "task_ids": [
+        "B061",
+        "B062"
+      ],
+      "observed_slot_keys": [
+        "line",
+        "memo_id"
+      ],
+      "policies": [
+        "EXECUTE"
+      ],
+      "expected_statuses": [
+        "success"
+      ],
+      "adapter_execution_values": [
+        true
+      ]
+    },
+    "memo.rename": {
+      "domain": "memo",
+      "adapter": "MemoAdapter",
+      "task_ids": [
+        "B068"
+      ],
+      "observed_slot_keys": [
+        "memo_id",
+        "new_title"
+      ],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "memo.search": {
+      "domain": "memo",
+      "adapter": "MemoAdapter",
+      "task_ids": [
+        "B060"
+      ],
+      "observed_slot_keys": [
+        "memo_ids",
+        "query"
+      ],
+      "policies": [
+        "EXECUTE"
+      ],
+      "expected_statuses": [
+        "success"
+      ],
+      "adapter_execution_values": [
+        true
+      ]
+    },
+    "memo.write": {
+      "domain": "memo",
+      "adapter": "MemoAdapter",
+      "task_ids": [
+        "B065"
+      ],
+      "observed_slot_keys": [
+        "memo_id",
+        "mode",
+        "text"
+      ],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "multi.read": {
+      "domain": "context",
+      "adapter": "MultiAdapter",
+      "task_ids": [
+        "B095"
+      ],
+      "observed_slot_keys": [],
+      "policies": [
+        "EXECUTE"
+      ],
+      "expected_statuses": [
+        "success"
+      ],
+      "adapter_execution_values": [
+        true
+      ]
+    },
+    "multi.write": {
+      "domain": "context",
+      "adapter": "MultiAdapter",
+      "task_ids": [
+        "B096"
+      ],
+      "observed_slot_keys": [],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "negative_scope": {
+      "domain": "context",
+      "adapter": "CalendarAdapter",
+      "task_ids": [
+        "B099"
+      ],
+      "observed_slot_keys": [
+        "date",
+        "event_id",
+        "position",
+        "prohibited_action"
+      ],
+      "policies": [
+        "EXECUTE"
+      ],
+      "expected_statuses": [
+        "success"
+      ],
+      "adapter_execution_values": [
+        true
+      ]
+    },
+    "todo.add": {
+      "domain": "todo",
+      "adapter": "TodoAdapter",
+      "task_ids": [
+        "B010",
+        "B011",
+        "B012",
+        "B013",
+        "B014",
+        "B015",
+        "B016"
+      ],
+      "observed_slot_keys": [
+        "date",
+        "text",
+        "time"
+      ],
+      "policies": [
+        "CLARIFY",
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_clarification",
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "todo.complete": {
+      "domain": "todo",
+      "adapter": "TodoAdapter",
+      "task_ids": [
+        "B017",
+        "B018",
+        "B024"
+      ],
+      "observed_slot_keys": [
+        "matches",
+        "query",
+        "task_id",
+        "text"
+      ],
+      "policies": [
+        "CLARIFY",
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_clarification",
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "todo.complete_batch": {
+      "domain": "todo",
+      "adapter": "TodoAdapter",
+      "task_ids": [
+        "B025"
+      ],
+      "observed_slot_keys": [
+        "date",
+        "task_ids"
+      ],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "todo.count": {
+      "domain": "todo",
+      "adapter": "TodoAdapter",
+      "task_ids": [
+        "B005"
+      ],
+      "observed_slot_keys": [
+        "date",
+        "status"
+      ],
+      "policies": [
+        "EXECUTE"
+      ],
+      "expected_statuses": [
+        "success"
+      ],
+      "adapter_execution_values": [
+        true
+      ]
+    },
+    "todo.delete": {
+      "domain": "todo",
+      "adapter": "TodoAdapter",
+      "task_ids": [
+        "B020"
+      ],
+      "observed_slot_keys": [
+        "task_id",
+        "text"
+      ],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "todo.delete_completed": {
+      "domain": "todo",
+      "adapter": "TodoAdapter",
+      "task_ids": [
+        "B026"
+      ],
+      "observed_slot_keys": [
+        "status",
+        "task_ids"
+      ],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "todo.get": {
+      "domain": "todo",
+      "adapter": "TodoAdapter",
+      "task_ids": [
+        "B006",
+        "B007"
+      ],
+      "observed_slot_keys": [
+        "date",
+        "position",
+        "task_id"
+      ],
+      "policies": [
+        "EXECUTE"
+      ],
+      "expected_statuses": [
+        "success"
+      ],
+      "adapter_execution_values": [
+        true
+      ]
+    },
+    "todo.list": {
+      "domain": "todo",
+      "adapter": "TodoAdapter",
+      "task_ids": [
+        "B001",
+        "B002",
+        "B003",
+        "B004",
+        "B009",
+        "B027",
+        "B028",
+        "B030"
+      ],
+      "observed_slot_keys": [
+        "after",
+        "before",
+        "date",
+        "end_date",
+        "filter",
+        "start_date",
+        "status"
+      ],
+      "policies": [
+        "EXECUTE"
+      ],
+      "expected_statuses": [
+        "success"
+      ],
+      "adapter_execution_values": [
+        true
+      ]
+    },
+    "todo.move": {
+      "domain": "todo",
+      "adapter": "TodoAdapter",
+      "task_ids": [
+        "B022",
+        "B023"
+      ],
+      "observed_slot_keys": [
+        "new_date",
+        "task_id"
+      ],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "todo.rename": {
+      "domain": "todo",
+      "adapter": "TodoAdapter",
+      "task_ids": [
+        "B021"
+      ],
+      "observed_slot_keys": [
+        "new_text",
+        "old_text",
+        "task_id"
+      ],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "todo.reopen": {
+      "domain": "todo",
+      "adapter": "TodoAdapter",
+      "task_ids": [
+        "B019"
+      ],
+      "observed_slot_keys": [
+        "task_id",
+        "text"
+      ],
+      "policies": [
+        "CONFIRM"
+      ],
+      "expected_statuses": [
+        "needs_confirmation"
+      ],
+      "adapter_execution_values": [
+        false
+      ]
+    },
+    "todo.search": {
+      "domain": "todo",
+      "adapter": "TodoAdapter",
+      "task_ids": [
+        "B008",
+        "B029"
+      ],
+      "observed_slot_keys": [
+        "query"
+      ],
+      "policies": [
+        "EXECUTE"
+      ],
+      "expected_statuses": [
+        "success"
+      ],
+      "adapter_execution_values": [
+        true
+      ]
+    }
+  },
+  "registered_tasks": [
+    {
+      "task_id": "B001",
+      "canonical_input": "오늘 할 일 확인해 줘",
+      "expected_response": "오늘 할 일은 5개입니다: 보고서 초안 작성, 세탁물 찾기, 동역학 과제 제출, 서버 백업 상태 확인, 보고서 제출 준비.",
+      "domain": "todo",
+      "capability": "todo.list",
+      "adapter": "TodoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "date": "2026-09-21",
+        "status": "pending"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "date"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P001",
+        "P002"
+      ]
+    },
+    {
+      "task_id": "B002",
+      "canonical_input": "내일 할 일 알려줘",
+      "expected_response": "내일 할 일은 1개입니다: 우유 사기.",
+      "domain": "todo",
+      "capability": "todo.list",
+      "adapter": "TodoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "date": "2026-09-22",
+        "status": "pending"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "date"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P003",
+        "P004"
+      ]
+    },
+    {
+      "task_id": "B003",
+      "canonical_input": "밀린 할 일 보여줘",
+      "expected_response": "기한이 지난 미완료 할 일은 1개입니다: 책상 정리.",
+      "domain": "todo",
+      "capability": "todo.list",
+      "adapter": "TodoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "filter": "overdue",
+        "status": "pending"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "filter"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P005",
+        "P006"
+      ]
+    },
+    {
+      "task_id": "B004",
+      "canonical_input": "오늘 완료한 할 일 보여줘",
+      "expected_response": "오늘 완료된 할 일은 1개입니다: 택배 찾기.",
+      "domain": "todo",
+      "capability": "todo.list",
+      "adapter": "TodoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "date": "2026-09-21",
+        "status": "completed"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "status"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P007",
+        "P008"
+      ]
+    },
+    {
+      "task_id": "B005",
+      "canonical_input": "오늘 할 일 몇 개야?",
+      "expected_response": "오늘 미완료 할 일은 5개입니다.",
+      "domain": "todo",
+      "capability": "todo.count",
+      "adapter": "TodoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "date": "2026-09-21",
+        "status": "pending"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "count"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P009",
+        "P010"
+      ]
+    },
+    {
+      "task_id": "B006",
+      "canonical_input": "오늘 첫 번째 할 일 뭐야?",
+      "expected_response": "오늘 첫 번째 할 일은 보고서 초안 작성입니다.",
+      "domain": "todo",
+      "capability": "todo.get",
+      "adapter": "TodoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "date": "2026-09-21",
+        "position": 1,
+        "task_id": "t1"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "ordinal"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P011",
+        "P012"
+      ]
+    },
+    {
+      "task_id": "B007",
+      "canonical_input": "오늘 두 번째 할 일 읽어줘",
+      "expected_response": "오늘 두 번째 할 일은 세탁물 찾기입니다.",
+      "domain": "todo",
+      "capability": "todo.get",
+      "adapter": "TodoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "date": "2026-09-21",
+        "position": 2,
+        "task_id": "t2"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "ordinal"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P013",
+        "P014"
+      ]
+    },
+    {
+      "task_id": "B008",
+      "canonical_input": "AIAC 관련 할 일 찾아줘",
+      "expected_response": "AIAC 관련 할 일은 1개입니다: AIAC 소개문 수정.",
+      "domain": "todo",
+      "capability": "todo.search",
+      "adapter": "TodoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "query": "AIAC"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "search"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P015",
+        "P016"
+      ]
+    },
+    {
+      "task_id": "B009",
+      "canonical_input": "9월 21일부터 23일까지 할 일 보여줘",
+      "expected_response": "9월 21일부터 23일까지의 미완료 할 일은 7개입니다: 보고서 초안 작성, 세탁물 찾기, 동역학 과제 제출, 서버 백업 상태 확인, 보고서 제출 준비, 우유 사기, AIAC 소개문 수정.",
+      "domain": "todo",
+      "capability": "todo.list",
+      "adapter": "TodoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "start_date": "2026-09-21",
+        "end_date": "2026-09-23",
+        "status": "pending"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "date_range"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P017",
+        "P018"
+      ]
+    },
+    {
+      "task_id": "B010",
+      "canonical_input": "오늘 할 일에 프린터 용지 사기 추가해",
+      "expected_response": "오늘 할 일에 ‘프린터 용지 사기’를 추가할까요?",
+      "domain": "todo",
+      "capability": "todo.add",
+      "adapter": "TodoAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "date": "2026-09-21",
+        "text": "프린터 용지 사기"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "add"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P019",
+        "P020"
+      ]
+    },
+    {
+      "task_id": "B011",
+      "canonical_input": "내일 할 일에 택배 보내기 추가해",
+      "expected_response": "내일 할 일에 ‘택배 보내기’를 추가할까요?",
+      "domain": "todo",
+      "capability": "todo.add",
+      "adapter": "TodoAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "date": "2026-09-22",
+        "text": "택배 보내기"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "add"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P021",
+        "P022"
+      ]
+    },
+    {
+      "task_id": "B012",
+      "canonical_input": "이번 주 수요일에 집에 갈 짐 싸기 할 일 추가해",
+      "expected_response": "9월 23일 할 일에 ‘집에 갈 짐 싸기’를 추가할까요?",
+      "domain": "todo",
+      "capability": "todo.add",
+      "adapter": "TodoAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "date": "2026-09-23",
+        "text": "집에 갈 짐 싸기"
+      },
+      "route_hint": "SEMANTIC_OR_LLM",
+      "route_strict": false,
+      "difficulty": "medium",
+      "tags": [
+        "write",
+        "add",
+        "relative_date",
+        "word_order"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P023",
+        "P024"
+      ]
+    },
+    {
+      "task_id": "B013",
+      "canonical_input": "9월 24일 할 일에 도서 반납 추가해",
+      "expected_response": "9월 24일 할 일에 ‘도서 반납’을 추가할까요?",
+      "domain": "todo",
+      "capability": "todo.add",
+      "adapter": "TodoAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "date": "2026-09-24",
+        "text": "도서 반납"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "add",
+        "absolute_date"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P025",
+        "P026"
+      ]
+    },
+    {
+      "task_id": "B014",
+      "canonical_input": "오늘 오후 5시까지 보고서 제출 할 일 추가해",
+      "expected_response": "오늘 오후 5시 마감으로 ‘보고서 제출’을 추가할까요?",
+      "domain": "todo",
+      "capability": "todo.add",
+      "adapter": "TodoAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "date": "2026-09-21",
+        "time": "17:00",
+        "text": "보고서 제출"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "add",
+        "time"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P027",
+        "P028"
+      ]
+    },
+    {
+      "task_id": "B015",
+      "canonical_input": "새 충전기 주문하기를 할 일에 추가해",
+      "expected_response": "‘새 충전기 주문하기’를 언제 할 일로 추가할까요?",
+      "domain": "todo",
+      "capability": "todo.add",
+      "adapter": "TodoAdapter",
+      "policy": "CLARIFY",
+      "expected_status": "needs_clarification",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "date": null,
+        "text": "새 충전기 주문하기"
+      },
+      "route_hint": "PARSER_OR_LLM",
+      "route_strict": false,
+      "difficulty": "medium",
+      "tags": [
+        "missing_slot",
+        "date"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P029",
+        "P030"
+      ]
+    },
+    {
+      "task_id": "B016",
+      "canonical_input": "내일 할 일 하나 추가해 줘",
+      "expected_response": "내일 할 일에 무엇을 추가할까요?",
+      "domain": "todo",
+      "capability": "todo.add",
+      "adapter": "TodoAdapter",
+      "policy": "CLARIFY",
+      "expected_status": "needs_clarification",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "date": "2026-09-22",
+        "text": null
+      },
+      "route_hint": "PARSER_OR_LLM",
+      "route_strict": false,
+      "difficulty": "medium",
+      "tags": [
+        "missing_slot",
+        "text"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P031",
+        "P032"
+      ]
+    },
+    {
+      "task_id": "B017",
+      "canonical_input": "보고서 초안 작성 완료 처리해",
+      "expected_response": "‘보고서 초안 작성’을 완료 처리할까요?",
+      "domain": "todo",
+      "capability": "todo.complete",
+      "adapter": "TodoAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "task_id": "t1",
+        "text": "보고서 초안 작성"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "complete"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P033",
+        "P034"
+      ]
+    },
+    {
+      "task_id": "B018",
+      "canonical_input": "세탁물 찾기 끝냈어",
+      "expected_response": "‘세탁물 찾기’를 완료 처리할까요?",
+      "domain": "todo",
+      "capability": "todo.complete",
+      "adapter": "TodoAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "task_id": "t2",
+        "text": "세탁물 찾기"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "complete",
+        "implicit"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P035",
+        "P036"
+      ]
+    },
+    {
+      "task_id": "B019",
+      "canonical_input": "USB 허브 주문 다시 미완료로 바꿔줘",
+      "expected_response": "‘USB 허브 주문’을 다시 미완료로 바꿀까요?",
+      "domain": "todo",
+      "capability": "todo.reopen",
+      "adapter": "TodoAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "task_id": "t5",
+        "text": "USB 허브 주문"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "reopen"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P037",
+        "P038"
+      ]
+    },
+    {
+      "task_id": "B020",
+      "canonical_input": "세탁물 찾기 할 일 삭제해",
+      "expected_response": "‘세탁물 찾기’를 삭제할까요?",
+      "domain": "todo",
+      "capability": "todo.delete",
+      "adapter": "TodoAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "task_id": "t2",
+        "text": "세탁물 찾기"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "delete"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P039",
+        "P040"
+      ]
+    },
+    {
+      "task_id": "B021",
+      "canonical_input": "AIAC 소개문 수정을 AIAC 소개 페이지 문구 수정으로 이름 바꿔줘",
+      "expected_response": "‘AIAC 소개문 수정’을 ‘AIAC 소개 페이지 문구 수정’으로 바꿀까요?",
+      "domain": "todo",
+      "capability": "todo.rename",
+      "adapter": "TodoAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "task_id": "t4",
+        "old_text": "AIAC 소개문 수정",
+        "new_text": "AIAC 소개 페이지 문구 수정"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "rename"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P041",
+        "P042"
+      ]
+    },
+    {
+      "task_id": "B022",
+      "canonical_input": "보고서 초안 작성을 내일로 미뤄줘",
+      "expected_response": "‘보고서 초안 작성’을 9월 22일로 옮길까요?",
+      "domain": "todo",
+      "capability": "todo.move",
+      "adapter": "TodoAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "task_id": "t1",
+        "new_date": "2026-09-22"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "move",
+        "relative_date"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P043",
+        "P044"
+      ]
+    },
+    {
+      "task_id": "B023",
+      "canonical_input": "밀린 책상 정리를 내일로 넘겨줘",
+      "expected_response": "‘책상 정리’를 9월 22일로 옮길까요?",
+      "domain": "todo",
+      "capability": "todo.move",
+      "adapter": "TodoAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "task_id": "t8",
+        "new_date": "2026-09-22"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "move",
+        "overdue"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P045",
+        "P046"
+      ]
+    },
+    {
+      "task_id": "B024",
+      "canonical_input": "보고서 완료해 줘",
+      "expected_response": "‘보고서’와 일치하는 할 일이 여러 개입니다. ‘보고서 초안 작성’과 ‘보고서 제출 준비’ 중 어느 것을 완료할까요?",
+      "domain": "todo",
+      "capability": "todo.complete",
+      "adapter": "TodoAdapter",
+      "policy": "CLARIFY",
+      "expected_status": "needs_clarification",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "query": "보고서",
+        "matches": [
+          "t1",
+          "t10"
+        ]
+      },
+      "route_hint": "PARSER_OR_LLM",
+      "route_strict": false,
+      "difficulty": "hard",
+      "tags": [
+        "ambiguity",
+        "entity_resolution"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P047",
+        "P048"
+      ]
+    },
+    {
+      "task_id": "B025",
+      "canonical_input": "오늘 할 일 전부 완료 처리해",
+      "expected_response": "오늘 미완료 할 일 5개를 모두 완료 처리할까요?",
+      "domain": "todo",
+      "capability": "todo.complete_batch",
+      "adapter": "TodoAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "date": "2026-09-21",
+        "task_ids": [
+          "t1",
+          "t2",
+          "t6",
+          "t7",
+          "t10"
+        ]
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "batch",
+        "high_impact"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P049",
+        "P050"
+      ]
+    },
+    {
+      "task_id": "B026",
+      "canonical_input": "완료된 할 일 전부 삭제해 줘",
+      "expected_response": "완료된 할 일 2개를 모두 삭제할까요?",
+      "domain": "todo",
+      "capability": "todo.delete_completed",
+      "adapter": "TodoAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "status": "completed",
+        "task_ids": [
+          "t5",
+          "t9"
+        ]
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "batch",
+        "delete"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P051",
+        "P052"
+      ]
+    },
+    {
+      "task_id": "B027",
+      "canonical_input": "오늘 6시 전에 마감인 할 일 보여줘",
+      "expected_response": "오늘 오후 6시 전에 시간이 지정된 할 일은 1개입니다: 동역학 과제 제출(오후 5시).",
+      "domain": "todo",
+      "capability": "todo.list",
+      "adapter": "TodoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "date": "2026-09-21",
+        "before": "18:00",
+        "status": "pending"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "time_filter"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P053",
+        "P054"
+      ]
+    },
+    {
+      "task_id": "B028",
+      "canonical_input": "오늘 오후 6시 이후 마감인 할 일 보여줘",
+      "expected_response": "오늘 오후 6시 이후로 시간이 지정된 미완료 할 일은 없습니다.",
+      "domain": "todo",
+      "capability": "todo.list",
+      "adapter": "TodoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "date": "2026-09-21",
+        "after": "18:00",
+        "status": "pending"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "time_filter"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P055",
+        "P056"
+      ]
+    },
+    {
+      "task_id": "B029",
+      "canonical_input": "서버 들어간 할 일 찾아줘",
+      "expected_response": "‘서버’가 포함된 할 일은 1개입니다: 서버 백업 상태 확인.",
+      "domain": "todo",
+      "capability": "todo.search",
+      "adapter": "TodoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "query": "서버"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "search"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P057",
+        "P058"
+      ]
+    },
+    {
+      "task_id": "B030",
+      "canonical_input": "9월 23일 할 일만 보여줘",
+      "expected_response": "9월 23일 미완료 할 일은 1개입니다: AIAC 소개문 수정.",
+      "domain": "todo",
+      "capability": "todo.list",
+      "adapter": "TodoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "date": "2026-09-23",
+        "status": "pending"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "absolute_date"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P059",
+        "P060"
+      ]
+    },
+    {
+      "task_id": "B031",
+      "canonical_input": "오늘 일정 알려줘",
+      "expected_response": "오늘 일정은 3개입니다: 오전 10시 국제경영론 수업, 오후 3시 프로젝트 회의, 오후 7시 30분 저녁 약속.",
+      "domain": "calendar",
+      "capability": "calendar.list",
+      "adapter": "CalendarAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "date": "2026-09-21"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "date"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P061",
+        "P062"
+      ]
+    },
+    {
+      "task_id": "B032",
+      "canonical_input": "오늘 오전 일정 확인해 줘",
+      "expected_response": "오늘 오전 일정은 1개입니다: 오전 10시 국제경영론 수업.",
+      "domain": "calendar",
+      "capability": "calendar.list",
+      "adapter": "CalendarAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "date": "2026-09-21",
+        "period": "morning"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "period"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P063",
+        "P064"
+      ]
+    },
+    {
+      "task_id": "B033",
+      "canonical_input": "오늘 오후 일정 알려줘",
+      "expected_response": "오늘 오후 일정은 1개입니다: 오후 3시 프로젝트 회의.",
+      "domain": "calendar",
+      "capability": "calendar.list",
+      "adapter": "CalendarAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "date": "2026-09-21",
+        "period": "afternoon"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "period"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P065",
+        "P066"
+      ]
+    },
+    {
+      "task_id": "B034",
+      "canonical_input": "오늘 저녁 일정 보여줘",
+      "expected_response": "오늘 저녁 일정은 1개입니다: 오후 7시 30분 저녁 약속.",
+      "domain": "calendar",
+      "capability": "calendar.list",
+      "adapter": "CalendarAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "date": "2026-09-21",
+        "period": "evening"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "period"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P067",
+        "P068"
+      ]
+    },
+    {
+      "task_id": "B035",
+      "canonical_input": "내일 일정 알려줘",
+      "expected_response": "내일 일정은 2개입니다: 오전 9시 교수님 면담, 오후 1시 실험실 작업.",
+      "domain": "calendar",
+      "capability": "calendar.list",
+      "adapter": "CalendarAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "date": "2026-09-22"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "relative_date"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P069",
+        "P070"
+      ]
+    },
+    {
+      "task_id": "B036",
+      "canonical_input": "내일 오전 일정 알려줘",
+      "expected_response": "내일 오전 일정은 1개입니다: 오전 9시 교수님 면담.",
+      "domain": "calendar",
+      "capability": "calendar.list",
+      "adapter": "CalendarAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "date": "2026-09-22",
+        "period": "morning"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "relative_date",
+        "period"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P071",
+        "P072"
+      ]
+    },
+    {
+      "task_id": "B037",
+      "canonical_input": "9월 23일 일정 보여줘",
+      "expected_response": "9월 23일 일정은 1개입니다: 오후 2시 AIAC 발표 준비.",
+      "domain": "calendar",
+      "capability": "calendar.list",
+      "adapter": "CalendarAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "date": "2026-09-23"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "absolute_date"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P073",
+        "P074"
+      ]
+    },
+    {
+      "task_id": "B038",
+      "canonical_input": "다음 일정이 뭐야?",
+      "expected_response": "다음 일정은 오늘 오전 10시 국제경영론 수업입니다.",
+      "domain": "calendar",
+      "capability": "calendar.next",
+      "adapter": "CalendarAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "after": "2026-09-21T09:00:00+09:00",
+        "event_id": "c1"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "next"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P075",
+        "P076"
+      ]
+    },
+    {
+      "task_id": "B039",
+      "canonical_input": "오늘 6시 이후 일정 알려줘",
+      "expected_response": "오늘 오후 6시 이후 일정은 1개입니다: 오후 7시 30분 저녁 약속.",
+      "domain": "calendar",
+      "capability": "calendar.list",
+      "adapter": "CalendarAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "date": "2026-09-21",
+        "after": "18:00"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "time_filter"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P077",
+        "P078"
+      ]
+    },
+    {
+      "task_id": "B040",
+      "canonical_input": "오늘 일정 몇 개야?",
+      "expected_response": "오늘 일정은 3개입니다.",
+      "domain": "calendar",
+      "capability": "calendar.count",
+      "adapter": "CalendarAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "date": "2026-09-21"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "count"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P079",
+        "P080"
+      ]
+    },
+    {
+      "task_id": "B041",
+      "canonical_input": "프로젝트 회의 일정 찾아줘",
+      "expected_response": "프로젝트 회의는 오늘 오후 3시부터 4시까지입니다.",
+      "domain": "calendar",
+      "capability": "calendar.search",
+      "adapter": "CalendarAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "query": "프로젝트 회의",
+        "event_id": "c2"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "search"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P081",
+        "P082"
+      ]
+    },
+    {
+      "task_id": "B042",
+      "canonical_input": "AIAC 들어간 일정 찾아줘",
+      "expected_response": "AIAC 관련 일정은 1개입니다: 9월 23일 오후 2시 AIAC 발표 준비.",
+      "domain": "calendar",
+      "capability": "calendar.search",
+      "adapter": "CalendarAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "query": "AIAC",
+        "event_id": "c6"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "search"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P083",
+        "P084"
+      ]
+    },
+    {
+      "task_id": "B043",
+      "canonical_input": "이번 주말 일정 알려줘",
+      "expected_response": "이번 주말인 9월 26일과 27일에는 등록된 일정이 없습니다.",
+      "domain": "calendar",
+      "capability": "calendar.list",
+      "adapter": "CalendarAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "start_date": "2026-09-26",
+        "end_date": "2026-09-27"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "date_range"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P085",
+        "P086"
+      ]
+    },
+    {
+      "task_id": "B044",
+      "canonical_input": "9월 21일부터 23일까지 일정 보여줘",
+      "expected_response": "9월 21일부터 23일까지 일정은 6개입니다: 국제경영론 수업, 프로젝트 회의, 저녁 약속, 교수님 면담, 실험실 작업, AIAC 발표 준비.",
+      "domain": "calendar",
+      "capability": "calendar.list",
+      "adapter": "CalendarAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "start_date": "2026-09-21",
+        "end_date": "2026-09-23"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "date_range"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P087",
+        "P088"
+      ]
+    },
+    {
+      "task_id": "B045",
+      "canonical_input": "내일 오후 1시에 시간 비어 있어?",
+      "expected_response": "내일 오후 1시부터 3시까지 실험실 작업이 있어 비어 있지 않습니다.",
+      "domain": "calendar",
+      "capability": "calendar.check_free",
+      "adapter": "CalendarAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "date": "2026-09-22",
+        "time": "13:00",
+        "free": false,
+        "conflict_event_id": "c5"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "availability"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P089",
+        "P090"
+      ]
+    },
+    {
+      "task_id": "B046",
+      "canonical_input": "내일 오후 4시에 일정 있어?",
+      "expected_response": "내일 오후 4시에는 등록된 일정이 없습니다.",
+      "domain": "calendar",
+      "capability": "calendar.check_free",
+      "adapter": "CalendarAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "date": "2026-09-22",
+        "time": "16:00",
+        "free": true
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "availability"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P091",
+        "P092"
+      ]
+    },
+    {
+      "task_id": "B047",
+      "canonical_input": "내일 오후 3시에 팀 회의 일정 추가해",
+      "expected_response": "내일 오후 3시에 ‘팀 회의’ 일정을 추가할까요?",
+      "domain": "calendar",
+      "capability": "calendar.add",
+      "adapter": "CalendarAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "date": "2026-09-22",
+        "time": "15:00",
+        "title": "팀 회의"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "add"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P093",
+        "P094"
+      ]
+    },
+    {
+      "task_id": "B048",
+      "canonical_input": "9월 24일에 기숙사 서류 제출 일정 추가해",
+      "expected_response": "9월 24일 종일 일정으로 ‘기숙사 서류 제출’을 추가할까요?",
+      "domain": "calendar",
+      "capability": "calendar.add",
+      "adapter": "CalendarAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "date": "2026-09-24",
+        "all_day": true,
+        "title": "기숙사 서류 제출"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "add",
+        "all_day"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P095",
+        "P096"
+      ]
+    },
+    {
+      "task_id": "B049",
+      "canonical_input": "내일 팀 회의 일정 추가해",
+      "expected_response": "내일 ‘팀 회의’를 몇 시에 추가할까요?",
+      "domain": "calendar",
+      "capability": "calendar.add",
+      "adapter": "CalendarAdapter",
+      "policy": "CLARIFY",
+      "expected_status": "needs_clarification",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "date": "2026-09-22",
+        "time": null,
+        "title": "팀 회의"
+      },
+      "route_hint": "PARSER_OR_LLM",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "missing_slot",
+        "time"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P097",
+        "P098"
+      ]
+    },
+    {
+      "task_id": "B050",
+      "canonical_input": "내일 오후 3시에 일정 하나 추가해",
+      "expected_response": "내일 오후 3시에 어떤 일정을 추가할까요?",
+      "domain": "calendar",
+      "capability": "calendar.add",
+      "adapter": "CalendarAdapter",
+      "policy": "CLARIFY",
+      "expected_status": "needs_clarification",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "date": "2026-09-22",
+        "time": "15:00",
+        "title": null
+      },
+      "route_hint": "PARSER_OR_LLM",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "missing_slot",
+        "title"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P099",
+        "P100"
+      ]
+    },
+    {
+      "task_id": "B051",
+      "canonical_input": "프로젝트 회의를 한 시간 뒤로 미뤄줘",
+      "expected_response": "프로젝트 회의를 오늘 오후 4시부터 5시로 옮길까요?",
+      "domain": "calendar",
+      "capability": "calendar.move",
+      "adapter": "CalendarAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "event_id": "c2",
+        "new_start": "2026-09-21T16:00:00+09:00",
+        "new_end": "2026-09-21T17:00:00+09:00"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "move",
+        "relative_time"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P101"
+      ]
+    },
+    {
+      "task_id": "B052",
+      "canonical_input": "프로젝트 회의 이름을 Room Hub 개발 회의로 바꿔줘",
+      "expected_response": "‘프로젝트 회의’를 ‘Room Hub 개발 회의’로 바꿀까요?",
+      "domain": "calendar",
+      "capability": "calendar.rename",
+      "adapter": "CalendarAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "event_id": "c2",
+        "new_title": "Room Hub 개발 회의"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "rename"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P102"
+      ]
+    },
+    {
+      "task_id": "B053",
+      "canonical_input": "오늘 저녁 약속 일정 삭제해",
+      "expected_response": "오늘 오후 7시 30분 ‘저녁 약속’ 일정을 삭제할까요?",
+      "domain": "calendar",
+      "capability": "calendar.delete",
+      "adapter": "CalendarAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "event_id": "c3"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "delete"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P103"
+      ]
+    },
+    {
+      "task_id": "B054",
+      "canonical_input": "내일 교수님 면담을 9월 23일로 옮겨줘",
+      "expected_response": "교수님 면담을 9월 23일 오전 9시로 옮길까요?",
+      "domain": "calendar",
+      "capability": "calendar.move",
+      "adapter": "CalendarAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "event_id": "c4",
+        "new_date": "2026-09-23",
+        "time": "09:00"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "move"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P104"
+      ]
+    },
+    {
+      "task_id": "B055",
+      "canonical_input": "AIAC 발표 준비를 오후 3시 30분에 끝나게 바꿔줘",
+      "expected_response": "9월 23일 ‘AIAC 발표 준비’ 종료 시간을 오후 3시 30분으로 바꿀까요?",
+      "domain": "calendar",
+      "capability": "calendar.update",
+      "adapter": "CalendarAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "event_id": "c6",
+        "new_end": "2026-09-23T15:30:00+09:00"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "update"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P105"
+      ]
+    },
+    {
+      "task_id": "B056",
+      "canonical_input": "현재 메모 내용 읽어줘",
+      "expected_response": "현재 메모에는 다음과 같이 적혀 있습니다: N150 서버에 Room Hub 이전 검토 / RTX 3060 12GB 중고 시세 확인.",
+      "domain": "memo",
+      "capability": "memo.read",
+      "adapter": "MemoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "memo_id": "memo.main"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "current"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P106"
+      ]
+    },
+    {
+      "task_id": "B057",
+      "canonical_input": "방금 수정한 메모 읽어줘",
+      "expected_response": "가장 최근에 수정된 메모는 ‘아이디어’입니다: Room Hub Parser를 LLM 이전 계층으로 추가 / 실패 로그를 벤치마크 데이터로 축적.",
+      "domain": "memo",
+      "capability": "memo.read",
+      "adapter": "MemoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "memo_id": "memo.idea",
+        "selector": "last_modified"
+      },
+      "route_hint": "CONTEXT_RESOLVER",
+      "route_strict": false,
+      "difficulty": "medium",
+      "tags": [
+        "read",
+        "context"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P107"
+      ]
+    },
+    {
+      "task_id": "B058",
+      "canonical_input": "메모 목록 보여줘",
+      "expected_response": "메모는 3개입니다: 현재 메모, 장보기, 아이디어.",
+      "domain": "memo",
+      "capability": "memo.list",
+      "adapter": "MemoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {},
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "list"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P108"
+      ]
+    },
+    {
+      "task_id": "B059",
+      "canonical_input": "장보기 메모 읽어줘",
+      "expected_response": "장보기 메모에는 우유, 세제, AA 건전지가 적혀 있습니다.",
+      "domain": "memo",
+      "capability": "memo.read",
+      "adapter": "MemoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "memo_id": "memo.shopping"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "named_entity"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P109"
+      ]
+    },
+    {
+      "task_id": "B060",
+      "canonical_input": "RTX가 들어간 메모 찾아줘",
+      "expected_response": "RTX가 포함된 메모는 ‘현재 메모’ 1개입니다.",
+      "domain": "memo",
+      "capability": "memo.search",
+      "adapter": "MemoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "query": "RTX",
+        "memo_ids": [
+          "memo.main"
+        ]
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "search"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P110"
+      ]
+    },
+    {
+      "task_id": "B061",
+      "canonical_input": "현재 메모 첫 줄만 읽어줘",
+      "expected_response": "현재 메모의 첫 줄은 ‘N150 서버에 Room Hub 이전 검토’입니다.",
+      "domain": "memo",
+      "capability": "memo.read_line",
+      "adapter": "MemoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "memo_id": "memo.main",
+        "line": 1
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "line"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P111"
+      ]
+    },
+    {
+      "task_id": "B062",
+      "canonical_input": "현재 메모 마지막 줄 읽어줘",
+      "expected_response": "현재 메모의 마지막 줄은 ‘RTX 3060 12GB 중고 시세 확인’입니다.",
+      "domain": "memo",
+      "capability": "memo.read_line",
+      "adapter": "MemoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "memo_id": "memo.main",
+        "line": "last"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "line"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P112"
+      ]
+    },
+    {
+      "task_id": "B063",
+      "canonical_input": "현재 메모 몇 줄이야?",
+      "expected_response": "현재 메모는 2줄입니다.",
+      "domain": "memo",
+      "capability": "memo.count_lines",
+      "adapter": "MemoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "memo_id": "memo.main"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "count"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P113"
+      ]
+    },
+    {
+      "task_id": "B064",
+      "canonical_input": "현재 메모에 Whisper base 성능 다시 측정 추가해",
+      "expected_response": "현재 메모 끝에 ‘Whisper base 성능 다시 측정’을 추가할까요?",
+      "domain": "memo",
+      "capability": "memo.append",
+      "adapter": "MemoAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "memo_id": "memo.main",
+        "text": "Whisper base 성능 다시 측정"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "append"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P114"
+      ]
+    },
+    {
+      "task_id": "B065",
+      "canonical_input": "현재 메모 내용을 N150 이전 작업 우선 진행으로 바꿔줘",
+      "expected_response": "현재 메모의 기존 내용을 모두 ‘N150 이전 작업 우선 진행’으로 바꿀까요?",
+      "domain": "memo",
+      "capability": "memo.write",
+      "adapter": "MemoAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "memo_id": "memo.main",
+        "text": "N150 이전 작업 우선 진행",
+        "mode": "replace"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "replace"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P115"
+      ]
+    },
+    {
+      "task_id": "B066",
+      "canonical_input": "장보기 메모 비워줘",
+      "expected_response": "장보기 메모의 내용을 모두 지울까요?",
+      "domain": "memo",
+      "capability": "memo.clear",
+      "adapter": "MemoAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "memo_id": "memo.shopping"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "clear"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P116"
+      ]
+    },
+    {
+      "task_id": "B067",
+      "canonical_input": "기숙사 준비물이라는 메모 만들고 충전기, 멀티탭, 세면도구 적어줘",
+      "expected_response": "‘기숙사 준비물’ 메모를 만들고 ‘충전기, 멀티탭, 세면도구’를 적을까요?",
+      "domain": "memo",
+      "capability": "memo.create",
+      "adapter": "MemoAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "title": "기숙사 준비물",
+        "content": "충전기, 멀티탭, 세면도구"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "create"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P117"
+      ]
+    },
+    {
+      "task_id": "B068",
+      "canonical_input": "아이디어 메모 이름을 Room Hub 개선안으로 바꿔줘",
+      "expected_response": "‘아이디어’ 메모 이름을 ‘Room Hub 개선안’으로 바꿀까요?",
+      "domain": "memo",
+      "capability": "memo.rename",
+      "adapter": "MemoAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "memo_id": "memo.idea",
+        "new_title": "Room Hub 개선안"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "rename"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P118"
+      ]
+    },
+    {
+      "task_id": "B069",
+      "canonical_input": "장보기 메모 삭제해",
+      "expected_response": "‘장보기’ 메모를 삭제할까요?",
+      "domain": "memo",
+      "capability": "memo.delete",
+      "adapter": "MemoAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "memo_id": "memo.shopping"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "delete"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P119"
+      ]
+    },
+    {
+      "task_id": "B070",
+      "canonical_input": "새 메모 하나 만들어줘",
+      "expected_response": "새 메모에 어떤 내용을 적을까요?",
+      "domain": "memo",
+      "capability": "memo.create",
+      "adapter": "MemoAdapter",
+      "policy": "CLARIFY",
+      "expected_status": "needs_clarification",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "title": null,
+        "content": null
+      },
+      "route_hint": "PARSER_OR_LLM",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "missing_slot"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P120"
+      ]
+    },
+    {
+      "task_id": "B071",
+      "canonical_input": "알람 목록 보여줘",
+      "expected_response": "알람은 3개입니다: 오전 7시 30분 기상(켜짐), 오후 1시 20분 수업 준비(켜짐), 오후 10시 30분 취침 준비(꺼짐).",
+      "domain": "alarm",
+      "capability": "alarm.list",
+      "adapter": "AlarmAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {},
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "list"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P121"
+      ]
+    },
+    {
+      "task_id": "B072",
+      "canonical_input": "켜져 있는 알람만 알려줘",
+      "expected_response": "현재 켜져 있는 알람은 2개입니다: 오전 7시 30분 기상, 오후 1시 20분 수업 준비.",
+      "domain": "alarm",
+      "capability": "alarm.list",
+      "adapter": "AlarmAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "enabled": true
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "filter"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P122"
+      ]
+    },
+    {
+      "task_id": "B073",
+      "canonical_input": "다음 알람 언제야?",
+      "expected_response": "다음 활성 알람은 오늘 오후 1시 20분 ‘수업 준비’입니다.",
+      "domain": "alarm",
+      "capability": "alarm.next",
+      "adapter": "AlarmAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "alarm_id": "a2"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "read",
+        "next"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P123"
+      ]
+    },
+    {
+      "task_id": "B074",
+      "canonical_input": "내일 아침 7시 25분에 알람 맞춰줘",
+      "expected_response": "내일 오전 7시 25분 알람을 설정할까요?",
+      "domain": "alarm",
+      "capability": "alarm.set",
+      "adapter": "AlarmAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "date": "2026-09-22",
+        "time": "07:25",
+        "label": null
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "set",
+        "relative_date"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P124"
+      ]
+    },
+    {
+      "task_id": "B075",
+      "canonical_input": "오늘 오전 12시 40분에 알람 맞춰줘",
+      "expected_response": "오늘 오전 12시 40분은 이미 지난 시간입니다. 다음 날 오전 12시 40분으로 설정할까요?",
+      "domain": "alarm",
+      "capability": "alarm.set",
+      "adapter": "AlarmAdapter",
+      "policy": "CLARIFY",
+      "expected_status": "needs_clarification",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "requested_date": "2026-09-21",
+        "requested_time": "00:40",
+        "past_time": true
+      },
+      "route_hint": "PARSER_OR_LLM",
+      "route_strict": false,
+      "difficulty": "hard",
+      "tags": [
+        "time",
+        "past_time",
+        "safety"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P125"
+      ]
+    },
+    {
+      "task_id": "B076",
+      "canonical_input": "10분 뒤에 알람 맞춰줘",
+      "expected_response": "오전 9시 10분 알람을 설정할까요?",
+      "domain": "alarm",
+      "capability": "alarm.set",
+      "adapter": "AlarmAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "date": "2026-09-21",
+        "time": "09:10",
+        "relative_minutes": 10
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "relative_time"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P126"
+      ]
+    },
+    {
+      "task_id": "B077",
+      "canonical_input": "평일마다 오전 7시 30분 알람 설정해",
+      "expected_response": "평일마다 오전 7시 30분 알람을 설정할까요?",
+      "domain": "alarm",
+      "capability": "alarm.set",
+      "adapter": "AlarmAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "time": "07:30",
+        "repeat": "weekdays"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "recurring"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P127"
+      ]
+    },
+    {
+      "task_id": "B078",
+      "canonical_input": "밤 10시 30분 취침 준비 알람 켜줘",
+      "expected_response": "오후 10시 30분 ‘취침 준비’ 알람을 켤까요?",
+      "domain": "alarm",
+      "capability": "alarm.enable",
+      "adapter": "AlarmAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "alarm_id": "a3"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "enable"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P128"
+      ]
+    },
+    {
+      "task_id": "B079",
+      "canonical_input": "오후 1시 20분 알람 꺼줘",
+      "expected_response": "오후 1시 20분 ‘수업 준비’ 알람을 끌까요?",
+      "domain": "alarm",
+      "capability": "alarm.disable",
+      "adapter": "AlarmAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "alarm_id": "a2"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "disable"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P129"
+      ]
+    },
+    {
+      "task_id": "B080",
+      "canonical_input": "오후 1시 20분 알람 삭제해",
+      "expected_response": "오후 1시 20분 ‘수업 준비’ 알람을 삭제할까요?",
+      "domain": "alarm",
+      "capability": "alarm.cancel",
+      "adapter": "AlarmAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "alarm_id": "a2"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "delete"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P130"
+      ]
+    },
+    {
+      "task_id": "B081",
+      "canonical_input": "기상 알람 이름을 아침 기상으로 바꿔줘",
+      "expected_response": "오전 7시 30분 ‘기상’ 알람 이름을 ‘아침 기상’으로 바꿀까요?",
+      "domain": "alarm",
+      "capability": "alarm.rename",
+      "adapter": "AlarmAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "alarm_id": "a1",
+        "new_label": "아침 기상"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "rename"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P131"
+      ]
+    },
+    {
+      "task_id": "B082",
+      "canonical_input": "오전 7시 30분 알람을 7시 45분으로 바꿔줘",
+      "expected_response": "‘기상’ 알람 시간을 오전 7시 45분으로 바꿀까요?",
+      "domain": "alarm",
+      "capability": "alarm.update",
+      "adapter": "AlarmAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "alarm_id": "a1",
+        "new_time": "07:45"
+      },
+      "route_hint": "FAST_OR_PARSER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "write",
+        "time_update"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P132"
+      ]
+    },
+    {
+      "task_id": "B083",
+      "canonical_input": "내일 알람 맞춰줘",
+      "expected_response": "내일 몇 시에 알람을 설정할까요?",
+      "domain": "alarm",
+      "capability": "alarm.set",
+      "adapter": "AlarmAdapter",
+      "policy": "CLARIFY",
+      "expected_status": "needs_clarification",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "date": "2026-09-22",
+        "time": null
+      },
+      "route_hint": "PARSER_OR_LLM",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "missing_slot",
+        "time"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P133"
+      ]
+    },
+    {
+      "task_id": "B084",
+      "canonical_input": "내일 아침쯤 알람 맞춰줘",
+      "expected_response": "내일 아침 몇 시에 알람을 설정할까요?",
+      "domain": "alarm",
+      "capability": "alarm.set",
+      "adapter": "AlarmAdapter",
+      "policy": "CLARIFY",
+      "expected_status": "needs_clarification",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "date": "2026-09-22",
+        "time": null,
+        "vague_time": "아침쯤"
+      },
+      "route_hint": "PARSER_OR_LLM",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "vague_time",
+        "clarify"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P134"
+      ]
+    },
+    {
+      "task_id": "B085",
+      "canonical_input": "알람 하나 취소해 줘",
+      "expected_response": "취소할 알람을 지정해 주세요. 현재 알람은 오전 7시 30분 기상, 오후 1시 20분 수업 준비, 오후 10시 30분 취침 준비입니다.",
+      "domain": "alarm",
+      "capability": "alarm.cancel",
+      "adapter": "AlarmAdapter",
+      "policy": "CLARIFY",
+      "expected_status": "needs_clarification",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "alarm_id": null
+      },
+      "route_hint": "PARSER_OR_LLM",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "ambiguity",
+        "entity_resolution"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P135"
+      ]
+    },
+    {
+      "task_id": "B086",
+      "canonical_input": "응, 그렇게 해",
+      "expected_response": "내일 오전 7시 25분 알람을 설정했습니다.",
+      "domain": "context",
+      "capability": "context.confirm",
+      "adapter": "AlarmAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "resolves_pending": "alarm.set",
+        "date": "2026-09-22",
+        "time": "07:25"
+      },
+      "route_hint": "CONTEXT_RESOLVER",
+      "route_strict": false,
+      "difficulty": "medium",
+      "tags": [
+        "context",
+        "confirmation"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P136"
+      ]
+    },
+    {
+      "task_id": "B087",
+      "canonical_input": "아니, 취소해",
+      "expected_response": "대기 중이던 요청을 취소했습니다.",
+      "domain": "context",
+      "capability": "context.cancel",
+      "adapter": "ContextResolver",
+      "policy": "CANCEL",
+      "expected_status": "cancelled",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "cancels_pending": true
+      },
+      "route_hint": "CONTEXT_RESOLVER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "context",
+        "cancel"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P137"
+      ]
+    },
+    {
+      "task_id": "B088",
+      "canonical_input": "아니, 7시 40분으로 바꿔",
+      "expected_response": "내일 오전 7시 40분 알람으로 변경해 설정할까요?",
+      "domain": "context",
+      "capability": "context.edit_pending",
+      "adapter": "ContextResolver",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "pending_action": "alarm.set",
+        "new_time": "07:40",
+        "date": "2026-09-22"
+      },
+      "route_hint": "CONTEXT_RESOLVER",
+      "route_strict": false,
+      "difficulty": "medium",
+      "tags": [
+        "context",
+        "edit"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P138"
+      ]
+    },
+    {
+      "task_id": "B089",
+      "canonical_input": "오후 3시",
+      "expected_response": "내일 오후 3시에 ‘팀 회의’ 일정을 추가할까요?",
+      "domain": "context",
+      "capability": "context.fill_slot",
+      "adapter": "ContextResolver",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "pending_action": "calendar.add",
+        "time": "15:00",
+        "date": "2026-09-22",
+        "title": "팀 회의"
+      },
+      "route_hint": "CONTEXT_RESOLVER",
+      "route_strict": false,
+      "difficulty": "medium",
+      "tags": [
+        "context",
+        "slot_fill"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P139"
+      ]
+    },
+    {
+      "task_id": "B090",
+      "canonical_input": "우유 사기",
+      "expected_response": "내일 할 일에 ‘우유 사기’를 추가할까요?",
+      "domain": "context",
+      "capability": "context.fill_slot",
+      "adapter": "ContextResolver",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "pending_action": "todo.add",
+        "date": "2026-09-22",
+        "text": "우유 사기"
+      },
+      "route_hint": "CONTEXT_RESOLVER",
+      "route_strict": false,
+      "difficulty": "medium",
+      "tags": [
+        "context",
+        "slot_fill"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P140"
+      ]
+    },
+    {
+      "task_id": "B091",
+      "canonical_input": "두 번째 거 완료해",
+      "expected_response": "‘세탁물 찾기’를 완료 처리할까요?",
+      "domain": "context",
+      "capability": "context.reference",
+      "adapter": "TodoAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "reference": "last_todo_result_ids[1]",
+        "task_id": "t2"
+      },
+      "route_hint": "CONTEXT_RESOLVER",
+      "route_strict": false,
+      "difficulty": "hard",
+      "tags": [
+        "context",
+        "ordinal_reference"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P141"
+      ]
+    },
+    {
+      "task_id": "B092",
+      "canonical_input": "그 일정 한 시간 미뤄줘",
+      "expected_response": "‘프로젝트 회의’를 오늘 오후 4시부터 5시로 옮길까요?",
+      "domain": "context",
+      "capability": "context.reference",
+      "adapter": "CalendarAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "reference": "last_calendar_event_id",
+        "event_id": "c2",
+        "offset_minutes": 60
+      },
+      "route_hint": "CONTEXT_RESOLVER",
+      "route_strict": false,
+      "difficulty": "hard",
+      "tags": [
+        "context",
+        "pronoun"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P142"
+      ]
+    },
+    {
+      "task_id": "B093",
+      "canonical_input": "그 메모 읽어줘",
+      "expected_response": "가장 최근에 수정된 ‘아이디어’ 메모에는 다음과 같이 적혀 있습니다: Room Hub Parser를 LLM 이전 계층으로 추가 / 실패 로그를 벤치마크 데이터로 축적.",
+      "domain": "context",
+      "capability": "context.reference",
+      "adapter": "MemoAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "reference": "last_modified_widget",
+        "memo_id": "memo.idea"
+      },
+      "route_hint": "CONTEXT_RESOLVER",
+      "route_strict": false,
+      "difficulty": "hard",
+      "tags": [
+        "context",
+        "pronoun"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P143"
+      ]
+    },
+    {
+      "task_id": "B094",
+      "canonical_input": "아까 설정한 알람 취소해",
+      "expected_response": "가장 최근 알람 요청을 취소할까요?",
+      "domain": "context",
+      "capability": "context.reference",
+      "adapter": "AlarmAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "reference": "last_alarm_action"
+      },
+      "route_hint": "CONTEXT_RESOLVER",
+      "route_strict": false,
+      "difficulty": "hard",
+      "tags": [
+        "context",
+        "recent_action"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P144"
+      ]
+    },
+    {
+      "task_id": "B095",
+      "canonical_input": "오늘 할 일하고 오후 일정 같이 알려줘",
+      "expected_response": "오늘 미완료 할 일은 5개이고, 오늘 오후 일정은 오후 3시 프로젝트 회의 1개입니다.",
+      "domain": "context",
+      "capability": "multi.read",
+      "adapter": "MultiAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {},
+      "route_hint": "MULTI_INTENT_OR_LLM",
+      "route_strict": false,
+      "difficulty": "hard",
+      "tags": [
+        "compound",
+        "multi_intent"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P145"
+      ]
+    },
+    {
+      "task_id": "B096",
+      "canonical_input": "내일 우유 사기 할 일 추가하고 아침 7시 25분 알람도 맞춰줘",
+      "expected_response": "두 작업을 진행할까요? 내일 할 일에 ‘우유 사기’를 추가하고, 내일 오전 7시 25분 알람을 설정합니다.",
+      "domain": "context",
+      "capability": "multi.write",
+      "adapter": "MultiAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {},
+      "route_hint": "MULTI_INTENT_OR_LLM",
+      "route_strict": false,
+      "difficulty": "hard",
+      "tags": [
+        "compound",
+        "multi_intent",
+        "write"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P146"
+      ]
+    },
+    {
+      "task_id": "B097",
+      "canonical_input": "내일 일정이 없으면 오전 9시에 알람 맞춰줘",
+      "expected_response": "조건부 실행은 현재 지원하지 않습니다. 내일 일정 조회와 오전 9시 알람 설정 중 어떤 작업부터 할까요?",
+      "domain": "context",
+      "capability": "conditional.unsupported",
+      "adapter": "ContextResolver",
+      "policy": "CLARIFY",
+      "expected_status": "unsupported",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "condition": "calendar_empty_tomorrow",
+        "then": "alarm.set@09:00"
+      },
+      "route_hint": "LLM_OR_UNSUPPORTED",
+      "route_strict": false,
+      "difficulty": "hard",
+      "tags": [
+        "conditional",
+        "unsupported",
+        "safety"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P147"
+      ]
+    },
+    {
+      "task_id": "B098",
+      "canonical_input": "현재 메모 내용을 오늘 할 일로 추가해",
+      "expected_response": "현재 메모 내용을 하나의 오늘 할 일로 추가할까요? 내용: ‘N150 서버에 Room Hub 이전 검토 / RTX 3060 12GB 중고 시세 확인’.",
+      "domain": "context",
+      "capability": "cross_widget.transfer",
+      "adapter": "MultiAdapter",
+      "policy": "CONFIRM",
+      "expected_status": "needs_confirmation",
+      "adapter_should_execute": false,
+      "expected_slots": {},
+      "route_hint": "CONTEXT_RESOLVER_OR_LLM",
+      "route_strict": false,
+      "difficulty": "hard",
+      "tags": [
+        "cross_widget",
+        "context",
+        "write"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P148"
+      ]
+    },
+    {
+      "task_id": "B099",
+      "canonical_input": "알람은 설정하지 말고 내일 첫 일정만 알려줘",
+      "expected_response": "내일 첫 일정은 오전 9시 교수님 면담입니다. 알람은 설정하지 않았습니다.",
+      "domain": "context",
+      "capability": "negative_scope",
+      "adapter": "CalendarAdapter",
+      "policy": "EXECUTE",
+      "expected_status": "success",
+      "adapter_should_execute": true,
+      "expected_slots": {
+        "date": "2026-09-22",
+        "position": 1,
+        "event_id": "c4",
+        "prohibited_action": "alarm.set"
+      },
+      "route_hint": "SEMANTIC_OR_LLM",
+      "route_strict": false,
+      "difficulty": "hard",
+      "tags": [
+        "negation",
+        "safety",
+        "read"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P149"
+      ]
+    },
+    {
+      "task_id": "B100",
+      "canonical_input": "됐어, 방금 요청은 전부 취소해",
+      "expected_response": "대기 중인 요청을 모두 취소했습니다.",
+      "domain": "context",
+      "capability": "context.cancel_all",
+      "adapter": "ContextResolver",
+      "policy": "CANCEL",
+      "expected_status": "cancelled",
+      "adapter_should_execute": false,
+      "expected_slots": {
+        "cancel_scope": "all_pending"
+      },
+      "route_hint": "CONTEXT_RESOLVER",
+      "route_strict": false,
+      "difficulty": "easy",
+      "tags": [
+        "context",
+        "cancel_all"
+      ],
+      "notes": "",
+      "paraphrase_ids": [
+        "P150"
+      ]
+    }
+  ]
+}

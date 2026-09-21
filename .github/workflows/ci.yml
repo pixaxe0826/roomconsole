@@ -49,6 +49,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ffmpeg nginx openssl
       - run: python -m pip install -r requirements-dev.txt
       - run: python scripts/check_repo.py --json artifacts/test-results/repository.json
+      - run: python -m benchmarks validate --suite room_hub_v1
       - name: V35 Git updater shell syntax
         if: runner.os == 'Linux'
         run: bash -n deploy/termux/adopt-git.sh deploy/termux/update-from-git.sh
@@ -73,6 +74,7 @@ jobs:
           tests/test_remote_update.py
           tests/test_timers.py
           tests/test_timer_bridge.py
+          tests/test_benchmark.py
           --timeout=30
           --timeout-method=thread
           --junitxml=artifacts/test-results/backend.xml

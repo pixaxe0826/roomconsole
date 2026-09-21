@@ -1,0 +1,203 @@
+{
+  "reference_datetime": "2026-09-21T09:00:00+09:00",
+  "timezone": "Asia/Seoul",
+  "todos": [
+    {
+      "id": "t1",
+      "text": "보고서 초안 작성",
+      "due_date": "2026-09-21",
+      "due_time": null,
+      "status": "pending"
+    },
+    {
+      "id": "t2",
+      "text": "세탁물 찾기",
+      "due_date": "2026-09-21",
+      "due_time": null,
+      "status": "pending"
+    },
+    {
+      "id": "t3",
+      "text": "우유 사기",
+      "due_date": "2026-09-22",
+      "due_time": null,
+      "status": "pending"
+    },
+    {
+      "id": "t4",
+      "text": "AIAC 소개문 수정",
+      "due_date": "2026-09-23",
+      "due_time": null,
+      "status": "pending"
+    },
+    {
+      "id": "t5",
+      "text": "USB 허브 주문",
+      "due_date": "2026-09-20",
+      "due_time": null,
+      "status": "completed"
+    },
+    {
+      "id": "t6",
+      "text": "동역학 과제 제출",
+      "due_date": "2026-09-21",
+      "due_time": "17:00",
+      "status": "pending"
+    },
+    {
+      "id": "t7",
+      "text": "서버 백업 상태 확인",
+      "due_date": "2026-09-21",
+      "due_time": null,
+      "status": "pending"
+    },
+    {
+      "id": "t8",
+      "text": "책상 정리",
+      "due_date": "2026-09-20",
+      "due_time": null,
+      "status": "pending"
+    },
+    {
+      "id": "t9",
+      "text": "택배 찾기",
+      "due_date": "2026-09-21",
+      "due_time": null,
+      "status": "completed"
+    },
+    {
+      "id": "t10",
+      "text": "보고서 제출 준비",
+      "due_date": "2026-09-21",
+      "due_time": null,
+      "status": "pending"
+    }
+  ],
+  "calendar": [
+    {
+      "id": "c1",
+      "title": "국제경영론 수업",
+      "start": "2026-09-21T10:00:00+09:00",
+      "end": "2026-09-21T11:30:00+09:00",
+      "all_day": false
+    },
+    {
+      "id": "c2",
+      "title": "프로젝트 회의",
+      "start": "2026-09-21T15:00:00+09:00",
+      "end": "2026-09-21T16:00:00+09:00",
+      "all_day": false
+    },
+    {
+      "id": "c3",
+      "title": "저녁 약속",
+      "start": "2026-09-21T19:30:00+09:00",
+      "end": "2026-09-21T21:00:00+09:00",
+      "all_day": false
+    },
+    {
+      "id": "c4",
+      "title": "교수님 면담",
+      "start": "2026-09-22T09:00:00+09:00",
+      "end": "2026-09-22T09:30:00+09:00",
+      "all_day": false
+    },
+    {
+      "id": "c5",
+      "title": "실험실 작업",
+      "start": "2026-09-22T13:00:00+09:00",
+      "end": "2026-09-22T15:00:00+09:00",
+      "all_day": false
+    },
+    {
+      "id": "c6",
+      "title": "AIAC 발표 준비",
+      "start": "2026-09-23T14:00:00+09:00",
+      "end": "2026-09-23T16:00:00+09:00",
+      "all_day": false
+    },
+    {
+      "id": "c7",
+      "title": "도서 반납",
+      "start": "2026-09-24",
+      "end": "2026-09-24",
+      "all_day": true
+    }
+  ],
+  "memos": [
+    {
+      "id": "memo.main",
+      "title": "현재 메모",
+      "content": "N150 서버에 Room Hub 이전 검토\nRTX 3060 12GB 중고 시세 확인",
+      "updated_at": "2026-09-21T08:30:00+09:00"
+    },
+    {
+      "id": "memo.shopping",
+      "title": "장보기",
+      "content": "우유\n세제\nAA 건전지",
+      "updated_at": "2026-09-20T20:10:00+09:00"
+    },
+    {
+      "id": "memo.idea",
+      "title": "아이디어",
+      "content": "Room Hub Parser를 LLM 이전 계층으로 추가\n실패 로그를 벤치마크 데이터로 축적",
+      "updated_at": "2026-09-21T08:45:00+09:00"
+    }
+  ],
+  "alarms": [
+    {
+      "id": "a1",
+      "time": "07:30",
+      "label": "기상",
+      "enabled": true,
+      "repeat": "daily"
+    },
+    {
+      "id": "a2",
+      "time": "13:20",
+      "label": "수업 준비",
+      "enabled": true,
+      "repeat": "once"
+    },
+    {
+      "id": "a3",
+      "time": "22:30",
+      "label": "취침 준비",
+      "enabled": false,
+      "repeat": "weekdays"
+    }
+  ],
+  "session": {
+    "active_widget": "memo.main",
+    "last_modified_widget": "memo.idea",
+    "last_todo_result_ids": [
+      "t1",
+      "t2",
+      "t6"
+    ],
+    "last_calendar_event_id": "c2",
+    "last_alarm_id": "a2",
+    "last_added_todo_id": "t3",
+    "pending_alarm": {
+      "action": "alarm.set",
+      "date": "2026-09-22",
+      "time": "07:25",
+      "label": null
+    },
+    "pending_todo_complete": {
+      "action": "todo.complete",
+      "task_id": "t1"
+    },
+    "pending_calendar_add": {
+      "action": "calendar.add",
+      "date": "2026-09-22",
+      "time": null,
+      "title": "팀 회의"
+    },
+    "pending_todo_add": {
+      "action": "todo.add",
+      "date": "2026-09-22",
+      "text": null
+    }
+  }
+}

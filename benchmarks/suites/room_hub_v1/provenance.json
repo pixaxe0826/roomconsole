@@ -1,0 +1,21 @@
+{
+  "input_archive": "room_hub_benchmark_v1_250.zip",
+  "input_archive_sha256": "36d9660af62cbcec3ba8a4e3195da62985d6e5e4b1d0c20f68fe3b287c075b9c",
+  "preserved_files": {
+    "all_250.jsonl": "7cf39a1599fd11854f131a5321fdb4e077054b58a7d8463b2a0d7c7306eb0ec2",
+    "fixtures.json": "73683f91c632004859cee12d529cf4b1ff44184cc03592ff221d3ea7e3900948",
+    "unique_tasks_registry_v1.json": "8a134440b6e1523088ac20a8b5ea60205bf11014cc17b9801663c4548c6f9e7d",
+    "SOURCES.md": "a91533e6ebc44f6fa6108f61ec56a3565ca1a4e540d167e4581cdd429812ce62"
+  },
+  "adapted_metadata": [
+    "manifest.json",
+    "schema.json"
+  ],
+  "added_metadata": [
+    "projection.json",
+    "README.md",
+    "provenance.json"
+  ],
+  "gold_answers_modified": false,
+  "fixture_content_modified": false
+}

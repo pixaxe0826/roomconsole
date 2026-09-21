@@ -1,0 +1,51 @@
+{
+  "version": "1.0",
+  "capability_aliases": {
+    "todo.create": "todo.add",
+    "todo.uncomplete": "todo.reopen",
+    "calendar.query": "calendar.list"
+  },
+  "slot_aliases": {
+    "todo": {
+      "title": "text"
+    },
+    "memo": {
+      "body": "text"
+    }
+  },
+  "target_slots": {
+    "memo": "memo_id",
+    "todo": "task_id",
+    "calendar": "event_id",
+    "alarm": "alarm_id",
+    "timer": "timer_id"
+  },
+  "critical_slot_keys": [
+    "date",
+    "time",
+    "text",
+    "title",
+    "memo_id",
+    "task_id",
+    "task_ids",
+    "event_id",
+    "alarm_id",
+    "timer_id",
+    "start_date",
+    "end_date",
+    "new_date",
+    "new_time",
+    "new_start",
+    "new_end",
+    "new_title",
+    "new_text",
+    "content",
+    "duration_seconds"
+  ],
+  "unordered_slots": [
+    "task_ids",
+    "memo_ids",
+    "matches"
+  ],
+  "notes": "Projection changes representation only; it does not infer source slots or change all to pending. Expected natural-language responses are advisory unless a case declares response_assertions."
+}
