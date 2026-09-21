@@ -67,6 +67,7 @@ jobs:
           tests/test_repo_packaging.py
           tests/test_life.py
           tests/test_life_update.py
+          tests/test_widget_protocol.py
           --timeout=30
           --timeout-method=thread
           --junitxml=artifacts/test-results/backend.xml

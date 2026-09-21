@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from .models import *
 from . import llm_display
 from .life import LifeService, register_routes as register_life_routes
+from . import widget_protocol
 from .clock_service import clock_context
 from .capabilities import manifest as capability_manifest
 from .assistant import Confirmation
@@ -311,6 +312,11 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
    else:cur=db.execute('DELETE FROM tasks WHERE series_id=?',(task['series_id'],))
    count=cur.rowcount;db.execute('DELETE FROM series WHERE id NOT IN(SELECT series_id FROM tasks WHERE series_id IS NOT NULL)')
   await changed('task.deleted',str(count));return {'deleted':count}
+ # Reuse the exact existing CRUD handlers; protocol does not replace UI/assistant paths.
+ protocol=widget_protocol.build_registry(store,life,changed,
+  widget_protocol.TaskServices(add_task,edit_task,complete_task,delete_task))
+ app.state.widget_protocol=protocol
+ widget_protocol.register_routes(app,protocol,admin)
  @app.get('/api/admin/export')
  async def export(_=Depends(admin)):
   with store.connect() as db:series=[dict(r) for r in db.execute('SELECT * FROM series')]
