@@ -432,7 +432,7 @@ def test_audit_error_does_not_report_committed_write_as_failure(hub):
     assert len(app.state.store.tasks()) == 1
 
 
-def test_alarm_read_only_actual_service_and_unavailable_controls(hub):
+def test_alarm_actual_service_and_confirmation_guarded_controls(hub):
     app, client, registry = hub
     added = client.post('/api/life/alarms', json={'request_id': uuid.uuid4().hex, 'label': '합성 알람',
                         'time': '15:00', 'date': '2099-01-01'})
@@ -440,8 +440,12 @@ def test_alarm_read_only_actual_service_and_unavailable_controls(hub):
     result = run(registry, req('alarm', 'list'))
     assert result.status == 'success' and result.data['items'][0]['id'] == added.json()['id']
     assert result.data['delivery'] == 'foreground_browser_only' and not result.data['sound_confirmed']
-    unavailable = run(registry, req('alarm', 'set', {'label': '추가 안됨', 'time': '16:00', 'date': '2099-01-01'}), confirmed=True)
-    assert unavailable.status == 'unavailable' and len(app.state.life.alarms()) == 1
+    pending = req('alarm', 'set', {'label': '확인된 추가', 'time': '16:00', 'date': '2099-01-01'})
+    assert run(registry, pending).status == 'needs_confirmation'
+    assert len(app.state.life.alarms()) == 1
+    created = run(registry, pending, confirmed=True)
+    assert created.status == 'success' and len(app.state.life.alarms()) == 2
+    assert created.data['sound_confirmed'] is False
 
 
 @pytest.mark.parametrize('body', [b'{', b'null', b'[]', b'{"request_id":"a","request_id":"b"}',

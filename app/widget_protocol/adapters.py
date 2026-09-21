@@ -10,12 +10,12 @@ import hashlib
 from types import MappingProxyType
 from typing import Callable
 
-from ..life import LifeService, NoteCreate, NoteUpdate, memo_snapshot
+from ..life import LifeService, NoteCreate, NoteUpdate, AlarmCreate, memo_snapshot
 from ..models import TaskCompletion
 from .core import (AdapterResult, ExecutionContext, Operation, ProtocolFault,
                    WidgetAdapter, WidgetRegistry, missing)
 from .models import WidgetRequest
-from .schemas import (AlarmInput, AlarmsList, Empty, MemoAppend, MemoData,
+from .schemas import (AlarmInput, AlarmsList, AlarmMutation, Empty, MemoAppend, MemoData,
                       MemoMutation, MemoWrite, TaskCreate, TaskData, TaskList,
                       TaskPatch, TaskQuery, TasksCreated, TasksDeleted, VersionArgs)
 
@@ -230,17 +230,34 @@ class AlarmAdapter(StoredAdapter):
     health_table = 'hub_alarms'
     operations = MappingProxyType({
         'list': Operation(Empty, AlarmsList, '실제 웹 알람 예약 조회; Android/푸시 알람 아님'),
-        'set': Operation(AlarmInput, Empty, '예약 제어 연결은 후속 PR', False, 'control', available=False),
-        'cancel': Operation(VersionArgs, Empty, '예약 제어 연결은 후속 PR', False, 'control', ('item_id',), True, False),
+        'set': Operation(AlarmInput, AlarmMutation, '확인 후 기존 웹 알람 예약 생성; 네이티브 알람 아님', False, 'control'),
+        'cancel': Operation(VersionArgs, AlarmMutation, '확인 후 지정 ID/버전의 웹 알람 예약 삭제', False, 'control', ('item_id',), True),
     })
 
-    def __init__(self, store, life):
+    def __init__(self, store, life, changed):
         super().__init__(store)
-        self.life = life
+        self.life, self.changed = life, changed
+
+    def validate_slots(self, request, args):
+        if request.action == 'set':
+            self.life._validated_alarm(args)  # Same future-time/DST validation as manager CRUD.
 
     async def _execute(self, request, args, authority=None):
-        return AdapterResult({'items': await asyncio.to_thread(self.life.alarms),
-                              'delivery': 'foreground_browser_only', 'sound_confirmed': False})
+        if request.action == 'list':
+            return AdapterResult({'items': await asyncio.to_thread(self.life.alarms),
+                                  'delivery': 'foreground_browser_only', 'sound_confirmed': False})
+        if request.action == 'set':
+            # Persistent service receipt is scoped to the trusted caller and exact key.
+            key = hashlib.sha256((authority.principal + ':' + (request.idempotency_key or request.request_id)).encode()).hexdigest()
+            result = await asyncio.to_thread(self.life.create_alarm,
+                AlarmCreate(**args.model_dump(), request_id=key))
+            if not result['duplicate']:
+                await self.changed('alarm.created', result['id'])
+            return AdapterResult(result, changed=not result['duplicate'], event='alarm.created', entity_id=result['id'])
+        result = await asyncio.to_thread(self.life.delete_alarm, request.target.value, args.version)
+        await self.changed('alarm.deleted', request.target.value)
+        return AdapterResult({'id': request.target.value, 'cancelled': result['deleted']},
+                             changed=result['deleted'], event='alarm.deleted', entity_id=request.target.value)
 
 
 def build_registry(store, life, changed, task_services: TaskServices) -> WidgetRegistry:
@@ -255,6 +272,6 @@ def build_registry(store, life, changed, task_services: TaskServices) -> WidgetR
 
     registry = WidgetRegistry(audit=audit)
     for adapter in (MemoAdapter(store, life, changed), TodoAdapter(store, task_services),
-                    CalendarAdapter(store, task_services), AlarmAdapter(store, life)):
+                    CalendarAdapter(store, task_services), AlarmAdapter(store, life, changed)):
         registry.register(adapter)
     return registry

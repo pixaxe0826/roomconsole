@@ -116,6 +116,9 @@ def status(root: Path, remote_name: str, remote_branch: str) -> dict:
     remote_ref = f"{remote_name}/{remote_branch}"
     local = git_out(root, "rev-parse", "HEAD")
     remote = git_out(root, "rev-parse", remote_ref)
+    expected_main = os.environ.get("ROOM_HUB_EXPECTED_MAIN")
+    if expected_main and remote != expected_main:
+        stop("origin/main changed after CI verification. Run the updater again; service not stopped.")
     local_tree = git_out(root, "rev-parse", "HEAD^{tree}")
     remote_tree = git_out(root, "rev-parse", f"{remote_ref}^{{tree}}")
     counts = git_out(root, "rev-list", "--left-right", "--count", f"HEAD...{remote_ref}")

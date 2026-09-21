@@ -389,14 +389,14 @@ class LLMHub:
             if agent:
                 agent['source_received_at']=meta.get('created_at')
                 agent['reference_policy']='new request uses request-created clock; previous voice timestamp recorded separately'
-                body=(self.widget_bridge.payload(agent,cfg) if agent.get('widget_bridge') and not agent.get('fast_read')
-                      else assistant_payload(agent,cfg)) or encoded({'local_plan':agent.get('proposal'),'route':agent['route']})
+                body=(self.widget_bridge.payload(agent,cfg) if agent.get('widget_bridge') and agent['route'] == 'parser'
+                      else assistant_payload(agent,cfg)) or encoded({'local_plan':agent.get('direct_widget') or agent.get('proposal'),'route':agent['route']})
                 if agent.get('widget_bridge'):
                     with self.store.connect() as db:
                         stt=db.execute('SELECT elapsed FROM speech_jobs WHERE voice_id=?',(voice_id,)).fetchone()
                     if stt and stt['elapsed'] is not None:agent['widget_trace']['latency_ms']['stt_ms']=stt['elapsed']*1000
             local=bool(agent and agent['route'] in {'rule','clarify'})
-            fast=bool(agent and agent.get('fast_read'))
+            fast=bool(agent and (agent.get('fast_read') or agent.get('direct_widget')))
             status='running' if fast else 'queued' if cfg.enabled or local else 'prepared'
             with self.store.connect() as db:
                 db.execute('BEGIN IMMEDIATE')
@@ -569,7 +569,7 @@ class LLMHub:
         return self.get(rid)|{'execution':result}
 
     async def _execute_fast_read(self,rid):
-        """Finish bounded reads independently of the model/speech worker.
+        """Finish bounded reads and exact-rule previews independently of the model/speech worker.
 
         Do not touch active_id/call: a concurrent model job owns those handles.
         Business data is read only; history and audit remain the existing store.
@@ -582,8 +582,11 @@ class LLMHub:
             if sha(d['request_body'])!=d['request_sha256']:
                 raise LLMFailure('저장된 조회 계획의 무결성을 확인하지 못했습니다.','snapshot_invalid')
             record['execution_started_at']=started
-            record=(await self.widget_bridge.fast_read(rid,record) if self.widget_bridge and record.get('widget_bridge')
-                    else self.assistant.stage(rid,record,record['proposal']))
+            if self.widget_bridge and record.get('direct_widget'):
+                record=await self.widget_bridge.direct(rid,record)
+            else:
+                record=(await self.widget_bridge.fast_read(rid,record) if self.widget_bridge and record.get('widget_bridge')
+                        else self.assistant.stage(rid,record,record['proposal']))
             elapsed=time.perf_counter()-start
             record['routing']['fast_path_seconds']=elapsed+record['routing']['router_seconds']
             if record.get('widget_trace'):record['widget_trace']['latency_ms']['total_ms']=record['routing']['fast_path_seconds']*1000
