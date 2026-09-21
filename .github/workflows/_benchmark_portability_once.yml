@@ -1,0 +1,155 @@
+name: Temporary benchmark portability source materialization
+on:
+  push:
+    branches: [automation/benchmark-harness-publish-20260922]
+    paths: [.github/workflows/_benchmark_portability_once.yml]
+permissions:
+  contents: write
+jobs:
+  materialize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Materialize hash-verified portability source only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, os, urllib.request
+          def api(path, data=None):
+              request = urllib.request.Request(
+                  'https://api.github.com/repos/pixaxe0826/roomconsole/' + path,
+                  data=None if data is None else json.dumps(data, ensure_ascii=False).encode('utf-8'),
+                  headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                           'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json',
+                           'X-GitHub-Api-Version': '2022-11-28'})
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.load(response)
+          def read(sha):
+              data = base64.b64decode(api('git/blobs/' + sha)['content'])
+              assert hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() == sha
+              return data.decode('utf-8')
+          def put(path, text, expected):
+              data = text.encode('utf-8')
+              assert hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() == expected, path
+              result = api('git/blobs', {'content': text, 'encoding': 'utf-8'})
+              assert result['sha'] == expected
+              print(path, expected)
+          runtime = read('45764bd33cebe325242a7de22e74ae446da00769')
+          replacements = [
+              ('import gc\n', ''),
+              ('import uuid\n', 'import uuid\n\nfrom .storage import owned_sqlite\n'),
+              ('        from app.main import create_app\n', '        self.stack.enter_context(owned_sqlite(self.root))\n        from app.main import create_app\n'),
+              ('            gc.collect()  # release sqlite context-manager cycles before Windows rmtree\n', ''),
+          ]
+          for old, new in replacements:
+              assert runtime.count(old) == 1
+              runtime = runtime.replace(old, new)
+          put('benchmarks/runtime.py', runtime, '84293b844443bd91bfe2efec1c3ab59620f26f49')
+          storage = '''"""Benchmark-only SQLite ownership; retain transactions, close handles on exit."""
+          from pathlib import Path
+          import os
+          import sqlite3
+          from unittest.mock import patch
+
+
+          class ClosingConnection(sqlite3.Connection):
+              """Keep SQLite commit/rollback semantics but release each owned handle promptly.
+
+              sqlite3.Connection.__exit__ does not close a connection. A captured exception
+              can retain that handle even after gc.collect(), preventing Windows cleanup.
+              The benchmark never reuses a connection after its transaction context ends.
+              """
+              def __exit__(self, *exc):
+                  try:
+                      return super().__exit__(*exc)
+                  finally:
+                      self.close()
+
+
+          def owned_sqlite(root: Path):
+              """Limit the worker's SQLite factory to its temporary tree, including imports.
+
+              Installed only inside Runtime's ExitStack, never in the deployed web server.
+              No transaction, query, timeout, isolation-level or thread check is replaced.
+              """
+              root = root.resolve()
+              original = sqlite3.connect
+
+              def connect(database, *args, **kwargs):
+                  path = Path(os.fsdecode(database)).resolve()
+                  if not path.is_relative_to(root):
+                      raise RuntimeError('Refusing SQLite access outside the benchmark temporary tree')
+                  if len(args) > 4 or kwargs.get('factory', ClosingConnection) is not ClosingConnection:
+                      raise RuntimeError('An unreviewed SQLite connection factory is not allowed')
+                  kwargs['factory'] = ClosingConnection
+                  return original(database, *args, **kwargs)
+
+              return patch.object(sqlite3, 'connect', connect)
+          '''
+          put('benchmarks/storage.py', storage, 'badf2703aa630cff01d8e5deab5c293433d4a045')
+          tests = read('136af5aae4109e96eec21cc29756f37df6a85acb')
+          tests += '''
+
+          @pytest.mark.parametrize('fail_transaction', [False, True])
+          def test_owned_sqlite_closes_retained_handles_and_preserves_transactions(tmp_path, fail_transaction):
+              import sqlite3
+              from benchmarks.storage import owned_sqlite
+              original = sqlite3.connect
+              path = tmp_path / 'owned.sqlite3'
+              retained = []
+              with owned_sqlite(tmp_path):
+                  with sqlite3.connect(path) as setup:
+                      setup.execute('CREATE TABLE evidence(value INTEGER)')
+                  try:
+                      with sqlite3.connect(path) as db:
+                          retained.append(db)  # Strong reference survives cleanup and GC.
+                          db.execute('INSERT INTO evidence VALUES(1)')
+                          if fail_transaction: raise ValueError('synthetic transaction failure')
+                  except ValueError:
+                      pass
+                  with pytest.raises(sqlite3.ProgrammingError):
+                      retained[0].execute('SELECT 1')
+                  with sqlite3.connect(path) as check:
+                      assert check.execute('SELECT count(*) FROM evidence').fetchone()[0] == int(not fail_transaction)
+                  outside = tmp_path.parent / 'not-owned.sqlite3'
+                  with pytest.raises(RuntimeError, match='outside'):
+                      sqlite3.connect(outside)
+                  assert not outside.exists()
+              assert sqlite3.connect is original
+              path.unlink()  # Also exercises Windows file-handle release.
+
+
+          def test_runtime_cleanup_closes_retained_store_context(suite):
+              import sqlite3
+              original = sqlite3.connect
+              async def run():
+                  runtime = Runtime(suite.fixtures, suite.manifest['reference_datetime'], suite.manifest['timezone'], {'llm':'disabled'})
+                  root = runtime.root
+                  try:
+                      with runtime.store.connect() as retained:
+                          retained.execute('SELECT 1')
+                      await runtime.run(TextInput('메모 내용 좀 읽어 볼래', suite.manifest['reference_datetime'], {}))
+                  finally:
+                      await runtime.close()
+                  assert not root.exists()
+                  with pytest.raises(sqlite3.ProgrammingError): retained.execute('SELECT 1')
+              asyncio.run(run())
+              assert sqlite3.connect is original
+          '''
+          put('tests/test_benchmark.py', tests, '2d406bb9d60307760a464c0e5ab256f8a4802c6a')
+          docs = read('5584d3566871ad7364820d940de7c260c808ecb8')
+          docs += '''
+          ## Portable SQLite cleanup
+
+          The isolated worker installs an owned SQLite connection factory before application
+          creation, including its import-time disposable app. Transaction contexts retain
+          SQLite commit/rollback behavior and close their handle on exit. This prevents
+          exception tracebacks from retaining open files on Windows. The factory rejects
+          paths outside the temporary tree and is restored on Runtime.close(); deployed
+          application connections and business semantics are not modified.
+          '''
+          put('docs/ASSISTANT_BENCHMARK.md', docs, '80928dc9e66b581d2546bfd630c7536f2a99f711')
+          print('PORTABILITY_BLOBS_VERIFIED=4; no refs or application data changed.')
+          PY
