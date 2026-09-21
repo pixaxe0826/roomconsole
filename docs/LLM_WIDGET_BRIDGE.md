@@ -1,3 +1,5 @@
+> 최신 변경: [라우팅 안정화 및 SSH 업데이트](ROUTING_STABILIZATION.md)를 참고하세요. 아래의 알람 set/cancel 미연결 설명과 widget-assistant-1 경로는 이전 계약 기록입니다.
+
 # LLM fallback → Widget Protocol 연결
 
 [문서 홈](../README.md) · [Widget Protocol 1.0](WIDGET_PROTOCOL.md) · [Fast reads](FAST_READS.md) · [V35 업데이트](V35_GIT_UPDATE.md)

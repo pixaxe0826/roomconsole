@@ -132,7 +132,7 @@ widgets/
 [LLM Widget Bridge](docs/LLM_WIDGET_BRIDGE.md)는 명확한 메모·할 일·일정을 기존 Adapter로 바로 조회하고,
 미확정 Widget 요청만 domain-scoped JSON Proposal로 분석합니다. 자동 모드의 일반 자유 응답은
 명확화 안내로 대체하며, 명시적 일반 대화 모드는 Widget 요청이 아닐 때만 유지합니다.
-새 Adapter 쓰기는 기존 관리자 확인을 거치며, 알람 set/cancel은 여전히 미연결입니다.
+새 Adapter 쓰기는 기존 관리자 확인을 거칩니다. [라우팅 안정화](docs/ROUTING_STABILIZATION.md)는 명확한 알람을 모델 없이 해석하고, 불명확한 Widget 표현만 제한된 모델로 보냅니다. 웹 알람 set 및 ID 지정 cancel은 기존 알람 서비스에 연결됩니다.
 
 ## Widget 서비스 호출 규격
 

@@ -17,15 +17,16 @@ import time
 from fastapi import HTTPException
 from pydantic import ConfigDict, ValidationError, create_model
 
-from .assistant import ambiguous, detect, digest, dump, parse_clock
+from .assistant import detect, digest, dump, parse_clock
 from .clock_service import aware, resolve_range, resolve_source_dates
 from .command_semantics import status_evidence, unsupported_personal
 from .fast_reads import match_read, format_read
+from .command_routing import exact_alarm, read_candidates, unsafe_source
 from .store import utcnow
 from .widget_protocol import ExecutionContext, WidgetRequest, WidgetResponse, request_digest
 from .widget_protocol.core import ProtocolFault
 
-BRIDGE_VERSION = 'widget-assistant-1'
+BRIDGE_VERSION = 'widget-assistant-2'
 # Projection, not a second service contract. IDs, context, permissions, version
 # and idempotency fields are supplied ONLY by trusted server code.
 WidgetProposal = create_model('WidgetRequestProposal',
@@ -38,7 +39,8 @@ PROPOSAL_PROMPT = (
     'Copy text from the input. Unknown/missing slots are null, never "unknown". '
     'Never repair or guess numbers, dates, times or IDs. '
     'Target is null or an input-grounded reference; server resolves IDs and versions. '
-    'No SQL, commands, authority or extra fields. /no_think'
+    'No SQL, commands, authority or extra fields. '
+    'If no listed action fits, return {"widget":null,"action":null,"target":null,"args":{}}. /no_think'
 )
 # Linguistic routing hints, not a duplicate capability catalog. All actions and
 # argument models are looked up from WidgetRegistry for every new request.
@@ -50,7 +52,7 @@ DOMAIN_WORDS = {
 }
 ACTION_WORDS = {
     'list': r'읽|보여|알려|확인|조회|목록|어떤|뭐|남아|남았|적혀',
-    'read': r'읽|보여|알려|확인|조회|내용|적혀',
+    'read': r'읽|보여|알려|확인|조회|내용|적혀|브리핑',
     'get': r'읽|보여|알려|확인|조회|찾아',
     'add': r'추가|등록|넣어',
     'write': r'적어|작성|기록|저장|써\s*줘|교체|바꿔|수정',
@@ -126,7 +128,7 @@ def source_clocks(text: str) -> list[str | None]:
                r'(?:\d{1,2}|열두|열한|한|두|세|네|다섯|여섯|일곱|여덟|아홉|열)\s*(?:시|:)')
     for m in re.finditer(pattern, text):
         tm, rest, err = parse_clock(text[m.start():].lstrip())
-        if re.match(r'(?:[영공일이삼사오육칠팔구십백몇]+|\d+)\s*분', rest):
+        if re.match(r'(?:[영공일이삼사오육칠팔구십백몇]+|\d+)\s*(?:분|초)', rest):
             err = 'unparsed_minutes'
         values.append(None if err else tm)
     if not values and re.search(r'(?:\d+|열세|몇)\s*(?:시|:)', text):
@@ -236,83 +238,127 @@ class WidgetBridge:
         self.confirm_lock = asyncio.Lock()
 
     def has_domain(self, text: str) -> bool:
-        return domain_for(text, self.registry) is not None or any(
+        return read_candidates(text) or domain_for(text, self.registry) is not None or any(
             re.search(pattern, text) for pattern in DOMAIN_WORDS.values())
 
     def prepare(self, record: dict) -> dict:
-        """Called before snapshot/queue creation; clear reads never load/probe a model."""
+        """EXACT -> local plan; CANDIDATE -> constrained parser; UNSAFE -> clarify."""
         text = record['normalized']
-        if re.search(DOMAIN_WORDS['memo'], text):
-            # A refused/mixed memo command may still contain a private literal.
-            # Mark it before ANY early clarification, not only after model dispatch.
-            record.update(memo_read=True, protocol_private=True)
         domain = domain_for(text, self.registry)
         personal = self.has_domain(text)
         if personal:
             record['_widget_domain_request'] = True
+        if re.search(DOMAIN_WORDS['memo'], text) or read_candidates(text):
+            record.update(memo_read=True, protocol_private=True)
+        # Preserve existing exact reads/atomic writes, not lexical safety rejects.
         if record.get('fast_read'):
             domain = {'memo.read': 'memo', 'todo.list': 'todo', 'calendar.query': 'calendar'}[
                 record['fast_read']['intent']]
         else:
-            if domain is None:
-                if (record['mode'] == 'auto' or personal) and record['route'] in {'parser', 'chat'}:
-                    record.update(route='clarify', origin='server', state='needs_clarification',
-                        final_text='메모·할 일·일정·알람 중 어떤 작업을 요청하나요? 일반 질문은 관리자 일반 대화 모드를 사용해 주세요.')
-                    record['routing'].update(route='EXISTING_RULE', route_reason='domain_not_resolved')
-                return record
-            # Explicit chat/legacy is not a bypass for a personal-service request.
-            if record['mode'] != 'auto':
+            if personal and record['mode'] != 'auto':
                 mode = record['mode']
                 record = detect(record['raw'], record['reference_at'], record['timezone'], 'auto')
                 record['mode'] = mode
                 record['_widget_domain_request'] = True
-                if domain == 'memo':
+                if re.search(DOMAIN_WORDS['memo'], text) or read_candidates(text):
                     record.update(memo_read=True, protocol_private=True)
             if record['route'] == 'rule':
-                return record  # Keep existing atomic/bulk rule-write semantics.
-            if ambiguous(text):
+                record['routing']['confidence'] = 'EXACT'
+                return record
+            mixed = sum(bool(re.search(p, text)) for p in DOMAIN_WORDS.values()) > 1
+            if personal and (len(text) > 1500 or unsafe_source(text) or mixed):
                 record.update(route='clarify', origin='server', state='needs_clarification',
                               final_text='부정·조건·인용·반복·복합 요청은 실행하지 않습니다. 한 작업으로 다시 요청해 주세요.')
+                record['routing'].update(confidence='UNSAFE', route_reason='unsafe_source')
                 return record
-            if record['route'] == 'clarify' and record['final_text'] != unsupported_personal(text):
-                return record  # Preserve existing safety clarifications.
-        caps = self.registry.get_capabilities(domain)
-        actions = [c.action for c in caps if action_evidence(c.action, text)]
-        if 'list' in actions and 'get' in actions and not re.search(r'\bID\b|아이디|항목|한\s*개', text, re.I):
-            actions.remove('get')  # Avoid two full schemas for a general list request.
-        if record.get('fast_read'):
-            actions = ['read' if domain == 'memo' else 'list']
-        if not actions:
-            record.update(route='clarify', origin='server', state='needs_clarification',
-                          final_text='지원하는 Widget 동작을 특정할 수 없습니다. 읽기·추가·수정 중 원하는 동작을 명확히 말씀해 주세요.')
+            if record['route'] == 'clarify' and record['final_text'] != unsupported_personal(text.rstrip('.!?。？！')):
+                record['routing']['confidence'] = 'UNSAFE'
+                return record  # Existing date/filter/safety errors are NOT parser permissions.
+            try:
+                direct = exact_alarm(text, record['reference_at'], record['timezone']) if domain == 'alarm' else None
+            except ValueError as exc:
+                record.update(route='clarify', origin='server', state='needs_clarification', final_text=str(exc))
+                record['routing'].update(route='EXISTING_RULE', confidence='EXACT', route_reason='alarm_missing_slot')
+                return record
+            if direct:
+                record['direct_widget'] = direct
+                domain = 'alarm'
+        # Unknown read noun: allow only read capabilities; the model may abstain.
+        recovered = domain is None and read_candidates(text)
+        if domain is None and not recovered:
+            if (record['mode'] == 'auto' or personal) and record['route'] in {'parser', 'chat'}:
+                record.update(route='clarify', origin='server', state='needs_clarification',
+                    final_text='메모·할 일·일정·알람 중 어떤 작업을 요청하나요? 일반 질문은 관리자 일반 대화 모드를 사용해 주세요.')
+                record['routing'].update(route='EXISTING_RULE', route_reason='domain_not_resolved', confidence='UNRESOLVED')
             return record
-        if domain == 'memo':
-            # Hide new private input as soon as a request starts, not only after
-            # model validation. The existing memo-read projector rechecks sharing.
-            record['memo_read'] = True
-            record['protocol_private'] = any(not c.read_only for c in caps if c.action in actions)
+        domains = [domain] if domain else [name for name in ('memo', 'todo', 'calendar', 'alarm') if self.registry.get(name)]
+        caps = [(name, c) for name in domains for c in self.registry.get_capabilities(name)]
+        choices = [(name, c) for name, c in caps if action_evidence(c.action, text)]
+        reason = 'widget_domain:' + domain if domain else 'read_domain_uncertain'
+        if recovered:
+            choices = [(name, c) for name, c in caps if c.read_only and c.action in {'read', 'list'}]
+            record['candidate_read_only'] = True
+        elif not choices:
+            # Action-language ambiguity is a parser job, NOT terminal failure.
+            # Mutation authority still requires independent source action proof in ground().
+            choices = caps
+            reason = 'widget_action_uncertain:' + domain
+            record['candidate_action_unknown'] = True
+        if any(c.action == 'list' for _, c in choices) and not re.search(r'\bID\b|아이디|항목|한\s*개', text, re.I):
+            choices = [(name, c) for name, c in choices if c.action != 'get']
+        if record.get('fast_read'):
+            choices = [(name, c) for name, c in caps if c.action == ('read' if domain == 'memo' else 'list')]
+        if record.get('direct_widget'):
+            choices = [(name, c) for name, c in caps if c.action == record['direct_widget']['action']]
+        if not choices:
+            record.update(route='clarify', origin='server', state='needs_clarification', final_text='사용 가능한 Widget 도구가 없습니다.')
+            return record
+        local = bool(record.get('fast_read') or record.get('direct_widget'))
+        if any(name == 'memo' for name, _ in choices):
+            record.update(memo_read=True, protocol_private=any(not c.read_only for _, c in choices))
         record['widget_bridge'] = BRIDGE_VERSION
-        record['widget_trace'] = {'domain': domain, 'available_capabilities': [domain + '.' + a for a in actions],
+        record['routing']['confidence'] = 'EXACT' if local else 'CANDIDATE'
+        record['widget_trace'] = {'domain': domain or 'read_candidates', 'candidate_domains': domains,
+            'available_capabilities': [name + '.' + c.action for name, c in choices],
             'schema_validation': 'not_run', 'policy_result': 'not_run', 'widget_request': None,
             'widget_response': None, 'adapter': None, 'source_of_truth': None,
             'latency_ms': {'stt_ms': None, 'router_ms': record['routing']['router_seconds'] * 1000,
                            'llm_ms': 0.0, 'adapter_ms': 0.0, 'total_ms': None}}
-        if not record.get('fast_read'):
+        record['widget_trace']['capability_fingerprint'] = digest([
+            [name, c.model_dump(mode='json')] for name, c in choices])
+        if record.get('direct_widget'):
+            record.update(route='rule', origin='server', state='new', final_text=None, proposal=None)
+            record['routing'].update(route='EXISTING_RULE', route_reason='exact_alarm.' + record['direct_widget']['action'],
+                                     resolved_intent='alarm.' + record['direct_widget']['action'])
+        elif not record.get('fast_read'):
             record.update(route='parser', origin='server', state='new', final_text=None, proposal=None)
-            record['routing'].update(route='LLM_FALLBACK', route_reason='widget_domain:' + domain)
-            record['widget_trace']['proposal_schema'] = proposal_schema(self.registry, domain, actions, record)
-            record['widget_trace']['capability_fingerprint'] = digest(
-                [c.model_dump(mode='json') for c in caps if c.action in actions])
+            record['routing'].update(route='LLM_FALLBACK', route_reason=reason)
+            branches = []
+            for name in domains:
+                actions = [c.action for n, c in choices if n == name]
+                if actions:
+                    branches.extend(proposal_schema(self.registry, name, actions, record)['anyOf'])
+            branches.append({'type': 'object', 'properties': {
+                'widget': {'type': 'null'}, 'action': {'type': 'null'},
+                'target': {'type': 'null'}, 'args': {'type': 'object', 'properties': {}, 'additionalProperties': False}},
+                'required': ['widget', 'action', 'target', 'args'], 'additionalProperties': False})
+            record['widget_trace']['proposal_schema'] = {'anyOf': branches}
         return record
+
+    def fingerprint(self, trace):
+        return digest([[name, c.model_dump(mode='json')]
+            for name in trace.get('candidate_domains', [trace['domain']])
+            for c in self.registry.get_capabilities(name)
+            if name + '.' + c.action in trace['available_capabilities']])
 
     def payload(self, record, cfg):
         trace = record['widget_trace']
         schema = trace['proposal_schema']
         # Only this request's candidate domain/action argument schemas enter the prompt.
-        contract = [{b['properties']['action']['const']: b['properties']['args']}
-                    for b in schema['anyOf']]
+        contract = [{b['properties']['widget']['const'] + '.' + b['properties']['action']['const']: b['properties']['args']}
+                    for b in schema['anyOf'] if 'const' in b['properties']['action']]
         ctx = record['time_context']
-        prompt = (PROPOSAL_PROMPT + '\nwidget=' + trace['domain'] + '; args=' + dump(contract) +
+        prompt = (PROPOSAL_PROMPT + '\nwidgets=' + ','.join(trace['candidate_domains']) + '; args=' + dump(contract) +
                   '\n오늘=' + ctx['today'] + '; 내일=' + ctx['tomorrow'] + '; timezone=' + record['timezone'])
         return dump({'model': cfg.model,
             'messages': [{'role': 'system', 'content': prompt}, {'role': 'user', 'content': record['normalized']}],
@@ -371,6 +417,9 @@ class WidgetBridge:
                 if items:
                     record['final_text'] += '\n' + '\n'.join(f'{a["time"]} · {a["label"]}' for a in items)
                 record['final_text'] += '\n활성 웹페이지용 예약이며 실제 소리 재생 여부는 확인하지 않았습니다.'
+            elif request.widget == 'alarm' and request.action in {'set', 'cancel'}:
+                verb = '예약했습니다' if request.action == 'set' else '예약을 취소했습니다'
+                record['final_text'] = f'알람 {verb}. ID: {data["id"]}\n활성 브라우저에서 소리 허용이 필요합니다. 실제 소리 재생을 확인한 것은 아닙니다.'
             else:
                 # Only reachable after a confirmed Adapter success. Never model text.
                 noun = {'memo':'메모', 'todo':'할 일', 'calendar':'일정'}.get(request.widget, request.widget)
@@ -434,6 +483,9 @@ class WidgetBridge:
         try:
             parsed = safe_json(result.get('output'))
             trace['parsed_proposal'] = parsed
+            if parsed == {'widget': None, 'action': None, 'target': None, 'args': {}}:
+                raise ProtocolFault('needs_clarification', 'INTENT_UNRESOLVED',
+                                    '어떤 Widget 동작인지 확정하지 못했습니다. 다시 말씀해 주세요.')
             parsed, changes = normalize_missing(parsed)
             trace['missing_normalized'] = changes
             p = WidgetProposal.model_validate(parsed)
@@ -443,14 +495,13 @@ class WidgetBridge:
         except (ValidationError, ValueError, TypeError, RecursionError):
             raise ProtocolFault('invalid_request', 'INVALID_PROPOSAL',
                                 'WidgetRequest 형식의 제안이 아닙니다. 모델 문장을 실행·조회 결과로 사용하지 않았습니다.') from None
-        if request.widget != trace['domain'] or request.widget + '.' + request.action not in trace['available_capabilities']:
+        if request.widget + '.' + request.action not in trace['available_capabilities']:
             raise ProtocolFault('invalid_request', 'UNSUPPORTED_ACTION', '이번 요청에 허용하지 않은 capability입니다.', 'action')
         adapter = self.registry.get(request.widget)
         spec = adapter.operations.get(request.action) if adapter else None
         if spec is None:
             raise ProtocolFault('unavailable', 'CAPABILITY_UNAVAILABLE', '요청한 Adapter가 현재 연결되어 있지 않습니다.')
-        expected = digest([c.model_dump(mode='json') for c in adapter.capabilities()
-                           if request.widget + '.' + c.action in trace['available_capabilities']])
+        expected = self.fingerprint(trace)
         if expected != trace['capability_fingerprint']:
             raise ProtocolFault('conflict', 'CAPABILITY_CHANGED', '요청 후 capability가 바뀌었습니다. 새 요청으로 확인하세요.')
         allowed = set(spec.inputs.model_fields) - CONTROLLED_ARGS
@@ -466,7 +517,8 @@ class WidgetBridge:
         text, args = record['normalized'], deepcopy(request.args)
         def reject(message, field=None):
             raise ProtocolFault('needs_clarification', 'SOURCE_NOT_GROUNDED', message, field)
-        if ambiguous(text) or not action_evidence(request.action, text):
+        inferred_read = spec.read_only and (record.get('candidate_read_only') or record.get('candidate_action_unknown'))
+        if unsafe_source(text) or (not inferred_read and not action_evidence(request.action, text)):
             reject('원문에서 단일 동작을 확인하지 못했습니다. 한 작업으로 다시 요청해 주세요.')
         if re.search(r'공유|고정|우선순위|카테고리|반복|매일|매주|매월|마다', text):
             reject('공유·고정·반복 등의 조건은 관리자 화면에서 확인해 주세요. 조건을 생략해 실행하지 않습니다.')
@@ -517,6 +569,10 @@ class WidgetBridge:
                     reject('분석한 시간이 전사 원문과 다릅니다. 오전·오후와 시간을 다시 말씀해 주세요.', 'args.time')
                 if clocks and args.get('time') is None:
                     reject('원문 시간이 누락되었거나 불확실합니다. 시간을 다시 말씀해 주세요.', 'args.time')
+        if request.widget == 'alarm' and request.action == 'set':
+            if args.get('label') is None:
+                args['label'] = '알람'
+            args['timezone'] = record['timezone']
         if not spec.available:
             # Intent may be recovered, but an unconnected control remains unavailable.
             # Do not resolve fabricated Alarm IDs through nonexistent get/execute paths.
@@ -551,6 +607,18 @@ class WidgetBridge:
                     target = {'type': 'item_id', 'value': response.data['id']}
                     args['version'] = response.data['version']
                     record['widget_trace']['resolved_target'] = {k: response.data[k] for k in ('id', 'title', 'version')}
+        elif request.widget == 'alarm' and request.action == 'cancel':
+            if target is None or target.type != 'item_id':
+                reject('취소할 알람 ID를 명확히 말씀해 주세요.', 'target')
+            response = await self.query(WidgetRequest(request_id='resolve:' + record['action_key'],
+                widget='alarm', action='list'), record)
+            if response.status != 'success':
+                raise ProtocolFault('error', 'TARGET_READ_FAILED', '실제 알람을 조회하지 못했습니다.')
+            alarm = next((a for a in response.data['items'] if a['id'] == target.value), None)
+            if alarm is None:
+                raise ProtocolFault('not_found', 'NOT_FOUND', '해당 알람이 없습니다.', 'target')
+            args['version'] = alarm['version']
+            record['widget_trace']['resolved_target'] = {k: alarm[k] for k in ('id', 'label', 'version', 'date', 'time')}
         elif not spec.read_only and spec.target_required:
             if target is None:
                 # Resolve an exact title mentioned in the transcript, never a fuzzy ID.
@@ -577,6 +645,15 @@ class WidgetBridge:
                 record['widget_trace']['resolved_target'] = {k: response.data[k] for k in ('id', 'title', 'version', 'date', 'time')}
         return WidgetRequest(request_id=record['action_key'], idempotency_key=record['action_key'],
             widget=request.widget, action=request.action, target=target, args=args, context={'source': 'assistant'})
+
+    async def direct(self, rid, record):
+        proof = exact_alarm(record['normalized'], record['reference_at'], record['timezone'])
+        if not proof or proof != record.get('direct_widget'):
+            raise ValueError('Direct rule plan integrity')
+        result = {'output': dump(proof), 'finish_reason': 'stop'}
+        record = await self.stage(rid, record, result)
+        record['widget_trace']['schema_validation'] = 'server_generated'
+        return record
 
     async def stage(self, rid, record, result):
         request = None
@@ -674,10 +751,7 @@ class WidgetBridge:
                     raise HTTPException(409, '날짜·시간대·제안이 달라졌습니다. 새 요청으로 확인하세요.') from None
                 if request_digest(request) != p.get('request_digest'):
                     raise HTTPException(409, '실행 제안 무결성을 확인하지 못했습니다.')
-                spec = self.registry.get(request.widget)
-                current = [c.model_dump(mode='json') for c in spec.capabilities()
-                           if request.widget + '.' + c.action in record['widget_trace']['available_capabilities']] if spec else []
-                if digest(current) != record['widget_trace']['capability_fingerprint']:
+                if self.fingerprint(record['widget_trace']) != record['widget_trace']['capability_fingerprint']:
                     raise HTTPException(409, '확인 후 capability가 달라졌습니다. 새 요청으로 진행하세요.')
                 # Durable reservation BEFORE entering any Adapter. With no new DB
                 # transaction plumbing, a crash gap is uncertain (not exactly-once).

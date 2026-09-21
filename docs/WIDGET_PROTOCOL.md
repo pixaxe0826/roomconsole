@@ -1,3 +1,5 @@
+> 업데이트: [라우팅 안정화](ROUTING_STABILIZATION.md)에서 AlarmAdapter.set/cancel을 기존 웹 알람 서비스에 연결했습니다. 아래의 미연결 표시는 그 이전 계약 설명입니다. HTTP 쓰기 확인 경계는 동일합니다.
+
 # Widget Communication Protocol 1.0
 
 [문서 홈](../README.md) · [기존 브라우저 위젯 API](WIDGET_API.md) · [V35 Git 업데이트](V35_GIT_UPDATE.md)

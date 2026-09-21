@@ -125,3 +125,12 @@ class AlarmsList(Contract):
     items: list[AlarmData]
     delivery: Literal['foreground_browser_only'] = 'foreground_browser_only'
     sound_confirmed: Literal[False] = False
+
+
+class AlarmMutation(Contract):
+    id: str
+    version: int | None = None
+    duplicate: bool = False
+    cancelled: bool = False
+    delivery: Literal['foreground_browser_only'] = 'foreground_browser_only'
+    sound_confirmed: Literal[False] = False

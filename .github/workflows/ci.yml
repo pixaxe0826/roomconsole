@@ -69,6 +69,8 @@ jobs:
           tests/test_life_update.py
           tests/test_widget_protocol.py
           tests/test_llm_widget_bridge.py
+          tests/test_routing_confidence.py
+          tests/test_remote_update.py
           --timeout=30
           --timeout-method=thread
           --junitxml=artifacts/test-results/backend.xml

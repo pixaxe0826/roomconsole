@@ -100,17 +100,21 @@ def test_cases4_8_alarm_uncertain_time_clarifies_without_control(hub,monkeypatch
     assert not calls and app.state.life.alarms()==[]
 
 
-@pytest.mark.parametrize('action',['set','cancel'])
-def test_alarm_unconnected_never_claims_execution(hub,monkeypatch,action):
+def test_alarm_fallback_requires_confirmation_never_claims_execution(hub,monkeypatch):
     app,c,b=hub;calls=spy_adapter(app,'alarm',monkeypatch)
-    today=c.get('/api/clock').json()['today']
-    text='오늘 오전 12시 40분 아람 맞춰줘' if action=='set' else '알람 취소해줘'
-    args={'date':today,'time':'00:40','label':'아람'} if action=='set' else {}
-    d=fallback(c,b,text,'alarm',action,args)
-    assert d['status']=='needs_clarification',d
-    assert trace(d)['widget_response']['status']=='unavailable'
-    assert not calls
-    assert '알람을 설정하지 않았습니다' in d['response_json']['output']
+    d=fallback(c,b,'내일 오전 12시 40분 아람 맞춰줘','alarm','set',
+               {'date':tomorrow(c),'time':'00:40','label':'아람'})
+    assert d['status']=='awaiting_confirmation',d
+    assert trace(d)['widget_response']['status']=='needs_confirmation'
+    assert not calls and not app.state.life.alarms()
+    assert '아직 변경하지 않았습니다' in d['response_json']['output']
+
+
+def test_alarm_cancel_without_target_clarifies_without_model(hub):
+    app,c,b=hub;enable(c)
+    d=wait(c,request(c,'알람 취소해줘'))
+    assert d['status']=='needs_clarification' and not b.calls
+    assert not app.state.life.alarms()
 
 
 def test_case5_unavailable_action_rejected_before_adapter(hub,monkeypatch):
