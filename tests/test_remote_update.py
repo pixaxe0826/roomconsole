@@ -37,41 +37,14 @@ def test_bat_preserves_provided_connection_and_safe_ssh():
     assert 'exit /b 0' in text and 'exit /b 1' in text
     assert 'git -C "$ROOT" show "$TARGET:deploy/termux/update_from_git.py"' in remote_script()
     assert 'git reset' not in remote_script() and 'git pull' not in remote_script()
+    assert 'api.github.com' not in text
+    assert 'does NOT query GitHub Actions' in text
 
 
 @pytest.mark.skipif(os.name == 'nt', reason='Bash payload parses on Linux/Termux')
 def test_embedded_shell_parses_without_crlf(tmp_path):
     payload = tmp_path / 'remote.sh';payload.write_text(remote_script())
     subprocess.run(['bash', '-n', str(payload)], check=True)
-
-
-@pytest.mark.parametrize('state,conclusion,expected',[
-    ('completed','success','success'), ('completed','failure','failed'),
-    ('completed','cancelled','failed'), ('in_progress',None,'pending')])
-def test_ci_exact_target(state,conclusion,expected):
-    m=load();target='a'*40
-    p={'workflow_runs':[{'id':1,'head_sha':target,'head_branch':'main','event':'push',
-                        'status':state,'conclusion':conclusion}]}
-    assert m.ci_state(p,target)==expected
-    assert m.ci_state(p,'b'*40)=='pending'
-    p['workflow_runs'][0]['event']='pull_request'
-    assert m.ci_state(p,target)=='pending'
-
-
-def test_ci_latest_run_and_failure_before_deploy(monkeypatch):
-    m=load();target='a'*40
-    base={'head_sha':target,'head_branch':'main','event':'push','status':'completed'}
-    payload={'workflow_runs':[dict(base,id=1,conclusion='success'),dict(base,id=2,conclusion='failure')]}
-    assert m.ci_state(payload,target)=='failed'
-    monkeypatch.setattr(m,'json_get',lambda _:payload)
-    with pytest.raises(m.VerifyError,match='CI failed'):
-        m.wait_ci(target,seconds=0)
-
-
-def test_ci_pending_timeout_has_no_success(monkeypatch):
-    m=load();monkeypatch.setattr(m,'json_get',lambda _: {'workflow_runs':[]})
-    with pytest.raises(m.VerifyError,match='not successful'):
-        m.wait_ci('a'*40,seconds=0)
 
 
 def setup_verification(tmp_path,monkeypatch,*,status=None,health=None,heads=None):
@@ -127,7 +100,7 @@ def test_wrong_head_never_success(tmp_path,monkeypatch):
         m.verify_running(root,prefix,target,delay=0)
 
 
-def test_updater_ci_target_mismatch_stops_before_service(tmp_path,monkeypatch):
+def test_updater_expected_target_mismatch_stops_before_service(tmp_path,monkeypatch):
     m=load('update_from_git');remote,local,env=make_git_pair(tmp_path)
     stopped=[];monkeypatch.setattr(m,'stop_room_hub',lambda *a:stopped.append(True))
     monkeypatch.setenv('ROOM_HUB_EXPECTED_MAIN','f'*40)
@@ -168,14 +141,11 @@ class Stub { public static int Main(string[] args) {
 
 
 @pytest.mark.skipif(os.name == 'nt', reason='Termux supervisor uses fcntl; wrapper is tested separately on Windows')
-@pytest.mark.parametrize('failed_step',['ci','updater','verify','none'])
+@pytest.mark.parametrize('failed_step',['updater','verify','none'])
 def test_supervisor_failure_never_prints_verified_success(tmp_path,monkeypatch,capsys,failed_step):
     m=load();root=tmp_path/'room-hub';root.mkdir()
     monkeypatch.setenv('HOME',str(tmp_path));monkeypatch.setenv('PREFIX',str(tmp_path/'prefix'))
     called=[]
-    def ci(*_):
-        called.append('ci')
-        if failed_step=='ci':raise m.VerifyError('synthetic CI failure')
     def update(*_,**kw):
         called.append('updater')
         if failed_step=='updater':raise subprocess.CalledProcessError(1,'synthetic updater')
@@ -184,10 +154,18 @@ def test_supervisor_failure_never_prints_verified_success(tmp_path,monkeypatch,c
         if failed_step=='verify':raise m.VerifyError('synthetic down service')
         return {'head':'a'*40,'tree':'b'*40,'pid':'123'}
     monkeypatch.setattr(m,'validate_source',lambda *_:None)
-    monkeypatch.setattr(m,'wait_ci',ci);monkeypatch.setattr(m.subprocess,'run',update)
+    monkeypatch.setattr(m.subprocess,'run',update)
     monkeypatch.setattr(m,'verify_running',verify)
     rc=m.main(['--root',str(root),'--target','a'*40]);out=capsys.readouterr()
     assert rc==(0 if failed_step=='none' else 1)
     assert ('VERIFIED UPDATE COMPLETE' in out.out)==(failed_step=='none')
-    if failed_step=='ci':assert called==['ci']
-    elif failed_step=='updater':assert called==['ci','updater']
+    if failed_step=='updater':assert called==['updater']
+    elif failed_step=='verify':assert called==['updater','verify']
+    else:assert called==['updater','verify']
+
+
+def test_supervisor_contains_no_external_ci_polling():
+    text=(ROOT/'deploy/termux/remote_update.py').read_text(encoding='utf-8')
+    assert 'api.github.com' not in text
+    assert 'wait_ci' not in text
+    assert 'workflow_runs' not in text

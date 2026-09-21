@@ -1,7 +1,8 @@
 """SSH foreground deployment supervisor. Stdlib only; no operational DB imports.
 
 Run the SAME fetched Git commit's updater, not the old checked-out Python code.
-No force updates, no secrets, no model changes. CI failure blocks before downtime.
+No force updates, no secrets, no model changes. The operator reviews CI before
+running the BAT; this supervisor deliberately does not poll external CI APIs.
 """
 from __future__ import annotations
 
@@ -45,9 +46,7 @@ def validate_source(root: Path, target: str) -> None:
 
 
 def json_get(url: str) -> dict:
-    # No inherited authentication, no proxy, no token in the public CI check.
-    request = urllib.request.Request(url, headers={'Accept': 'application/vnd.github+json',
-                                                 'User-Agent': 'Room-Hub-V35-Updater'})
+    request = urllib.request.Request(url, headers={'User-Agent': 'Room-Hub-V35-Updater'})
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with opener.open(request, timeout=15) as response:
         raw = response.read(2 * 1024 * 1024 + 1)
@@ -59,35 +58,6 @@ def json_get(url: str) -> dict:
     return value
 
 
-def ci_state(payload: dict, target: str) -> str:
-    runs = [r for r in payload.get('workflow_runs', [])
-            if r.get('head_sha') == target and r.get('head_branch') == 'main'
-            and r.get('event') == 'push']
-    if not runs:
-        return 'pending'
-    latest = max(runs, key=lambda r: r['id'])
-    if latest.get('status') != 'completed':
-        return 'pending'
-    return 'success' if latest.get('conclusion') == 'success' else 'failed'
-
-
-def wait_ci(target: str, seconds: float = 600) -> None:
-    url = (f'https://api.github.com/repos/{REPOSITORY}/actions/workflows/ci.yml/runs'
-           f'?branch=main&event=push&head_sha={target}&per_page=10')
-    deadline = time.monotonic() + seconds
-    while True:
-        state = ci_state(json_get(url), target)
-        if state == 'success':
-            print('[OK] Merged main CI SUCCESS for ' + target, flush=True)
-            return
-        if state == 'failed':
-            raise VerifyError('Merged main CI failed/cancelled. No update performed.')
-        if time.monotonic() >= deadline:
-            raise VerifyError('Merged main CI is not successful yet. No update performed; retry later.')
-        print('[WAIT] CI pending; service is still running. Checking in 30 seconds...', flush=True)
-        time.sleep(min(30, max(0, deadline - time.monotonic())))
-
-
 def verify_running(root: Path, prefix: Path, target: str, *, samples: int = 3, delay: float = 2) -> dict:
     if samples < 1 or delay < 0:
         raise VerifyError('Invalid verification sampling policy.')
@@ -96,7 +66,7 @@ def verify_running(root: Path, prefix: Path, target: str, *, samples: int = 3, d
     tree = output('git', '-C', str(root), 'rev-parse', 'HEAD^{tree}')
     remote_tree = output('git', '-C', str(root), 'rev-parse', 'origin/main^{tree}')
     if head != target or remote != target or tree != remote_tree:
-        raise VerifyError('Post-update HEAD/tree is not the verified target.')
+        raise VerifyError('Post-update HEAD/tree is not the fetched target.')
     if output('git', '-C', str(root), 'status', '--porcelain', '--untracked-files=normal'):
         raise VerifyError('Post-update working tree is dirty.')
     version = (root / 'VERSION').read_text(encoding='utf-8').strip()
@@ -139,15 +109,13 @@ def main(argv=None) -> int:
             except BlockingIOError:
                 raise VerifyError('Another SSH updater is active. Do not start a second update.') from None
             validate_source(root, args.target)
-            print('[1/3] Checking merged main CI before any downtime...', flush=True)
-            wait_ci(args.target)
-            print('[2/3] Running the Git updater with backup and rollback...', flush=True)
+            print('[1/2] Running the Git updater with backup and rollback...', flush=True)
             env = os.environ.copy()
             env.update(ROOM_HUB_ROOT=str(root), ROOM_HUB_EXPECTED_MAIN=args.target,
                        ROOM_HUB_GIT_REMOTE='origin', ROOM_HUB_GIT_BRANCH='main', PYTHONUNBUFFERED='1')
             updater = Path(__file__).with_name('update_from_git.py')
             subprocess.run([str(prefix / 'bin/python'), str(updater)], check=True, env=env, stdin=subprocess.DEVNULL)
-            print('[3/3] Checking exact Git state, health and stable runit PID...', flush=True)
+            print('[2/2] Checking exact Git state, health and stable runit PID...', flush=True)
             report = verify_running(root, prefix, args.target)
             directory = Path.home() / 'room-hub-git-backups'
             directory.mkdir(mode=0o700, exist_ok=True)
