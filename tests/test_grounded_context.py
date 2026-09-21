@@ -183,7 +183,7 @@ def test_fresh_reads_not_cached_response(hub):
 def test_model_iso_write_still_needs_approval(hub):
  a,c,b=hub;enable(c)
  tomorrow=c.get('/api/clock').json()['tomorrow']
- b.output=json.dumps({'intent':'todo.create','date_ref':tomorrow,'title':'택배 보내기','time':None,'status':'all','scope':'one'})
+ b.output=json.dumps({'widget':'todo','action':'add','target':None,'args':{'date':tomorrow,'title':'택배 보내기','time':None}})
  d=wait(c,request(c,'내일 택배 보내기 할 일로 등록해 줘'))
  assert d['status']=='awaiting_confirmation' and a.state.store.tasks()==[]
  assert d['assistant']['resolved_date']['evidence']=='내일'
@@ -193,7 +193,7 @@ def test_model_iso_write_still_needs_approval(hub):
 @pytest.mark.parametrize('text',[ '일어나 '*90, '가나다라마바사 '*20 ])
 def test_repeated_model_output_not_published(hub,text):
  a,c,b=hub;enable(c);b.output=text;b.finish='length'
- d=wait(c,request(c,'좋은 습관을 추천해'))
+ d=wait(c,request(c,'좋은 습관을 추천해',mode='chat'))
  assert d['status']=='needs_clarification' and 'repeated_phrase' in d['assistant']['quality']['issues']
  assert '일어나 일어나' not in d['response_json']['output']
  assert d['assistant']['calls'][0]['result']['output']==text
@@ -209,11 +209,11 @@ def test_good_output_not_false_positive(text):
 
 def test_chat_profile_and_exact_input_snapshot(hub):
  a,c,b=hub;enable(c);cfg=c.get('/api/llm/config').json()['config'];cfg.update(include_time_context=False,max_tokens=512,temperature=0.2);c.put('/api/llm/config',json=cfg)
- d=wait(c,request(c,'저녁 메뉴 추천해 줘'))
+ d=wait(c,request(c,'저녁 메뉴 추천해 줘',mode='chat'))
  body=b.calls[0]
  assert body['max_tokens']==128 and body['temperature']==.7 and body['presence_penalty']==1.0
  assert body['top_p']==.8 and body['top_k']==20 and body['min_p']==0
- assert '오늘=' in body['messages'][0]['content']  # automatic mode includes clock contract
+ assert '오늘=' not in body['messages'][0]['content']  # explicit chat honors include_time_context=False
  assert body==d['request_payload']==d['assistant']['calls'][0]['request_payload']
  assert d['assistant']['calls'][0]['result']['output']==b.output
  assert d['assistant']['source_received_at']
@@ -230,7 +230,7 @@ def test_stale_prepared_does_not_send(hub,monkeypatch):
  a,c,b=hub
  old=(datetime.now(timezone.utc)-timedelta(days=1)).isoformat()
  monkeypatch.setattr('app.llm.utcnow',lambda:old)
- j=request(c,'저녁 메뉴 추천해');assert j['status']=='prepared'
+ j=request(c,'저녁 메뉴 추천해',mode='chat');assert j['status']=='prepared'
  monkeypatch.undo();enable(c)
  assert c.post('/api/llm/requests/'+j['id']+'/send').status_code==200
  d=wait(c,j)

@@ -316,6 +316,7 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
  protocol=widget_protocol.build_registry(store,life,changed,
   widget_protocol.TaskServices(add_task,edit_task,complete_task,delete_task))
  app.state.widget_protocol=protocol
+ llm.set_widget_registry(protocol)
  widget_protocol.register_routes(app,protocol,admin)
  @app.get('/api/admin/export')
  async def export(_=Depends(admin)):

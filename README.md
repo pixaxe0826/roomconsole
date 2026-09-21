@@ -127,6 +127,13 @@ widgets/
 
 미리보기는 합성 데이터이고 실제 운영 데이터와 동기화되지 않습니다.
 
+## Widget Assistant 연결
+
+[LLM Widget Bridge](docs/LLM_WIDGET_BRIDGE.md)는 명확한 메모·할 일·일정을 기존 Adapter로 바로 조회하고,
+미확정 Widget 요청만 domain-scoped JSON Proposal로 분석합니다. 자동 모드의 일반 자유 응답은
+명확화 안내로 대체하며, 명시적 일반 대화 모드는 Widget 요청이 아닐 때만 유지합니다.
+새 Adapter 쓰기는 기존 관리자 확인을 거치며, 알람 set/cancel은 여전히 미연결입니다.
+
 ## Widget 서비스 호출 규격
 
 [Widget Protocol 1.0](docs/WIDGET_PROTOCOL.md)은 기존 Memo/Todo/Calendar 서비스 위의 typed Adapter 계층입니다. 관리자 인증된 읽기 API와 신뢰된 서버 호출용 CRUD를 제공하며, LLM 연결·새 승인 UI·Android 알람 제어는 포함하지 않습니다.

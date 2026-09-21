@@ -19,7 +19,7 @@ def main():
     def check(name,condition):
         if not condition:raise AssertionError(name)
         result['checks'].append(name);print('PASS',name,flush=True)
-    captured=[];mode={'usage':True};out='[검증용 모의 응답 · 실제 모델 아님]\n내일 오후 3시에 택배를 보내려는 요청입니다. 할 일을 자동으로 추가하지 않았습니다.\n<script>window.PWNED=true</script>'
+    captured=[];mode={'usage':True};out='[검증용 모의 응답 · 실제 모델 아님]\n로컬 언어 모델에 관한 합성 설명입니다. 실제 모델 추론을 수행한 답변은 아닙니다.\n<script>window.PWNED=true</script>'
     class Backend(BaseHTTPRequestHandler):
         def log_message(self,*a):pass
         def send_json(self,obj):
@@ -49,7 +49,9 @@ def main():
             headers={'Authorization':'Bearer '+app.state.admin_token,'X-Room-Request':'1'}
             api=context.request
             def request(method,path,data=None):return getattr(api,method)(base+path,headers=headers,data=data)
-            source='내일 오후 세 시에 택배 보내기 추가해 줘.'
+            # Explicit legacy remains free-form ONLY for a non-Widget question.
+            # Widget requests, even in legacy mode, must validate a Proposal.
+            source='로컬 언어 모델이 무엇인지 설명해 줘.'
             vid=request('post','/api/voice/text',{'request_id':'browser-voice','source':'UI-test','text':source}).json()['id']
             check('health/version 0.1.7',request('get','/healthz').json()['version']=='0.1.7')
             browser_http=None
@@ -87,6 +89,7 @@ def main():
             check('no fabricated output tokens',page.locator('.llm-metric').nth(1).locator('strong').inner_text().startswith('—'))
             rid=page.evaluate('RoomLLM.getSelection()')
             row=request('get','/api/llm/requests/'+rid).json();check('exact source snapshot',row['source_text']==source)
+            check('explicit non-Widget legacy remains outside Widget bridge',row.get('assistant') is None)
             page.locator('[data-section="payload"] summary').click();check('payload shows system and user',page.locator('[data-section="payload"] pre').inner_text().find('"role": "system"')>=0)
             page.evaluate("RoomManager.navigate('tasks')");page.evaluate("RoomManager.navigate('llm')");page.wait_for_selector('.llm-history-item.selected');check('navigation preserves selected request',page.evaluate('RoomLLM.getSelection()')==rid)
             if injected_html:
@@ -135,6 +138,20 @@ def main():
             display=browser.new_context();res=display.request.post(base+'/api/devices/claim',data={'code':pair['path'].split('=')[1]},headers={'X-Room-Request':'1'})
             check('paired client access retained',res.status==200 and display.request.get(base+'/api/state').status==200)
             check('LLM admin-only from actual display',display.request.get(base+'/api/llm/requests').status==401)
+            # The same free-form provider response is diagnostic-only for a Widget
+            # request. Mode selection must not bypass schema/permission checks.
+            widget_text='내일 하늘에 우유 사기 추가해.'
+            widget_voice=request('post','/api/voice/text',{'request_id':'browser-widget-voice','source':'UI-test','text':widget_text}).json()['id']
+            widget_request=request('post','/api/llm/requests',{'request_id':'browser-widget-legacy','voice_id':widget_voice,'mode':'legacy','expected_text_sha256':hashlib.sha256(widget_text.encode()).hexdigest()}).json()
+            for _ in range(200):
+                widget_request=request('get','/api/llm/requests/'+widget_request['id']).json()
+                if widget_request['status'] not in {'queued','running'}:break
+                page.wait_for_timeout(25)
+            trace=widget_request['assistant']['widget_trace']
+            check('Widget legacy request uses constrained Proposal schema',json.loads(captured[-1])['response_format']['type']=='json_schema')
+            check('Widget prose is rejected, not a final success',widget_request['status']=='needs_clarification' and trace['widget_response']['error']['code']=='INVALID_PROPOSAL' and widget_request['response_json']['output']!=out)
+            check('Rejected prose is preserved only in manager diagnostics',widget_request['assistant']['calls'][0]['result']['output']==out)
+            check('Rejected Widget prose cannot mutate tasks',len(request('get','/api/state').json()['tasks'])==0)
             browser.close()
             if browser_http:browser_http.close()
     finally:

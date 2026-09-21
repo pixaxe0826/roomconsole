@@ -53,6 +53,7 @@ def main():
      load_bridged(page,api,'manager');page.wait_for_selector('.kpis')
      def send(i,state):
       page.evaluate("RoomManager.navigate('voice')");page.wait_for_selector('#voiceLLMMode')
+      page.locator('#voiceLLMMode').select_option('chat' if i==2 else 'auto')
       page.locator(f'[data-op=voice-to-llm][data-id="{vids[i]}"]').click()
       page.wait_for_selector('[data-agent-state='+state+']')
      send(0,'succeeded')

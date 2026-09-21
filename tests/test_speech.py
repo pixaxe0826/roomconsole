@@ -52,7 +52,7 @@ class FakeLLM:
     def __init__(self):self.calls=[]
     async def generate(self,endpoint,body,timeout):
         self.calls.append(json.loads(body))
-        response={'model':'test-double','choices':[{'message':{'content':'김치볶음밥이나 카레를 추천합니다. 간단하게 준비할 수 있습니다.'},'finish_reason':'stop'}],
+        response={'model':'test-double','choices':[{'message':{'content':json.dumps({'widget':'memo','action':'read','target':None,'args':{}})},'finish_reason':'stop'}],
                   'usage':{'prompt_tokens':32,'completion_tokens':12},
                   'timings':{'predicted_n':12,'predicted_ms':1200,'predicted_per_second':10,'prompt_ms':100}}
         return response,json.dumps(response,ensure_ascii=False)
@@ -155,12 +155,14 @@ def test_auto_submit_write_still_requires_confirmation(enabled):
     assert not app.state.store.tasks()
 
 
-def test_auto_submit_general_chat_reaches_enabled_llm_once(enabled):
+def test_auto_submit_widget_fallback_reaches_enabled_llm_once(enabled):
     app,c,r,a,_=enabled
     backend=FakeLLM();app.state.llm.backend=backend
     cfg=c.get('/api/llm/config',headers=a).json()['config'];cfg['enabled']=True
     assert c.put('/api/llm/config',headers=a,json=cfg).status_code==200
-    r.text='저녁 메뉴 추천해 줘.'
+    layout=app.state.store.get('layout');layout['widgets'][0]['type']='note'
+    app.state.store.set('layout',layout);app.state.store.set('widget_data:note',{'text':'합성 실제 메모'})
+    r.text='메모 내용 좀 읽어 볼래'
     job=wait(c,post(c,'auto-chat').json()['id'])
     req=wait_llm(app,job['voice_id'])
     assert req['status']=='succeeded'
@@ -168,6 +170,8 @@ def test_auto_submit_general_chat_reaches_enabled_llm_once(enabled):
     assert req['assistant']['mode']=='auto'
     assert req['assistant']['routing']['route']=='LLM_FALLBACK'
     assert req['assistant']['routing']['llm_called'] is True
+    assert req['response_json']['output'].endswith('합성 실제 메모')
+    assert req['assistant']['widget_trace']['adapter']=='MemoAdapter'
 
 
 def test_auto_submit_failure_does_not_rewrite_successful_stt(enabled):

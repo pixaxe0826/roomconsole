@@ -61,7 +61,11 @@ def entry(store, rid: str) -> dict:
     output = output if isinstance(output, str) else None
     refusal = refusal if isinstance(refusal, str) else None
     input_text = row['source_text']
-    if agent.get('memo_read'):
+    if agent.get('protocol_private'):
+        input_text = '메모 변경 요청'
+        output = '이 메모 변경 요청과 결과는 관리자 기록에서 확인해 주세요.'
+        refusal = None
+    elif agent.get('memo_read'):
         try:
             visible = memo_result_is_public(store, agent.get('tool_result') or {})
         except (ValueError, TypeError, sqlite3.Error):
