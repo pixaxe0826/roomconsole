@@ -82,7 +82,8 @@ def setup_verification(tmp_path,monkeypatch,*,status=None,health=None,heads=None
         if args[0]=='sv':
             count[0]+=1
             if callable(status):return status(str(prefix/'var/service/room-hub'),count[0])
-            return status or f'run: {prefix}/var/service/room-hub: (pid 123) 30s; run: log: (pid 456) 30s'
+            service = prefix / 'var/service/room-hub'
+            return status or f'run: {service}: (pid 123) 30s; run: log: (pid 456) 30s'
         if args[-2]=='rev-parse':
             if heads and args[-1] in heads:return heads[args[-1]]
             return 'b'*40 if 'tree' in args[-1] else target
