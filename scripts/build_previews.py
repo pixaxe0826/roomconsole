@@ -46,7 +46,7 @@ def build():
   html=html.replace('</head>','<style>'+css+'</style></head>')
   llm=(ROOT/'scripts/llm_demo.js').read_text('utf-8')+'\n'+(ROOT/'web/manager-llm.js').read_text('utf-8') if kind=='manager' else ''
   scripts=prefix+'\n'+shared+'\n'+(ROOT/'web/life.js').read_text('utf-8')+'\n'+extra+'\n'+llm+'\n'+(ROOT/f'web/{kind}.js').read_text(encoding='utf-8')
-  if kind=='client':scripts+='\n'+(ROOT/'web/speech.js').read_text(encoding='utf-8')
+  if kind=='client':scripts+='\n'+(ROOT/'web/timers.js').read_text(encoding='utf-8')+'\n'+(ROOT/'web/speech.js').read_text(encoding='utf-8')
   return html.replace('</body>','<script>'+scripts.replace('</script','<\\/script')+'</script></body>')
  mod='window.ROOM_WIDGETS={};\n'
  for m in registry:

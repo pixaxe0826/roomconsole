@@ -26,7 +26,7 @@ def test_new_folder_discovered_without_altering_layout(hub):
  _,a,d=hub;s=d.get('/api/state').json()
  assert s['layout']==DEFAULT_LAYOUT
  assert {'todos','all-todos'}<={m['id'] for m in s['widgets']}
- assert len(s['widgets'])==8 and not s['widget_errors']
+ assert len(s['widgets'])==9 and not s['widget_errors']
  for path in ['manifest.json','widget.js','style.css']:
   assert a.get('/widgets/all-todos/'+path).status_code==200
 

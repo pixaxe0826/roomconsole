@@ -162,14 +162,15 @@ def test_case5_unknown_action(hub):
 
 def test_case6_registry_and_typed_schemas(hub):
     _, client, registry = hub
-    assert registry.list_widgets() == ['memo', 'todo', 'calendar', 'alarm']
+    assert registry.list_widgets() == ['memo', 'todo', 'calendar', 'alarm', 'timer']
     assert registry.get('does-not-exist') is None
     manifest = client.get(API + '/widgets').json()
-    assert manifest['protocol_version'] == '1.0' and manifest['http_write_execution'] is False
+    assert manifest['protocol_version'] == '1.0' and manifest['http_write_execution'] is True
+    assert manifest['http_immediate_actions'] == ['timer.start', 'timer.stop']
     for widget in manifest['widgets']:
         for cap in widget['capabilities']:
             assert 'properties' in cap['input_schema'] and 'properties' in cap['output_schema']
-            assert cap['requires_confirmation'] == (not cap['read_only'])
+            assert cap['requires_confirmation'] == (not cap['read_only'] and widget['name'] != 'timer')
             assert cap['permission_level'] in {'read', 'write', 'control', 'dangerous'}
     schema = client.get(API + '/schema').json()
     assert 'accepted' in schema['response']['properties']['status']['enum']
