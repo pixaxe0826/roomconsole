@@ -1,0 +1,27 @@
+name: Temporary benchmark source export
+on:
+  push:
+    branches: [automation/benchmark-source-export]
+    paths: [.github/workflows/_benchmark_source_export.yml]
+permissions:
+  contents: read
+jobs:
+  export:
+    if: github.repository == 'pixaxe0826/roomconsole'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ca70421e53e7b36fff442d5e0f5bca94b0ef025f
+          fetch-depth: 0
+          persist-credentials: false
+      - run: |
+          git branch benchmark-base ca70421e53e7b36fff442d5e0f5bca94b0ef025f
+          git bundle create /tmp/roomconsole-benchmark-base.bundle benchmark-base
+          git bundle verify /tmp/roomconsole-benchmark-base.bundle
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: benchmark-development-base
+          path: /tmp/roomconsole-benchmark-base.bundle
+          retention-days: 1
