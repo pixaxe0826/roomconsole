@@ -196,8 +196,13 @@ class WidgetRegistry:
         adapter = self.get(name)
         return adapter.capabilities() if adapter else []
 
+    def immediate_actions(self) -> list[str]:
+        return [a.name + '.' + c.action for a in self._adapters.values()
+                for c in a.capabilities() if not c.read_only and not c.requires_confirmation]
+
     def manifest(self) -> dict:
-        return {'protocol_version': '1.0', 'http_write_execution': False,
+        return {'protocol_version': '1.0', 'http_write_execution': bool(self.immediate_actions()),
+                'http_immediate_actions': self.immediate_actions(),
                 'widgets': [{'name': a.name, 'adapter': type(a).__name__, 'source_of_truth': a.source_of_truth,
                              'capabilities': [c.model_dump(mode='json') for c in a.capabilities()]}
                             for a in self._adapters.values()]}

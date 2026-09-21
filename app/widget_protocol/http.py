@@ -67,6 +67,7 @@ def register_routes(app, registry: WidgetRegistry, admin):
             return JSONResponse(response.model_dump(mode='json'), status_code=400)
         # A manager can validate all action schemas, but cannot approve execution by
         # self-asserting user_confirmed or by copying the public request digest.
+        # Bounded TimerAdapter start/stop are explicitly immediate under server policy.
         authority = ExecutionContext(principal='admin', role='admin',
                                      permissions=frozenset({'read', 'write', 'control', 'dangerous'}))
         response = await registry.execute(value, authority)

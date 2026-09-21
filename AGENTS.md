@@ -52,3 +52,13 @@
 - alarms 예약 CRUD는 관리자. 유효 표시 기기는 기존 회차 ack/snooze만 허용한다.
 - ringing은 실제 소리 재생 증거가 아니다. 잠금/백그라운드/오프라인 보장을 하지 않는다.
 - tests/test_life.py, tests/test_life_update.py, scripts/life_browser.py와 기존 테스트를 실행한다.
+
+## Timer patch: explicit narrow exception
+
+- timer.start/stop only are immediate 1–600-second countdown controls; existing other writes still require confirmation.
+- All timer widgets share TimerService SQLite deadlines; never treat a client interval/LLM as the source of truth.
+- `current` means last-started RUNNING timer, not a guessed client/session card.
+- Preserve durable request-key replay before current resolution; never stop the next timer on retry.
+- Narrow paired-display `/api/timers` access requires timer layout opt-in. No general Protocol/control grant.
+- Run tests/test_timers.py, tests/test_timer_bridge.py and scripts/timers_browser.py plus existing suites.
+- Rebuild previews after client/widget changes. Foreground-only opt-in audio is NOT an OS alarm.

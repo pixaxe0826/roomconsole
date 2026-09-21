@@ -43,6 +43,7 @@ def load_bridged(page, api, kind):
     """
     code+='\n'+(ROOT/'web/life.js').read_text()+'\n'
     if kind=='client':
+        code+='\n'+(ROOT/'web/timers.js').read_text()+'\n'
         code+='window.ROOM_WIDGETS={};\n'
         for mod in (ROOT/'widgets').glob('*/widget.js'):
             text=mod.read_text().replace('export function','function');names='render,bind' if 'function bind(' in text else 'render'

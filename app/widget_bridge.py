@@ -23,6 +23,7 @@ from .command_semantics import status_evidence, unsupported_personal
 from .fast_reads import match_read, format_read
 from .command_routing import exact_alarm, read_candidates, unsafe_source
 from .store import utcnow
+from .timer_commands import exact_timer, source_duration, format_timer, START as TIMER_START, STOP as TIMER_STOP
 from .widget_protocol import ExecutionContext, WidgetRequest, WidgetResponse, request_digest
 from .widget_protocol.core import ProtocolFault
 
@@ -48,7 +49,8 @@ DOMAIN_WORDS = {
     'memo': r'메모(?!리)|노트',
     'todo': r'할\s*일|해야\s*(?:할|하는)\s*일',
     'calendar': r'일정|스케줄|달력|캘린더',
-    'alarm': r'알람|알림|깨워|깨우|타이머',
+    'alarm': r'알람|알림|깨워|깨우',
+    'timer': r'타이머|timer',
 }
 ACTION_WORDS = {
     'list': r'읽|보여|알려|확인|조회|목록|어떤|뭐|남아|남았|적혀',
@@ -64,6 +66,8 @@ ACTION_WORDS = {
     'update': r'수정|고쳐|바꿔|변경',
     'set': r'맞춰|설정|울려|깨워|깨우|등록',
     'cancel': r'취소|꺼|끄|해제',
+    'start': TIMER_START,
+    'stop': TIMER_STOP,
 }
 CONTROLLED_ARGS = {'version', 'limit', 'category', 'priority', 'notes', 'repeat',
                    'weekdays', 'enabled', 'timezone', 'pinned', 'shared'}
@@ -245,6 +249,8 @@ class WidgetBridge:
         """EXACT -> local plan; CANDIDATE -> constrained parser; UNSAFE -> clarify."""
         text = record['normalized']
         domain = domain_for(text, self.registry)
+        if domain == 'timer':
+            return self.prepare_timer(record)
         personal = self.has_domain(text)
         if personal:
             record['_widget_domain_request'] = True
@@ -345,6 +351,86 @@ class WidgetBridge:
             record['widget_trace']['proposal_schema'] = {'anyOf': branches}
         return record
 
+    def prepare_timer(self, record):
+        text = record['normalized']
+        record['_widget_domain_request'] = True
+        record.pop('fast_read', None)
+        # Do not let broad timer fallback silently omit scheduling/batch/negation.
+        if unsafe_source(text) or re.search(r'전부|모두|모든|전체|반복|마다|일시\s*정지|재개|늘려|줄여', text):
+            record.update(route='clarify', origin='server', state='needs_clarification',
+                          final_text='한 개의 타이머 시작·종료·조회를 요청해 주세요. 일괄·반복·일시정지는 지원하지 않습니다.')
+            record['routing'].update(route='EXISTING_RULE', confidence='UNSAFE', route_reason='timer_unsafe_source')
+            return record
+        try:
+            direct = exact_timer(text)
+        except ValueError as exc:
+            record.update(route='clarify', origin='server', state='needs_clarification', final_text=str(exc))
+            record['routing'].update(route='EXISTING_RULE', confidence='EXACT', route_reason='timer_missing_or_invalid_duration')
+            return record
+        caps = self.registry.get_capabilities('timer')
+        choices = [c for c in caps if c.action == direct['action']] if direct else [c for c in caps if action_evidence(c.action, text)]
+        if not choices:
+            choices = caps
+        record['widget_bridge'] = BRIDGE_VERSION
+        record['widget_trace'] = {'domain':'timer', 'candidate_domains':['timer'],
+            'available_capabilities':['timer.'+c.action for c in choices],
+            'schema_validation':'not_run', 'policy_result':'not_run', 'widget_request':None,
+            'widget_response':None, 'adapter':None, 'source_of_truth':None,
+            'capability_fingerprint':digest([['timer',c.model_dump(mode='json')] for c in choices]),
+            'latency_ms':{'stt_ms':None,'router_ms':0.,'llm_ms':0.,'adapter_ms':0.,'total_ms':None}}
+        record.update(origin='server', state='new', final_text=None, proposal=None)
+        if direct:
+            record.update(route='rule', direct_widget=direct)
+            record['routing'].update(route='EXISTING_RULE', confidence='EXACT', route_reason='exact_timer.'+direct['action'], resolved_intent='timer.'+direct['action'])
+        else:
+            record.update(route='parser')
+            record['routing'].update(route='LLM_FALLBACK',confidence='CANDIDATE',route_reason='timer_candidate')
+            record['widget_trace']['proposal_schema'] = proposal_schema(self.registry,'timer',[c.action for c in choices],record)
+        return record
+
+    async def stage_timer(self, rid, record, result, *, direct=False):
+        request = None
+        trace = record['widget_trace']
+        trace['latency_ms']['llm_ms'] = record['routing'].get('llm_seconds',0)*1000
+        try:
+            fresh(record,self.store)
+            request, spec = self.validate_projection(record,result)
+            text = record['normalized']
+            # Model never chooses a duration or target not backed by the transcript.
+            if request.action == 'start':
+                duration = source_duration(text)
+                if request.args.get('duration_seconds') != duration or not action_evidence('start',text):
+                    raise ValueError('source duration or action mismatch')
+                label = request.args.get('label')
+                if label is not None and label != '타이머' and label not in text:
+                    raise ValueError('invented timer label')
+            if request.action in {'stop', 'get'}:
+                if request.action == 'stop' and not action_evidence('stop',text):
+                    raise ValueError('stop not requested')
+                if re.search(r'전부|모두|모든|전체|다른|두\s*개|여러|후|뒤|내일|오늘|오전|오후|예약',text):
+                    raise ValueError('unsupported timer target/schedule')
+                if request.target is None:
+                    raise ValueError('target missing')
+                if request.target.type == 'item_id' and request.target.value not in text:
+                    raise ValueError('invented target ID')
+                if request.target.type == 'reference':
+                    if request.target.value != 'current':
+                        raise ValueError('unsupported timer reference')
+                    exact = exact_timer(text)
+                    if not (exact and (exact.get('target') or {}).get('value') == 'current') and not re.search(r'현재|지금|마지막|최근',text):
+                        raise ValueError('current timer not grounded')
+            if direct:
+                trace['schema_validation']='server_generated'
+            response = await self.registry.execute(request, ExecutionContext(
+                principal='assistant-timer',role='admin',permissions=frozenset({'read','control'})))
+            trace['latency_ms']['adapter_ms'] += response.meta.latency_ms
+        except ProtocolFault as exc:
+            response=fail(request,exc.status,exc.error.code,exc.error.message,exc.error.field,self.registry)
+        except (ValueError,TypeError,ValidationError):
+            response=fail(request,'needs_clarification','TIMER_SOURCE_NOT_GROUNDED',
+                '1~600초의 시간 또는 종료할 현재 타이머를 명확히 말씀해 주세요. 추측해서 실행하지 않았습니다.',registry=self.registry)
+        return self.finish(rid,record,request,response)
+
     def fingerprint(self, trace):
         return digest([[name, c.model_dump(mode='json')]
             for name in trace.get('candidate_domains', [trace['domain']])
@@ -389,7 +475,10 @@ class WidgetBridge:
                           'error': 'failed', 'unavailable': 'needs_clarification'}.get(response.status, 'needs_clarification')
         if response.status == 'success':
             data = response.data
-            if request.widget == 'memo' and request.action == 'read':
+            if request.widget == 'timer':
+                record['final_text'] = format_timer(request, data, response.meta.duplicate)
+                record['routing']['resolved_context'] = {'selection_policy': 'latest_started_running' if request.target and request.target.value == 'current' else 'explicit', 'timer_id': data.get('id'), 'current_id': data.get('current_id')}
+            elif request.widget == 'memo' and request.action == 'read':
                 # Preserve the existing dynamic display privacy recheck contract.
                 snapshot = data | {'source': response.meta.source_of_truth, 'count': 1,
                                   'note_id': data.get('id'), 'as_of': response.meta.executed_at}
@@ -647,6 +736,11 @@ class WidgetBridge:
             widget=request.widget, action=request.action, target=target, args=args, context={'source': 'assistant'})
 
     async def direct(self, rid, record):
+        if record.get('widget_trace', {}).get('domain') == 'timer':
+            proof = exact_timer(record['normalized'])
+            if not proof or proof != record.get('direct_widget'):
+                raise ValueError('Timer direct plan integrity')
+            return await self.stage_timer(rid, record, {'output': dump(proof), 'finish_reason': 'stop'}, direct=True)
         proof = exact_alarm(record['normalized'], record['reference_at'], record['timezone'])
         if not proof or proof != record.get('direct_widget'):
             raise ValueError('Direct rule plan integrity')
@@ -656,6 +750,8 @@ class WidgetBridge:
         return record
 
     async def stage(self, rid, record, result):
+        if record.get('widget_trace', {}).get('domain') == 'timer':
+            return await self.stage_timer(rid, record, result)
         request = None
         trace = record['widget_trace']
         trace['latency_ms']['llm_ms'] = record['routing'].get('llm_seconds', 0) * 1000

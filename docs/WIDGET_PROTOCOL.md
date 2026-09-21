@@ -243,3 +243,12 @@ HEAD/tree/SYNCED 및 관리자 Protocol schema endpoint로 패치 적용을 구�
 후속 LLM/Rule/MCP bridge는 registry.manifest()에서 스키마를 얻고 registry.execute()를 호출하면 됩니다.
 반드시 원문·대상·권한·실제 확인을 검증하는 별도 경계를 거쳐야 하며, 모델에 admin 키나
 ExecutionContext 생성 권한을 주지 않습니다. 기존 confirmation broker와의 통합은 후속 PR입니다.
+
+## Timer extension: immediate countdown controls
+
+The timer patch adds `timer.list/get/start/stop` without changing the 1.0 envelope.
+Unlike existing mutations, bounded `timer.start/stop` have `permission_level=control`
+and `requires_confirmation=false`; authenticated admin HTTP can execute only these
+immediate mutations. `http_immediate_actions` identifies the exception explicitly.
+Existing memo/todo/calendar/alarm HTTP writes remain confirmation-gated.
+See [TimerAdapter, source-of-truth, idempotency and delivery contract](TIMERS.md).

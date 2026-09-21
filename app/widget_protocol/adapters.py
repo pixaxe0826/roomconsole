@@ -260,7 +260,7 @@ class AlarmAdapter(StoredAdapter):
                              changed=result['deleted'], event='alarm.deleted', entity_id=request.target.value)
 
 
-def build_registry(store, life, changed, task_services: TaskServices) -> WidgetRegistry:
+def build_registry(store, life, changed, task_services: TaskServices, *, timers=None) -> WidgetRegistry:
     def audit(record):
         # Existing audit table and retention; reads do not bump layout/state revision.
         with closing(store.connect()) as db:
@@ -274,4 +274,7 @@ def build_registry(store, life, changed, task_services: TaskServices) -> WidgetR
     for adapter in (MemoAdapter(store, life, changed), TodoAdapter(store, task_services),
                     CalendarAdapter(store, task_services), AlarmAdapter(store, life, changed)):
         registry.register(adapter)
+    if timers is not None:
+        from .timers import TimerAdapter
+        registry.register(TimerAdapter(timers))
     return registry
