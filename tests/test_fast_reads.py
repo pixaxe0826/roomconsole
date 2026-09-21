@@ -144,26 +144,26 @@ def test_case6_uncertain_input_still_calls_structured_parser(hub):
 @pytest.mark.parametrize('tm',[None,'unknown',' NONE ','null','N/A',''])
 def test_case7_missing_optional_time_is_null(hub,tm):
     app,c,b=hub;enable(c)
-    b.output=json.dumps({'intent':'todo.create','date_ref':'내일','title':'우유 사기','time':tm})
+    b.output=json.dumps({'widget':'todo','action':'add','target':None,'args':{'date':c.get('/api/clock').json()['tomorrow'],'title':'우유 사기','time':tm}})
     d=wait(c,request(c,'내일 하늘에 우유 사기 추가해.'))
     assert d['status']=='awaiting_confirmation',d
-    assert d['assistant']['proposal']['time'] is None
+    assert d['assistant']['widget_trace']['widget_request']['args'].get('time') is None
     assert not app.state.store.tasks() # write STILL requires confirmation
 
 
 def test_case7_omitted_time_and_required_missing_value(hub):
     app,c,b=hub;enable(c)
-    b.output=json.dumps({'intent':'todo.create','date_ref':'내일','title':'우유 사기'})
+    b.output=json.dumps({'widget':'todo','action':'add','target':None,'args':{'date':c.get('/api/clock').json()['tomorrow'],'title':'우유 사기'}})
     d=wait(c,request(c,'내일 하늘에 우유 사기 추가해.'))
-    assert d['status']=='awaiting_confirmation' and d['assistant']['proposal']['time'] is None
-    b.output=json.dumps({'intent':'todo.create','time':None})
+    assert d['status']=='awaiting_confirmation' and d['assistant']['widget_trace']['widget_request']['args'].get('time') is None
+    b.output=json.dumps({'widget':'todo','action':'add','target':None,'args':{'time':None}})
     d=wait(c,request(c,'내일 하늘에 우유 사기 추가해.'))
     assert d['status']=='needs_clarification' and not app.state.store.tasks()
 
 
 def test_invalid_time_remains_invalid_but_no_pydantic_trace_in_response(hub):
     app,c,b=hub;enable(c)
-    b.output=json.dumps({'intent':'todo.create','date_ref':'내일','title':'우유 사기','time':'25:99'})
+    b.output=json.dumps({'widget':'todo','action':'add','target':None,'args':{'date':c.get('/api/clock').json()['tomorrow'],'title':'우유 사기','time':'25:99'}})
     d=wait(c,request(c,'내일 하늘에 우유 사기 추가해.'))
     assert d['status']=='needs_clarification'
     assert 'ValidationError' not in d['response_json']['output']
@@ -174,7 +174,7 @@ def test_invalid_time_remains_invalid_but_no_pydantic_trace_in_response(hub):
 
 def test_model_cannot_silently_drop_explicit_source_time(hub):
     app,c,b=hub;enable(c)
-    b.output=json.dumps({'intent':'todo.create','date_ref':'내일','title':'우유 사기','time':'unknown'})
+    b.output=json.dumps({'widget':'todo','action':'add','target':None,'args':{'date':c.get('/api/clock').json()['tomorrow'],'title':'우유 사기','time':'unknown'}})
     d=wait(c,request(c,'내일 하늘에 오후 3시 우유 사기 추가해.'))
     assert d['status']=='needs_clarification' and not app.state.store.tasks()
 
@@ -191,7 +191,7 @@ def test_clear_reads_cannot_be_forced_to_model_by_old_mode(hub,mode,enabled):
 
 def test_fast_path_does_not_wait_for_busy_model_or_cancel_it(hub):
     app,c,b=hub;enable(c);b.hold.set()
-    slow=request(c,'저녁 메뉴 추천해 줘.')
+    slow=request(c,'저녁 메뉴 추천해 줘.',mode='chat')
     for _ in range(150):
         if b.calls:break
         time.sleep(.01)
@@ -219,7 +219,8 @@ def test_db_error_is_failure_not_empty_or_model_fallback(hub,monkeypatch):
     monkeypatch.setattr(app.state.store,'query_tasks',unavailable)
     d=wait(c,request(c,'오늘 오후 일정 확인해줘'))
     assert d['status']=='failed' and d['error_code']=='source_read_failed'
-    assert not d['response_json'] and not b.calls
+    assert d['assistant']['widget_trace']['widget_response']['status']=='error' and not b.calls
+    assert '없습니다' not in d['response_json']['output']
 
 
 def test_current_memo_empty_no_widget_and_tied_recency_do_not_guess(hub):
@@ -272,7 +273,7 @@ def test_old_rule_write_confirmation_and_model_chat_still_work(hub):
     d=wait(c,request(c,'내일 할 일에 검증 작업 추가해'))
     assert d['status']=='awaiting_confirmation' and not b.calls and not app.state.store.tasks()
     assert confirm(c,d).status_code==200 and len(app.state.store.tasks())==1
-    enable(c);d=wait(c,request(c,'저녁 메뉴 추천해 줘.'))
+    enable(c);d=wait(c,request(c,'저녁 메뉴 추천해 줘.',mode='chat'))
     assert d['status']=='succeeded' and len(b.calls)==1
 
 

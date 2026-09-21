@@ -102,7 +102,7 @@ def resolve_date(ref, at, tz):
 
 def parse_clock(text):
     """Return time at the start, remaining title, ambiguity. Never guess AM/PM."""
-    m=re.match(r'(?:(오전|오후|아침|저녁|밤|낮)\s*)?(\d{1,2}|한|두|세|네|다섯|여섯|일곱|여덟|아홉|열|열한|열두)\s*(?:시|:)(?:(\d{1,2})\s*분?|\s*(반))?\s*(?:에\s*)?',text)
+    m=re.match(r'(?:(오전|오후|아침|저녁|밤|낮)\s*)?(\d{1,2}|한|두|세|네|다섯|여섯|일곱|여덟|아홉|열|열한|열두)\s*(?:시|:)(?:\s*(\d{1,2})\s*분?|\s*(반))?\s*(?:에\s*)?',text)
     if not m:return None,text,None
     values={'한':1,'두':2,'세':3,'네':4,'다섯':5,'여섯':6,'일곱':7,'여덟':8,'아홉':9,'열':10,'열한':11,'열두':12}
     h=values.get(m[2],int(m[2]) if m[2].isdigit() else 0);minutes=30 if m[4] else int(m[3] or 0)

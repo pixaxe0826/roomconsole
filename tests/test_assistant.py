@@ -190,7 +190,7 @@ def test_display_reads_result_but_cannot_confirm(hub):
 
 def test_chat_role_no_legacy_refusal_prompt(hub):
     a,c,b=hub;enable(c)
-    d=wait(c,request(c,'저녁메뉴 추천해 줘.'))
+    d=wait(c,request(c,'저녁메뉴 추천해 줘.',mode='chat'))
     assert d['status']=='succeeded' and '김치볶음밥' in d['response_json']['output']
     body=b.calls[-1]
     assert '입력 검토 도우미' not in body['messages'][0]['content']
@@ -198,15 +198,17 @@ def test_chat_role_no_legacy_refusal_prompt(hub):
     assert d['assistant']['route']=='chat' and not a.state.store.tasks()
     assert d['response_json']['metrics']['generation_tps']==10
 
-def test_forced_chat_never_calls_tools(hub):
-    a,c,b=hub;enable(c);d=wait(c,request(c,'오늘 할 일 전부 삭제해',mode='chat'))
-    assert d['assistant']['route']=='chat' and d['status']=='succeeded' and not a.state.store.tasks()
+def test_forced_chat_cannot_bypass_widget_confirmation(hub):
+    a,c,b=hub;enable(c);add(c,'보존할 실제 작업')
+    d=wait(c,request(c,'오늘 할 일 전부 삭제해',mode='chat'))
+    assert d['assistant']['route']=='rule' and d['status']=='awaiting_confirmation'
+    assert len(a.state.store.tasks())==1 and not b.calls
 
 def test_parser_valid_proposal_only_preview(hub):
     a,c,b=hub;enable(c)
     text='내일 택배 보내기 할 일로 등록해 줘'
     assert detect(text,AT,'Asia/Seoul')['route']=='parser'
-    b.output=json.dumps({'intent':'todo.create','date_ref':'내일','title':'택배 보내기','time':None,'status':'all','scope':'one'},ensure_ascii=False)
+    b.output=json.dumps({'widget':'todo','action':'add','target':None,'args':{'date':c.get('/api/clock').json()['tomorrow'],'title':'택배 보내기','time':None}},ensure_ascii=False)
     d=wait(c,request(c,text));assert d['status']=='awaiting_confirmation',d
     assert b.calls[0]['response_format']['type']=='json_schema'
     assert not a.state.store.tasks() and '추가했습니다' not in d['response_json']['output']
@@ -236,10 +238,15 @@ def test_truncated_proposal_not_executed(hub):
 
 def test_disabled_chat_prepared_but_local_query_available(hub):
     a,c,b=hub;d=wait(c,request(c,'오늘 남은 할 일 확인해줘'));assert d['status']=='succeeded' and not b.calls
-    j=wait(c,request(c,'저녁 메뉴 추천해 줘'));assert j['status']=='prepared'
+    j=wait(c,request(c,'저녁 메뉴 추천해 줘',mode='chat'));assert j['status']=='prepared'
 
 def test_old_requests_snapshot_preserved(hub):
-    a,c,b=hub;j=request(c,'오늘 할 일에 택배 보내기 추가해',mode='legacy')
+    a,c,b=hub
+    # A historical pre-bridge request is kept byte-for-byte; new Widget requests
+    # cannot select legacy mode to bypass the proposal boundary.
+    bridge=a.state.llm.widget_bridge;a.state.llm.widget_bridge=None
+    j=request(c,'오늘 할 일에 택배 보내기 추가해',mode='legacy')
+    a.state.llm.widget_bridge=bridge
     assert not j['assistant'] and '변경할 권한은 없습니다' in j['request_payload']['messages'][0]['content']
     body=j['request_body'];r=wait(c,request(c,'오늘 할 일에 다른 일 추가해'))
     assert c.get('/api/llm/requests/'+j['id']).json()['request_body']==body

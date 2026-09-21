@@ -274,10 +274,12 @@ def test_voice_transcription_to_llm_full_flow(tmp_path):
     import sys, io, wave, struct, math
     from app.speech import SpeechConfig
     class ASR:
-        async def transcribe(self,source,cfg,cancel,temp_root):return '이번 주 토요일에 화분 물 주기',1.0
+        async def transcribe(self,source,cfg,cancel,temp_root):return '오늘 일정 목록 좀 확인해 줄래',1.0
     model=tmp_path/'model';model.write_bytes(b'x'*2048)
     cfg=SpeechConfig(enabled=True,binary=sys.executable,model=str(model),ffmpeg=sys.executable,threads=6)
-    b=FakeBackend();a=create_app(tmp_path/'data',weather_enabled=False,speech_config=cfg,speech_runner=ASR(),llm_backend=b)
+    b=FakeBackend()
+    b.response['choices'][0]['message']['content']=json.dumps({'widget':'calendar','action':'list','target':None,'args':{}})
+    a=create_app(tmp_path/'data',weather_enabled=False,speech_config=cfg,speech_runner=ASR(),llm_backend=b)
     with TestClient(a) as c:
         c.headers.update({'Authorization':'Bearer '+a.state.admin_token,'X-Room-Request':'1'})
         enable(c)

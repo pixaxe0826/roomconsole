@@ -111,6 +111,7 @@ def main():
                 ok('actual list includes task inserted by earlier request','택배 보내기' in page.locator('.llm-output').inner_text() and '3개' in page.locator('.llm-output').inner_text())
                 page.screenshot(path=str(screenshots/'assistant_read.png'),full_page=True)
                 page.evaluate("RoomManager.navigate('voice')");page.wait_for_selector('#voiceLLMMode')
+                page.locator('#voiceLLMMode').select_option('chat')
                 page.locator(f'[data-id="{voices[2]}"][data-op=voice-to-llm]').click();page.wait_for_selector('[data-agent-state=succeeded]')
                 ok('general query routes to separate chat prompt','일반 대화' in page.locator('.assistant-panel').inner_text())
                 ok('model output retained and labelled','[모의 응답]' in page.locator('.llm-output').inner_text())

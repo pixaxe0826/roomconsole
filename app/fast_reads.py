@@ -62,9 +62,18 @@ def match_read(text: str, at: str, tz: str) -> ReadPlan | None:
 
 
 def execute_read(store, plan: ReadPlan, at: str, tz: str):
-    """Read the existing repositories, then format their exact values as text."""
+    """Legacy direct reader; the integrated assistant now reads through Registry."""
     if plan.intent == 'memo.read':
         snapshot = memo_snapshot(store, plan.memo_ref)
+    else:
+        resolved = resolve_range(plan.date_ref, at, tz)
+        snapshot = store.query_tasks(resolved.start, resolved.end, plan.status, limit=50, period=plan.period)
+    return format_read(snapshot, plan, at, tz)
+
+
+def format_read(snapshot, plan: ReadPlan, at: str, tz: str):
+    """Pure deterministic formatter, shared by old readers and Adapter responses."""
+    if plan.intent == 'memo.read':
         context = {k: snapshot.get(k) for k in (
             'selector', 'selection_policy', 'widget_id', 'note_id', 'version', 'updated_at', 'shared')}
         context['active_card_known'] = False  # Browser noteId is NOT backend state.
@@ -77,7 +86,6 @@ def execute_read(store, plan: ReadPlan, at: str, tz: str):
                 text += '(본문이 비어 있습니다.)'
         return snapshot, text, context
     resolved = resolve_range(plan.date_ref, at, tz)
-    snapshot = store.query_tasks(resolved.start, resolved.end, plan.status, limit=50, period=plan.period)
     context = {'date': resolved.start if resolved.start == resolved.end else None,
                'date_ref': plan.date_ref, 'range': [resolved.start, resolved.end],
                'timezone': tz, 'period': plan.period, 'status': plan.status,

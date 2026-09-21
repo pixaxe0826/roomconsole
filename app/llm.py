@@ -245,7 +245,12 @@ class LLMHub:
             CREATE INDEX IF NOT EXISTS llm_voice ON llm_requests(source_voice_id,created_at);
             ''')
         self.assistant = AssistantEngine(store)
+        self.widget_bridge = None
         if store.get('llm_config') is None: store.set('llm_config', LLMConfig().model_dump())
+
+    def set_widget_registry(self, registry):
+        from .widget_bridge import WidgetBridge
+        self.widget_bridge = WidgetBridge(self.store, self.assistant, registry)
 
     def config(self): return LLMConfig.model_validate(self.store.get('llm_config'))
 
@@ -257,7 +262,8 @@ class LLMHub:
                 'active_id':self.active_id,'auto_execute':False,'streaming':False,
                 'assistant_protocol':PROTOCOL,'capability_catalog':capability_manifest(),
                 'clock':clock_context(utcnow(),self.store.get('settings')['timezone']),
-                'assistant_profiles':{'chat':{'temperature':0.7,'top_p':0.8,'top_k':20,'min_p':0.0,'presence_penalty':1.0,'max_tokens_cap':128},'parser':{'temperature':0,'max_tokens_cap':256}},
+                'assistant_profiles':{'chat':{'temperature':0.7,'top_p':0.8,'top_k':20,'min_p':0.0,'presence_penalty':1.0,'max_tokens_cap':128},'parser':{'temperature':0,'max_tokens_cap':256},'widget_proposal':{'temperature':0,'max_tokens_cap':64,'schema_constrained':True}},
+                'widget_bridge':bool(self.widget_bridge),'widget_capability_catalog':self.widget_bridge.registry.manifest() if self.widget_bridge else None,
                 'max_pending':MAX_PENDING,'max_history':MAX_HISTORY,
                 'worker_running':bool(self.worker and not self.worker.done())}
 
@@ -373,12 +379,22 @@ class LLMHub:
             duplicate=self._duplicate(key,sig)
             if duplicate:return duplicate
             cfg=self.config();now=utcnow();rid=uid();body=self.make_payload(cfg,text,now)
+            router_start=time.perf_counter()
             agent=detect(text,now,self.store.get('settings')['timezone'],mode)
-            if mode=='legacy' and not agent.get('fast_read'):agent=None
+            if self.widget_bridge:agent=self.widget_bridge.prepare(agent)
+            agent['routing']['router_seconds']=time.perf_counter()-router_start
+            if agent.get('widget_trace'):
+                agent['widget_trace']['latency_ms']['router_ms']=agent['routing']['router_seconds']*1000
+            if mode=='legacy' and not agent.get('fast_read') and not agent.get('_widget_domain_request'):agent=None
             if agent:
                 agent['source_received_at']=meta.get('created_at')
                 agent['reference_policy']='new request uses request-created clock; previous voice timestamp recorded separately'
-                body=assistant_payload(agent,cfg) or encoded({'local_plan':agent.get('proposal'),'route':agent['route']})
+                body=(self.widget_bridge.payload(agent,cfg) if agent.get('widget_bridge') and not agent.get('fast_read')
+                      else assistant_payload(agent,cfg)) or encoded({'local_plan':agent.get('proposal'),'route':agent['route']})
+                if agent.get('widget_bridge'):
+                    with self.store.connect() as db:
+                        stt=db.execute('SELECT elapsed FROM speech_jobs WHERE voice_id=?',(voice_id,)).fetchone()
+                    if stt and stt['elapsed'] is not None:agent['widget_trace']['latency_ms']['stt_ms']=stt['elapsed']*1000
             local=bool(agent and agent['route'] in {'rule','clarify'})
             fast=bool(agent and agent.get('fast_read'))
             status='running' if fast else 'queued' if cfg.enabled or local else 'prepared'
@@ -415,6 +431,7 @@ class LLMHub:
         await self.notify('llm.queued',rid);return self.get(rid)
 
     async def cancel(self,rid):
+        if self.widget_bridge:self.widget_bridge.assert_not_executing(rid)
         d=self.get(rid)
         if d['status'] not in ACTIVE|{'prepared','awaiting_confirmation'}:return d
         # Cancellation is local: backend may not abort its computation instantly.
@@ -483,6 +500,14 @@ class LLMHub:
         if d['status']!='queued':return
         if d.get('assistant') is not None:
             await self._execute_assistant(rid,d);return
+        if self.widget_bridge and self.widget_bridge.has_domain(d['source_text']):
+            # Preserve the old snapshot; don't run a historical free-answer prompt
+            # on a personal-service request after upgrading to the Protocol bridge.
+            message='이전 방식으로 준비된 Widget 요청입니다. 현재 설정으로 새 요청을 만들어 주세요.'
+            with self.store.connect() as db:
+                db.execute("UPDATE llm_requests SET status='needs_clarification',response_json=?,updated_at=?,finished_at=? WHERE id=?",
+                    (encoded({'output':message,'output_source':'server','metrics':{},'warnings':[]}),utcnow(),utcnow(),rid))
+            await self.notify('assistant.stale',rid);return
         cfg=self.config()
         if not cfg.enabled:
             with self.store.connect() as db:db.execute("UPDATE llm_requests SET status='prepared',updated_at=? WHERE id=?",(utcnow(),rid))
@@ -532,10 +557,15 @@ class LLMHub:
 
 
     async def confirm_action(self,rid,body):
-        result=self.assistant.confirm(rid,body.preview_sha256)
+        record=self.assistant.get(rid) or {}
+        result=(await self.widget_bridge.confirm(rid,body.preview_sha256)
+                if self.widget_bridge and record.get('widget_bridge') else self.assistant.confirm(rid,body.preview_sha256))
         # The mutation + receipt already committed before notification. A failed
         # socket does not roll back or repeat the mutation.
-        await self.notify('assistant.executed' if result['changed'] else 'assistant.already_executed',rid)
+        outcome=(result.get('receipt') or {}).get('protocol_state')
+        event=('assistant.confirmation_uncertain' if outcome in {'reserved','uncertain'} else
+               'assistant.executed' if result['changed'] else 'assistant.already_executed')
+        await self.notify(event,rid)
         return self.get(rid)|{'execution':result}
 
     async def _execute_fast_read(self,rid):
@@ -552,15 +582,19 @@ class LLMHub:
             if sha(d['request_body'])!=d['request_sha256']:
                 raise LLMFailure('저장된 조회 계획의 무결성을 확인하지 못했습니다.','snapshot_invalid')
             record['execution_started_at']=started
-            record=self.assistant.stage(rid,record,record['proposal'])
+            record=(await self.widget_bridge.fast_read(rid,record) if self.widget_bridge and record.get('widget_bridge')
+                    else self.assistant.stage(rid,record,record['proposal']))
             elapsed=time.perf_counter()-start
             record['routing']['fast_path_seconds']=elapsed+record['routing']['router_seconds']
+            if record.get('widget_trace'):record['widget_trace']['latency_ms']['total_ms']=record['routing']['fast_path_seconds']*1000
             self.assistant.put(rid,record)
             result={'output':record['final_text'],'output_source':'server','action_state':record['state'],
                     'metrics':{},'warnings':[],'assistant_seconds':elapsed}
             with self.store.connect() as db:
-                db.execute('UPDATE llm_requests SET status=?,response_json=?,request_seconds=?,finished_at=?,updated_at=? WHERE id=?',
-                           (record['state'],encoded(result),elapsed,utcnow(),utcnow(),rid))
+                db.execute('UPDATE llm_requests SET status=?,response_json=?,request_seconds=?,finished_at=?,updated_at=?,error=?,error_code=? WHERE id=?',
+                           (record['state'],encoded(result),elapsed,utcnow(),utcnow(),
+                            record['final_text'] if record['state']=='failed' else '',
+                            'source_read_failed' if record['state']=='failed' else None,rid))
         except Exception:
             # A DB/service error is not an empty list or an excuse for LLM guessing.
             record.update(state='failed',validation='source_read_failed',final_text=None)
@@ -587,6 +621,8 @@ class LLMHub:
             # date rollover require an explicit new request, including chat context.
             stale=False
             if record.get('protocol')!=PROTOCOL:
+                stale=True
+            elif self.widget_bridge and (record['mode']=='auto' or self.widget_bridge.has_domain(record['raw'])) and record['route'] in {'parser','chat'} and not record.get('widget_bridge'):
                 stale=True
             else:
                 now=aware(started,record['timezone']);ref=aware(record['reference_at'],record['timezone'])
@@ -616,7 +652,10 @@ class LLMHub:
                 record['calls']=[call]
                 record.setdefault('routing',{})['llm_seconds']=elapsed
                 with self.store.connect() as db:db.execute('UPDATE llm_requests SET response_raw=?,http_status=200 WHERE id=?',(raw,rid))
-                if record['route']=='chat':
+                if record.get('widget_bridge'):
+                    record=await self.widget_bridge.stage(rid,record,result)
+                    result['parser_output']=result.get('output');result['output_source']='server'
+                elif record['route']=='chat':
                     output=result.get('output')
                     if not output:raise LLMFailure('최종 텍스트가 없습니다. 모델 응답을 확인하세요.','empty_output')
                     check=assess_response(output,record['raw'],result.get('finish_reason'))
@@ -648,9 +687,14 @@ class LLMHub:
             if self.get(rid)['status']!='running':return
             result['output']=record['final_text'];result['action_state']=record['state']
             result['output_source']=record['origin'];result['assistant_seconds']=time.perf_counter()-start
+            if record.get('widget_trace'):
+                record['widget_trace']['latency_ms']['total_ms']=result['assistant_seconds']*1000+record['routing']['router_seconds']*1000
+                self.assistant.put(rid,record)
             with self.store.connect() as db:
-                db.execute("UPDATE llm_requests SET status=?,response_json=?,request_seconds=?,updated_at=?,finished_at=? WHERE id=? AND status='running'",
-                   (record['state'],encoded(result),result['assistant_seconds'],utcnow(),utcnow(),rid))
+                db.execute("UPDATE llm_requests SET status=?,response_json=?,request_seconds=?,updated_at=?,finished_at=?,error=?,error_code=? WHERE id=? AND status='running'",
+                   (record['state'],encoded(result),result['assistant_seconds'],utcnow(),utcnow(),
+                    record['final_text'] if record['state']=='failed' else '',
+                    'adapter_error' if record['state']=='failed' else None,rid))
         except asyncio.CancelledError:
             if asyncio.current_task().cancelling():raise
         except LLMFailure as exc:
