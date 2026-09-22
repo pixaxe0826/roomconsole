@@ -17,8 +17,8 @@ done
 [[ -f "$ROOT/.venv-v35/pyvenv.cfg" ]] || { echo 'Existing V35 Python environment is required.' >&2; exit 1; }
 [[ -x "$PREFIX/bin/proot-distro" ]] || { echo 'Existing proot-distro is required.' >&2; exit 1; }
 binds=(--bind "$ROOT:/opt/room-hub")
-# compare and CLI help use result files only, not a present dataset.
-if [[ "${1:-}" != compare && "${1:-}" != --help && "${1:-}" != -h ]]; then
+# Offline diagnostics, comparison and help need result files only, not datasets.
+if [[ "${1:-}" != compare && "${1:-}" != analyze && "${1:-}" != verify-analysis && "${1:-}" != compare-analysis && "${1:-}" != --help && "${1:-}" != -h ]]; then
   [[ -d "$DATA_ROOT" && ! -L "$DATA_ROOT" && "$DATA_ROOT" != *:* && "$DATA_ROOT" != *$'\n'* ]] || { echo 'Missing or unsafe external --data-root' >&2; exit 2; }
   [[ "$DATA_ROOT" == /* ]] || DATA_ROOT="$PWD/$DATA_ROOT"
   inspect="$DATA_ROOT"

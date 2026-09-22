@@ -140,6 +140,9 @@ def run_suite(suite, selected, *, name, results_root, mode='full', backend=None,
             items.sort(key=lambda c: c['turn'])
             if [c['turn'] for c in items] != list(range(1, len(items) + 1)):
                 raise ValueError(f'Session {identity}: select all prerequisite turns starting at 1')
+    # Metadata inspection has no Store/model access and occurs outside timed work.
+    from .support import capture_snapshot, projection_receipt
+    support_snapshot = capture_snapshot()
     folder = result_directory(results_root, suite.path) / name
     folder.mkdir(parents=True, exist_ok=False)
     (folder / 'trace').mkdir()
@@ -155,6 +158,11 @@ def run_suite(suite, selected, *, name, results_root, mode='full', backend=None,
               'python': platform.python_version(), 'platform': platform.platform(),
               'started_at': datetime.now(timezone.utc).isoformat(), 'run_status': 'RUNNING',
               'warnings': suite.warnings, **source_state()}
+    if support_snapshot['production_source_hash'] != config['production_source_hash']:
+        raise ValueError('Production source changed before benchmark execution')
+    config['support_snapshot_hash'] = support_snapshot['snapshot_hash']
+    config['support_projection'] = projection_receipt(suite.projection)
+    write_json(folder / 'support_snapshot.json', support_snapshot)
     write_json(folder / 'config.json', config)
     rows = []
     try:
@@ -171,6 +179,7 @@ def run_suite(suite, selected, *, name, results_root, mode='full', backend=None,
                            'category': category(case), 'tags': case.get('tags', []),
                            'split': case.get('split', 'development'), 'expected': case['expected'],
                            'expected_response': case.get('expected_response'),
+                           'scoring_context': {'critical_slots': sorted(case.get('critical_slots', case['expected']['slots']))},
                            'actual': actual, 'score': scores, 'trace_file': 'trace/' + trace_name,
                            'session_wall_ms': wall_ms}
                     write_json(folder / 'trace' / trace_name, obs)

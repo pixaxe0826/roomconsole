@@ -78,6 +78,7 @@ jobs:
           tests/test_benchmark.py
           tests/test_benchmark_external.py
           tests/test_benchmark_wrappers.py
+          tests/test_benchmark_taxonomy.py
           --timeout=30
           --timeout-method=thread
           --junitxml=artifacts/test-results/backend.xml

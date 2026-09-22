@@ -176,3 +176,13 @@ V35의 `~/room-hub-benchmark-data/`에서 읽습니다. 기존 production DB·Wh
 
 [전송/검증/실행/비교와 격리 한계](docs/ASSISTANT_BENCHMARK.md)를 먼저 읽으세요.
 전송 도구와 외부 loader는 dataset 없이 동작한 것처럼 성공 처리하지 않습니다.
+
+### M2 benchmark diagnostics
+
+Benchmark engine 1.2.0 adds **offline analysis of an existing run**, not new
+Assistant behavior or model inference. `analyze` preserves the original scores
+and files, adds exposed-operation support coverage and evidence-labelled failure
+causes in a separate `artifacts/benchmarks/analysis/` folder. `verify-analysis`
+checks input/output integrity; `compare-analysis` fixes the common supported
+cohort. No dataset is bundled or needed for these commands.
+See [M2 specification and V35 test procedure](docs/BENCHMARK_M2.md).
