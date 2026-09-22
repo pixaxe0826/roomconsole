@@ -1,0 +1,84 @@
+name: Temporary external benchmark source materialization
+on:
+  push:
+    branches: [automation/external-benchmark-source-20260922]
+    paths: [.github/workflows/_external_benchmark_source.yml]
+permissions:
+  contents: write
+jobs:
+  materialize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 7e168c0d8f5dce91fff8033790dac26921bab609
+          persist-credentials: false
+      - name: Verify exact source tree and materialize blobs only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYTHONDONTWRITEBYTECODE: '1'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, os, pathlib, subprocess, urllib.request
+          base = '7e168c0d8f5dce91fff8033790dac26921bab609'
+          expected_tree = '8d87186f24b6ca543cf80ed6dc685309b8e44a88'
+          def git(*args):
+              return subprocess.check_output(['git', *args])
+          def digest(data):
+              return hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+          def api(path, payload=None):
+              request = urllib.request.Request('https://api.github.com/repos/pixaxe0826/roomconsole/' + path,
+                  data=None if payload is None else json.dumps(payload, ensure_ascii=False).encode('utf-8'),
+                  headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                           'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json',
+                           'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'roomconsole-source-materialization'})
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  return json.load(response)
+          def read(sha):
+              data = base64.b64decode(api('git/blobs/' + sha)['content'])
+              assert digest(data) == sha
+              return data
+          assert git('rev-parse', 'HEAD').decode().strip() == base
+          encoded = ''.join(read(sha).decode('ascii') for sha in [
+              'd558ee98f5562b063f2d3f544583460226190a53',
+              '4e54d165385967792834f290cb8ec8da7ad7b47f'])
+          raw = lzma.decompress(base64.b64decode(encoded, validate=True))
+          assert len(raw) == 91385
+          assert hashlib.sha256(raw).hexdigest() == 'e96651c48ae55c5d42d64fea00294f83a32cd148ddd2e63d261790e11225e146'
+          files = json.loads(raw)
+          allowed = {'.github/workflows/ci.yml', '.gitignore', 'AGENTS.md', 'README.md',
+                     'benchmarks/README.md', 'benchmarks/__init__.py', 'benchmarks/__main__.py',
+                     'benchmarks/dataset.py', 'benchmarks/integrity.py', 'benchmarks/paths.py',
+                     'benchmarks/reports.py', 'benchmarks/runner.py', 'benchmarks/runtime.py',
+                     'benchmarks/scoring.py', 'benchmarks/storage.py', 'benchmarks/transfer.py',
+                     'benchmarks/worker.py', 'deploy/termux/benchmark-data.sh',
+                     'deploy/termux/benchmark.sh', 'deploy/windows/Benchmark_Data_Push.ps1',
+                     'docs/ASSISTANT_BENCHMARK.md', 'scripts/check_benchmark_policy.py',
+                     'scripts/repo_policy.py', 'scripts/test_benchmark_transport.ps1',
+                     'tests/benchmark_cases.py', 'tests/test_benchmark.py',
+                     'tests/test_benchmark_external.py', 'tests/test_benchmark_wrappers.py'}
+          assert set(files) == allowed
+          for path, spec in sorted(files.items()):
+              old = read(spec['base_blob']) if spec['base_blob'] else b''
+              lines = old.decode('utf-8').splitlines(keepends=True)
+              for start, end, text in reversed(spec['edits']):
+                  assert 0 <= start <= end <= len(lines)
+                  lines[start:end] = text.splitlines(keepends=True)
+              data = ''.join(lines).encode('utf-8')
+              assert digest(data) == spec['result_blob'], path
+              target = pathlib.Path(path)
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(data)
+              target.chmod(0o755 if spec['mode'] == '100755' else 0o644)
+              result = api('git/blobs', {'content': data.decode('utf-8'), 'encoding': 'utf-8'})
+              assert result['sha'] == spec['result_blob'], path
+              print(path, result['sha'], flush=True)
+          subprocess.run(['git', 'add', '--', *sorted(allowed)], check=True)
+          assert git('write-tree').decode().strip() == expected_tree
+          subprocess.run(['git', 'diff', '--cached', '--check'], check=True)
+          subprocess.run(['python3', 'scripts/check_benchmark_policy.py'], check=True)
+          print('DATASET_FREE_SOURCE_BLOBS_VERIFIED=28; TREE=' + expected_tree)
+          print('No refs, PRs, production deployment or user dataset transfers performed by this job.')
+          PY
