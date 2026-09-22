@@ -315,3 +315,20 @@ tracked-path CI 검사로 차단합니다. JSON 전체 무시 규칙으로 정�
 롤백은 검토된 revert PR → 병합 main CI → 기존 updater입니다. 외부 dataset/results는 코드
 업데이트와 독립적입니다. 운영 data/나 모델은 삭제하지 않습니다. 이 PR은 생산 DB migration을
 추가하지 않으며 PR #20의 타이머 스키마를 되돌리지 않습니다.
+
+## M2: dataset/LLM 없이 기존 결과 분석
+
+엔진 1.2.0은 기존 채점/운영 동작을 유지하고 `analyze`, `verify-analysis`,
+`compare-analysis`를 추가합니다. M1 폴더에는 파일을 쓰지 않으며 별도의
+`artifacts/benchmarks/analysis/<name>/`에 진단을 생성합니다.
+
+```bash
+bash "$HOME/room-hub/deploy/termux/benchmark.sh" analyze baseline-v1-qwen --name m1-taxonomy-v1
+bash "$HOME/room-hub/deploy/termux/benchmark.sh" verify-analysis m1-taxonomy-v1
+```
+
+데이터 재전송/250문항 재실행/모델 서버 시작은 필요 없습니다. 원본 config/raw/metrics/
+progress가 필수이며 trace는 원인 근거에 사용합니다. 지원 여부는 실제 Assistant
+계약에서 판정하며 없는 근거를 추측하지 않습니다. production app hash 불일치는
+거부하고 전체 Git SHA의 benchmark-only 변경은 허용합니다.
+상세한 검증 순서·오류·비교 범위는 [M2 사양서](BENCHMARK_M2.md)를 참고하세요.

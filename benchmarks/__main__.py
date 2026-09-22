@@ -1,4 +1,4 @@
-"""python -m benchmarks: list / validate / run / compare."""
+"""python -m benchmarks: list / validate / run / compare / offline M2 diagnostics."""
 import argparse
 import json
 from pathlib import Path
@@ -36,6 +36,14 @@ def main(argv=None):
     compare.add_argument('before'); compare.add_argument('after')
     compare.add_argument('--output', type=Path)
     compare.add_argument('--allow-incompatible', action='store_true')
+    analyze = sub.add_parser('analyze', help='Offline diagnostics from a finished run; no dataset/model needed')
+    analyze.add_argument('before')
+    analyze.add_argument('--name', required=True)
+    verify = sub.add_parser('verify-analysis', help='Recheck original and derived output hashes')
+    verify.add_argument('name')
+    comparison = sub.add_parser('compare-analysis', help='Compare the fixed common supported cohort')
+    comparison.add_argument('before'); comparison.add_argument('after')
+    comparison.add_argument('--name', required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == 'list':
@@ -68,6 +76,22 @@ def main(argv=None):
                 print(f"\nROOM HUB BENCHMARK\nSuite: {name}\nCases: {metrics['processed']}\nEvaluated: {metrics['evaluated']}\n"
                       f"Mode success: {score_label(metrics['mode_success'])}\nFalse Execution: {score_label(metrics['false_execution'])}\n"
                       f"LLM blocked: {metrics['llm_blocked']}\nReport: {folder / 'summary.html'}")
+        elif args.command == 'analyze':
+            from .analysis import analyze_run
+            folder, state, metrics = analyze_run(args.results_root, args.before, args.name)
+            print(json.dumps({'analysis': state['name'], 'status': state['run_status'],
+                'source_run': state['source_run'], 'original_files_unchanged': True,
+                'original_metrics_preserved': True, 'source_match': True, 'model_calls_during_analysis': 0,
+                'overall': metrics['overall_preserved']['task_success'],
+                'supported': metrics['supported']['task_success'], 'support': metrics['support'],
+                'report': str(folder / 'summary.html')}, ensure_ascii=False, indent=2))
+        elif args.command == 'verify-analysis':
+            from .analysis import verify_analysis
+            print(json.dumps(verify_analysis(args.results_root, args.name), ensure_ascii=False, indent=2))
+        elif args.command == 'compare-analysis':
+            from .analysis_compare import compare_analyses
+            folder, result = compare_analyses(args.results_root, args.before, args.after, args.name)
+            print(json.dumps({'output': str(folder), **result}, ensure_ascii=False, indent=2))
         else:
             from .dataset import NAME
             if not NAME.fullmatch(args.before) or not NAME.fullmatch(args.after):
@@ -80,7 +104,7 @@ def main(argv=None):
             result = compare_runs(before, after, output, args.allow_incompatible)
             print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
-    except (ValueError, OSError, KeyError, TypeError) as exc:
+    except (ValueError, OSError, KeyError, TypeError, RecursionError) as exc:
         print(f'Benchmark error: {exc}', file=sys.stderr)
         return 2
 
