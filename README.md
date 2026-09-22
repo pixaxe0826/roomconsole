@@ -166,3 +166,13 @@ python scripts/llm_widget_regression.py
 ### 타이머 위젯
 
 기본 **2×2**, **위젯 하나당 독립 타이머 하나**입니다. 여러 위젯을 한 화면에 배치하고 각각 **1초~10분 / 1초 단위**로 분·초를 설정해 시작·종료합니다. 서로 다른 위젯의 시간·실행·소리 설정은 독립적이며, 같은 위젯 ID를 다른 기기에서 열면 그 타이머만 동기화됩니다. 서버 DB의 종료 시각으로 재시작 뒤에도 남은 시간을 복원합니다. `4분 타이머 시작`, `현재 타이머 종료`는 기존 자동 전사 전달에서 **타이머만 즉시 실행**하며 LLM 0회입니다. 다른 쓰기 작업의 확인 정책은 유지합니다. 소리는 활성 브라우저의 명시적 허용이 필요합니다. [동작·Protocol·한도·적용 안내](docs/TIMERS.md).
+
+## External Assistant Benchmark
+
+Benchmark engine과 실제 dataset을 분리합니다. 평가 suite는 저장소에 포함하지 않습니다.
+Windows 로컬 폴더를 `deploy/windows/Benchmark_Data_Push.ps1`로 검증·전송한 뒤,
+V35의 `~/room-hub-benchmark-data/`에서 읽습니다. 기존 production DB·Whisper·모델·서비스를
+변경하지 않습니다. PR #20의 독립 타이머 fixture/ownership을 지원합니다.
+
+[전송/검증/실행/비교와 격리 한계](docs/ASSISTANT_BENCHMARK.md)를 먼저 읽으세요.
+전송 도구와 외부 loader는 dataset 없이 동작한 것처럼 성공 처리하지 않습니다.

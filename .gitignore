@@ -61,3 +61,11 @@ Desktop.ini
 
 # Local speech engine sources, weights and builds; never publish runtime assets.
 /runtime/
+
+# Evaluation datasets and reports are external; tests generate temporary synthetic data.
+/benchmarks/suites/
+/benchmarks/datasets/
+/benchmark-data/
+/benchmark-results/
+/room-hub-benchmark-data/
+/room-hub-benchmark-results/
