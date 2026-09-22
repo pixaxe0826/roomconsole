@@ -43,11 +43,14 @@ class TimerInput(BaseModel):
 
 
 class TimerStart(TimerInput):
+    # UI instance identity, deliberately absent from the model's TimerInput schema.
+    widget_id: str | None = Field(default=None, pattern=r'^[a-z][a-z0-9_-]{0,63}$')
     request_id: str = Field(pattern=r'^[A-Za-z0-9_.:-]{1,128}$')
 
 
 class TimerStop(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
+    widget_id: str | None = Field(default=None, pattern=r'^[a-z][a-z0-9_-]{0,63}$')
     request_id: str = Field(pattern=r'^[A-Za-z0-9_.:-]{1,128}$')
     version: int | None = Field(default=None, ge=1)
 
@@ -70,6 +73,42 @@ class TimerService:
                 CREATE TABLE IF NOT EXISTS hub_timer_requests(
                     request_key TEXT PRIMARY KEY, signature TEXT NOT NULL, response TEXT NOT NULL);
             ''')
+            # Additive migration: preserve IDs, deadlines and durable receipts.
+            db.execute('BEGIN IMMEDIATE')
+            if 'widget_id' not in {r['name'] for r in db.execute('PRAGMA table_info(hub_timers)')}:
+                db.execute('ALTER TABLE hub_timers ADD COLUMN widget_id TEXT')
+            db.execute("CREATE UNIQUE INDEX IF NOT EXISTS hub_timer_widget_running ON hub_timers(widget_id) WHERE state='running' AND widget_id IS NOT NULL")
+        self.reconcile_widgets()
+
+    @staticmethod
+    def _widgets(db):
+        row = db.execute("SELECT value FROM kv WHERE key='layout'").fetchone()
+        layout = json.loads(row['value']) if row else {'widgets': []}
+        return sorted((w for w in layout['widgets'] if w.get('type') == 'timers'),
+                      key=lambda w: (w.get('y', 0), w.get('x', 0), w['id']))
+
+    def reconcile_widgets(self):
+        """On startup/admin layout write, bind legacy active runs once to empty slots.
+
+        Never move a bound timer or change its deadline. Overflow/removed widgets
+        remain visible as recovery rows rather than being silently stopped/lost.
+        """
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            widgets = self._widgets(db)
+            if not widgets:
+                return 0
+            self._expire(db, self.clock())
+            busy = {r[0] for r in db.execute("SELECT widget_id FROM hub_timers WHERE state='running' AND widget_id IS NOT NULL")}
+            free = [w for w in widgets if w['id'] not in busy]
+            legacy = db.execute("SELECT id FROM hub_timers WHERE state='running' AND widget_id IS NULL ORDER BY sequence").fetchall()
+            assigned = 0
+            for widget, row in zip(free, legacy):
+                db.execute('UPDATE hub_timers SET widget_id=? WHERE id=?', (widget['id'], row['id']))
+                assigned += 1
+            if assigned:
+                self._bump(db)
+            return assigned
 
     @contextmanager
     def db(self):
@@ -102,7 +141,7 @@ class TimerService:
         running = row['state'] == 'running' and row['deadline_at'] > at
         state = row['state'] if row['state'] != 'running' or running else 'expired'
         ended = row['ended_at'] if row['ended_at'] is not None else (row['deadline_at'] if state == 'expired' else None)
-        return {'id': row['id'], 'label': row['label'], 'duration_seconds': row['duration_seconds'],
+        return {'id': row['id'], 'widget_id': row['widget_id'], 'label': row['label'], 'duration_seconds': row['duration_seconds'],
                 'state': state, 'started_at': stamp(row['started_at']), 'deadline_at': stamp(row['deadline_at']),
                 'ended_at': stamp(ended) if ended is not None else None, 'version': row['version'],
                 'remaining_seconds': max(0, min(row['duration_seconds'], math.ceil(row['deadline_at']-at))) if running else 0}
@@ -152,7 +191,11 @@ class TimerService:
 
     def start(self, body: TimerStart, principal: str):
         key = self._key(principal, body.request_id)
-        signature = json.dumps(['start', body.duration_seconds, body.label], ensure_ascii=False)
+        # Keep the old unscoped signature compatible with pre-migration receipts.
+        sig = ['start', body.duration_seconds, body.label]
+        if body.widget_id is not None:
+            sig.append(body.widget_id)
+        signature = json.dumps(sig, ensure_ascii=False)
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             at = self.clock()
@@ -162,11 +205,34 @@ class TimerService:
             self._expire(db, at)
             if db.execute("SELECT count(*) FROM hub_timers WHERE state='running'").fetchone()[0] >= MAX_ACTIVE:
                 raise HTTPException(429, f'동시에 실행할 수 있는 타이머는 {MAX_ACTIVE}개입니다.')
+            widgets = self._widgets(db)
+            widget_id = body.widget_id
+            busy = {r[0] for r in db.execute("SELECT widget_id FROM hub_timers WHERE state='running'")}
+            if widget_id is not None:
+                if widget_id not in {w['id'] for w in widgets}:
+                    raise HTTPException(409, '해당 타이머 위젯이 배치에서 제거되었습니다. 화면을 새로 확인하세요.')
+                if widget_id in busy:
+                    raise HTTPException(409, '이 위젯의 타이머가 이미 실행 중입니다. 종료한 뒤 다시 시작하세요.')
+            elif widgets:
+                # Existing voice/Protocol requests use the first idle placed widget;
+                # never overwrite another countdown or create a hidden extra run.
+                widget_id = next((w['id'] for w in widgets if w['id'] not in busy), None)
+                if widget_id is None:
+                    raise HTTPException(409, '모든 타이머 위젯이 실행 중입니다. 빈 위젯을 추가하거나 타이머 하나를 종료하세요.')
+            # No layout: retain trusted legacy service/Protocol compatibility.
+            label = body.label
+            if widget_id is not None and label == '타이머':
+                index, widget = next((i, w) for i, w in enumerate(widgets, 1) if w['id'] == widget_id)
+                label = widget.get('title') or f'타이머 {index}'
             identity = uid()
-            db.execute('INSERT INTO hub_timers(id,label,duration_seconds,state,started_at,deadline_at,ended_at,version) VALUES(?,?,?,?,?,?,NULL,1)',
-                       (identity, body.label, body.duration_seconds, 'running', at, at+body.duration_seconds))
-            # Keep a documented bounded history; running timers are never pruned.
-            db.execute("DELETE FROM hub_timers WHERE state!='running' AND sequence NOT IN (SELECT sequence FROM hub_timers ORDER BY sequence DESC LIMIT ?)", (MAX_HISTORY,))
+            db.execute('INSERT INTO hub_timers(id,label,duration_seconds,state,started_at,deadline_at,ended_at,version,widget_id) VALUES(?,?,?,?,?,?,NULL,1,?)',
+                       (identity, label, body.duration_seconds, 'running', at, at+body.duration_seconds, widget_id))
+            # Keep recent history plus the last run of each currently placed widget.
+            # That run restores its duration after reload. Removed slots add no unbounded retention.
+            ids = [w['id'] for w in widgets]
+            marks = ','.join('?' for _ in ids) or 'NULL'
+            db.execute("DELETE FROM hub_timers WHERE state!='running' AND sequence NOT IN (SELECT sequence FROM hub_timers ORDER BY sequence DESC LIMIT ?) "
+                       + f"AND sequence NOT IN (SELECT MAX(sequence) FROM hub_timers WHERE widget_id IN ({marks}) GROUP BY widget_id)", (MAX_HISTORY, *ids))
             self._bump(db)
             result = self._data(db.execute('SELECT * FROM hub_timers WHERE id=?', (identity,)).fetchone(), at) | {'changed': True, 'duplicate': False}
             self._save(db, key, signature, result)
@@ -178,7 +244,10 @@ class TimerService:
         A retry of 'current' must never stop the next running timer.
         """
         key = self._key(principal, body.request_id)
-        signature = json.dumps(['stop', target, body.version])
+        sig = ['stop', target, body.version]
+        if body.widget_id is not None:
+            sig.append(body.widget_id)
+        signature = json.dumps(sig)
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             at = self.clock()
@@ -187,11 +256,16 @@ class TimerService:
                 return old
             self._expire(db, at)
             if target == 'current':
-                row = db.execute("SELECT * FROM hub_timers WHERE state='running' ORDER BY sequence DESC LIMIT 1").fetchone()
+                if body.widget_id is not None:
+                    row = db.execute("SELECT * FROM hub_timers WHERE state='running' AND widget_id=?", (body.widget_id,)).fetchone()
+                else:
+                    row = db.execute("SELECT * FROM hub_timers WHERE state='running' ORDER BY sequence DESC LIMIT 1").fetchone()
             else:
                 row = db.execute('SELECT * FROM hub_timers WHERE id=?', (target,)).fetchone()
             if row is None:
                 raise HTTPException(404, '실행 중인 현재 타이머가 없습니다.' if target == 'current' else '타이머가 없습니다.')
+            if body.widget_id is not None and row['widget_id'] != body.widget_id:
+                raise HTTPException(409, '다른 위젯의 타이머는 변경하지 않았습니다.')
             if body.version is not None and row['version'] != body.version and row['state'] == 'running':
                 raise HTTPException(409, '타이머 상태가 바뀌었습니다. 다시 확인하세요.')
             changed = row['state'] == 'running'
@@ -249,7 +323,7 @@ def register_routes(app, timers: TimerService, viewer):
         result = await asyncio.to_thread(timers.start, body, principal)
         if result['changed']:
             await timers.announce('timer.started', result['id'])
-        return result
+        return result | {'snapshot': await asyncio.to_thread(timers.snapshot)}
 
     @app.post('/api/timers/{target}/stop')
     async def stop(target: str, body: TimerStop, principal=Depends(operator)):
@@ -258,4 +332,4 @@ def register_routes(app, timers: TimerService, viewer):
         result = await asyncio.to_thread(timers.stop, target, body, principal)
         if result['changed']:
             await timers.announce('timer.stopped', result['id'])
-        return result
+        return result | {'snapshot': await asyncio.to_thread(timers.snapshot)}

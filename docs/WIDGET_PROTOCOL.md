@@ -252,3 +252,9 @@ and `requires_confirmation=false`; authenticated admin HTTP can execute only the
 immediate mutations. `http_immediate_actions` identifies the exception explicitly.
 Existing memo/todo/calendar/alarm HTTP writes remain confirmation-gated.
 See [TimerAdapter, source-of-truth, idempotency and delivery contract](TIMERS.md).
+
+Timer widget 1.1.0 adds optional `widget_id` to TimerData, without adding it to model
+input proposals. Narrow HTTP UI start/stop requests include their layout instance ID.
+An unscoped Protocol start selects the first idle placed timer; a full dashboard is
+rejected rather than overwriting another run. Voice `current` remains workspace-wide;
+UI stop uses its own run ID. See [ownership and migration](TIMERS.md).

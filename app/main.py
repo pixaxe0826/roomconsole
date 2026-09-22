@@ -249,7 +249,9 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
   if current['version']!=body.version:raise HTTPException(409,'배치가 변경되었습니다. 다시 불러오세요.')
   registry,errors=discover(widget_root)
   if any(w.type not in {m['id'] for m in registry} for w in body.widgets):raise HTTPException(422,'설치되지 않은 위젯입니다.')
-  result=body.model_dump();result['version']+=1;store.set('layout',result);await changed('layout.updated');return result
+  result=body.model_dump();result['version']+=1;store.set('layout',result)
+  await asyncio.to_thread(timers.reconcile_widgets)
+  await changed('layout.updated');return result
  @app.put('/api/settings')
  async def settings(body:HubSettings,_=Depends(admin)):
   old=store.get('settings');new=body.model_dump();store.set('settings',new)

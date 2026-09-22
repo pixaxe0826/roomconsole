@@ -56,9 +56,10 @@
 ## Timer patch: explicit narrow exception
 
 - timer.start/stop only are immediate 1–600-second countdown controls; existing other writes still require confirmation.
-- All timer widgets share TimerService SQLite deadlines; never treat a client interval/LLM as the source of truth.
-- `current` means last-started RUNNING timer, not a guessed client/session card.
+- Each placed timer widget ID owns one active countdown. Different IDs are independent; the same ID on different displays stays synchronized. TimerService SQLite deadlines remain authoritative.
+- Voice `current` means last-started RUNNING timer. UI stop must use its own widget/run ID, never global current. Unscoped voice starts use the first idle placed card.
 - Preserve durable request-key replay before current resolution; never stop the next timer on retry.
 - Narrow paired-display `/api/timers` access requires timer layout opt-in. No general Protocol/control grant.
-- Run tests/test_timers.py, tests/test_timer_bridge.py and scripts/timers_browser.py plus existing suites.
+- Preserve legacy timers/deadlines/receipts during additive ownership migration. Never reset another card or silently discard overflow.
+- Run tests/test_timers.py, tests/test_timer_bridge.py, tests/test_timer_instances.py, scripts/timer_transport_regression.js and scripts/timers_browser.py plus existing suites.
 - Rebuild previews after client/widget changes. Foreground-only opt-in audio is NOT an OS alarm.
