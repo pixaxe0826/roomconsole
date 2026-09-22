@@ -186,3 +186,13 @@ causes in a separate `artifacts/benchmarks/analysis/` folder. `verify-analysis`
 checks input/output integrity; `compare-analysis` fixes the common supported
 cohort. No dataset is bundled or needed for these commands.
 See [M2 specification and V35 test procedure](docs/BENCHMARK_M2.md).
+
+### M3 supported semantic parser
+
+M3는 기존 FAST_PATH/정확한 atomic write를 유지하면서, 명확한 단일 요청의 날짜 범위·
+제목·의도를 source-only frame으로 해석하고 서버가 실제 대상을 찾습니다. 일반 Assistant
+할 일 조회는 **pending**, 명시한 전체/완료 상태는 all/completed이며 UI·DB 기본값은 그대로입니다.
+새 exact 경로는 모델을 호출하지 않지만 **write는 기존 관리자 confirmation**이 필요합니다.
+타이머 즉시 실행 예외는 기존 그대로입니다. 미지원 시간 필터/문맥/새 operation을 묵시적으로
+추가하지 않으며, 실제 benchmark 개선은 별도 V35 실행으로 확인합니다.
+[구현 범위·안전 경계·M1/M2 보존·V35 테스트](docs/SEMANTIC_PARSER_M3.md).

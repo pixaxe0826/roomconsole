@@ -29,6 +29,18 @@ def status_evidence(text: str) -> str | None:
     return None
 
 
+def read_status(text: str, domain: str = 'todo') -> str:
+    """Assistant semantics only: implicit todo reads mean pending; UI stays all."""
+    state = status_evidence(text)
+    state_source = re.sub(r'(?:전체|모든)\s*날짜', '', text)
+    explicit_all = bool(re.search(r'전체|모든|전부|모두', state_source))
+    if state and explicit_all:
+        # '전체 날짜의 남은 할 일' explicitly separates date scope from state.
+        if not re.search(r'(?:전체|모든)\s*날짜', text):
+            raise ValueError('전체와 완료 상태 조건이 함께 있습니다. 한 상태로 다시 요청하세요.')
+    return state or ('all' if explicit_all or domain != 'todo' else 'pending')
+
+
 def known_read(text: str, at: str, tz: str) -> dict | None:
     s=re.sub(r'[?？!！.。]+$','',text).strip()
     ref,rest=prefix_date(s)
@@ -48,7 +60,7 @@ def known_read(text: str, at: str, tz: str) -> dict | None:
     if ref is None and ranges:ref=ranges[0].evidence
     if ref is None and re.match(r'^(?:전체|모든)\s*할\s*일',rest):ref='전체'
     return {'intent':'calendar.query' if re.search(r'일정|달력|스케줄',rest) else 'todo.list',
-            'date_ref':ref,'status':status_evidence(rest) or 'all','scope':'one'}
+            'date_ref':ref,'status':read_status(rest, 'calendar' if re.search(r'일정|달력|스케줄',rest) else 'todo'),'scope':'one'}
 
 
 def is_personal_task_request(s: str) -> bool:

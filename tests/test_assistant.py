@@ -206,7 +206,9 @@ def test_forced_chat_cannot_bypass_widget_confirmation(hub):
 
 def test_parser_valid_proposal_only_preview(hub):
     a,c,b=hub;enable(c)
-    text='내일 택배 보내기 할 일로 등록해 줘'
+    # This paraphrase deliberately stays outside the bounded M3 grammar, so
+    # malformed-model/grounding tests still exercise the real LLM fallback.
+    text='내일 택배 보내기 할 일로 등록해 줄래'
     assert detect(text,AT,'Asia/Seoul')['route']=='parser'
     b.output=json.dumps({'widget':'todo','action':'add','target':None,'args':{'date':c.get('/api/clock').json()['tomorrow'],'title':'택배 보내기','time':None}},ensure_ascii=False)
     d=wait(c,request(c,text));assert d['status']=='awaiting_confirmation',d
@@ -223,18 +225,18 @@ def test_parser_valid_proposal_only_preview(hub):
 ])
 def test_model_json_not_authority(hub,proposal):
     a,c,b=hub;enable(c);b.output=json.dumps(proposal,ensure_ascii=False)
-    d=wait(c,request(c,'내일 택배 보내기 할 일로 등록해 줘'))
+    d=wait(c,request(c,'내일 택배 보내기 할 일로 등록해 줄래'))
     assert d['status']=='needs_clarification' and not a.state.store.tasks()
 
 @pytest.mark.parametrize('bad',['일정 변경 권한이 없습니다.','```json\n{}\n```','{"intent":"todo.create"','[]'])
 def test_parser_bad_json(hub,bad):
     a,c,b=hub;enable(c);b.output=bad
-    d=wait(c,request(c,'내일 택배 보내기 할 일로 등록해 줘'));assert d['status']=='needs_clarification'
+    d=wait(c,request(c,'내일 택배 보내기 할 일로 등록해 줄래'));assert d['status']=='needs_clarification'
     assert not a.state.store.tasks()
 
 def test_truncated_proposal_not_executed(hub):
     a,c,b=hub;enable(c);b.finish='length';b.output='{}'
-    assert wait(c,request(c,'내일 택배 보내기 할 일로 등록해 줘'))['status']=='needs_clarification'
+    assert wait(c,request(c,'내일 택배 보내기 할 일로 등록해 줄래'))['status']=='needs_clarification'
 
 def test_disabled_chat_prepared_but_local_query_available(hub):
     a,c,b=hub;d=wait(c,request(c,'오늘 남은 할 일 확인해줘'));assert d['status']=='succeeded' and not b.calls

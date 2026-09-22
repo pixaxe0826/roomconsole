@@ -79,6 +79,10 @@ jobs:
           tests/test_benchmark_external.py
           tests/test_benchmark_wrappers.py
           tests/test_benchmark_taxonomy.py
+          tests/test_semantic_parser_m3.py
+          tests/test_entity_resolver_m3.py
+          tests/test_m3_assistant_regression.py
+          tests/test_benchmark_m3.py
           --timeout=30
           --timeout-method=thread
           --junitxml=artifacts/test-results/backend.xml

@@ -186,7 +186,7 @@ def test_clear_reads_cannot_be_forced_to_model_by_old_mode(hub,mode,enabled):
     if enabled:enable(c)
     d=wait(c,request(c,'오늘 할 일 확인해 줘.',mode=mode))
     assert_local(d,'TODO_LIST');assert not b.calls
-    assert d['response_json']['output']=='오늘 등록된 할 일이 없습니다.'
+    assert d['response_json']['output']=='오늘 등록된 남은 할 일이 없습니다.'
 
 
 def test_fast_path_does_not_wait_for_busy_model_or_cancel_it(hub):

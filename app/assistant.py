@@ -25,7 +25,7 @@ from .store import uid, utcnow
 
 from .clock_service import clock_context, resolve_day, resolve_range, prefix_date, date_evidence, aware
 from .capabilities import READS, WRITES, INTENTS, require, manifest as capability_manifest, parser_description
-from .command_semantics import known_read, is_personal_task_request, unsupported_personal, source_constraints, match_model_date, status_evidence
+from .command_semantics import known_read, is_personal_task_request, unsupported_personal, source_constraints, match_model_date, status_evidence, read_status
 
 PROTOCOL = 'room-assistant-2'
 DAY = r'(?:\d{4}-\d{2}-\d{2}|\d{1,2}월\s*\d{1,2}일|오늘|내일|모레|어제|(?:이번\s*주|다음\s*주)?\s*[월화수목금토일]요일)'
@@ -250,8 +250,10 @@ def grounded(proposal, record):
             expected=status_evidence(s)
             if expected and p.status!=expected:
                 raise ValueError('원문의 완료/미완료 조건과 분석 결과가 다릅니다. 작업은 실행하지 않았습니다.')
-            # With no status cue, '할 일' is ALL, never a model-invented filter.
-            if not expected and p.status!='all':raise ValueError('원문에 없는 완료 상태 필터를 제안했습니다.')
+            # Approved Assistant default, not a change to UI/DB query defaults.
+            wanted = read_status(s, 'calendar' if p.intent == 'calendar.query' else 'todo')
+            if not expected and p.status not in {wanted, 'all'}:raise ValueError('원문에 없는 완료 상태 필터를 제안했습니다.')
+            p=p.model_copy(update={'status':wanted})
             if p.title or p.time or p.scope!='one':raise ValueError('조회에 원문에 없는 대상/시간/범위가 포함되었습니다.')
         if p.intent=='weather.query' and not re.search(r'날씨|비|눈|기온|온도|강수',s):raise ValueError('날씨 조회 근거가 없습니다.')
         if p.intent=='time.query' and not re.search(r'시간|몇\s*시|날짜|며칠|요일',s):raise ValueError('시각 조회 근거가 없습니다.')
@@ -404,8 +406,22 @@ class AssistantEngine:
                             else:
                                 rows=[dict(t) for t in db.execute('SELECT * FROM tasks WHERE date=? ORDER BY time IS NULL,time,created_at,id',(target_day,))]
                                 if p.scope=='one':
-                                    rows=[t for t in rows if t['title']==p.title]
-                                    if len(rows)!=1:raise ValueError('일치하는 할 일이 없거나 같은 제목이 여러 개입니다. 관리자 할 일 목록에서 대상과 날짜를 확인하세요.')
+                                    from .entity_resolver import resolve_target
+                                    if p.date_ref is None:
+                                        # A named single-turn reference can span dates; never select
+                                        # 'today' merely to turn duplicate titles into one match.
+                                        snapshot=self.store.query_tasks('0001-01-01','9999-12-31','all',limit=10000)
+                                        candidates=snapshot['items'];truncated=snapshot['truncated']
+                                    else:
+                                        candidates=rows;truncated=False
+                                    resolved_target=resolve_target(candidates,p.title,truncated=truncated)
+                                    record['entity_resolution']=resolved_target.evidence()
+                                    if resolved_target.status!='resolved':raise ValueError('일치하는 할 일이 없거나 같은 제목이 여러 개입니다. 정확한 제목과 날짜를 확인하세요.')
+                                    rows=list(resolved_target.matches)
+                                    target_day=rows[0]['date']
+                                    if p.date_ref is None:
+                                        record['resolved_date']={'start':target_day,'end':target_day,
+                                            'evidence':None,'policy':'server_resolved_target_date; no_source_date'}
                                 if p.scope=='all' and p.status!='all': rows=[t for t in rows if bool(t['completed'])==(p.status=='completed')]
                                 if p.scope=='all' and len(rows)>100:raise ValueError('일괄 변경은 한 번에 100개까지입니다. 관리자에서 범위를 줄여 주세요.')
                                 if p.intent=='todo.complete':rows=[t for t in rows if not t['completed']]
