@@ -63,3 +63,13 @@
 - Preserve legacy timers/deadlines/receipts during additive ownership migration. Never reset another card or silently discard overflow.
 - Run tests/test_timers.py, tests/test_timer_bridge.py, tests/test_timer_instances.py, scripts/timer_transport_regression.js and scripts/timers_browser.py plus existing suites.
 - Rebuild previews after client/widget changes. Foreground-only opt-in audio is NOT an OS alarm.
+
+## External benchmark data only
+
+- Evaluation cases/gold/fixtures/schema/manifest/projection/registry belong outside Git.
+- Do not read the user's Windows dataset from Chat or upload it as a source artifact.
+- Keep production core/PR #20 timer semantics intact. Fixtures may explicitly supply layout/widget IDs.
+- Only small synthetic test data generated in OS temporary directories is allowed for CI.
+- Run scripts/check_benchmark_policy.py plus benchmark, transport and timer regressions.
+- PRoot bind is not an enforced read-only mount; never claim it prevents same-UID writes.
+- A clean replacement PR is not proof of global deletion of older GitHub PR/commit refs.

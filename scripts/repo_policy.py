@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 from typing import Iterator
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_DIRS = {'.github', 'app', 'web', 'widgets', 'docs', 'deploy', 'examples', 'scripts', 'tests', 'previews'}
+SOURCE_DIRS = {'.github', 'app', 'web', 'widgets', 'docs', 'deploy', 'examples', 'scripts', 'tests', 'previews', 'benchmarks'}
 ROOT_FILES = {
     '.gitignore', '.gitattributes', '.editorconfig', '.dockerignore', '.env.example',
     'README.md', 'README_KO.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'SECURITY.md',
@@ -21,13 +21,13 @@ ROOT_FILES = {
 }
 EXCLUDED_DIRS = {
     '.git', '.venv', 'venv', 'env', '__pycache__', '.pytest_cache', '.mypy_cache',
-    '.ruff_cache', 'data', 'backups', 'secrets', 'artifacts', 'dist', 'build',
+    '.ruff_cache', 'benchmark-data', 'benchmark-results', 'room-hub-benchmark-data', 'room-hub-benchmark-results', 'data', 'backups', 'secrets', 'artifacts', 'dist', 'build',
     'node_modules', '.vscode', '.idea',
 }
 BINARY_SUFFIXES = {'.png', '.jpg', '.jpeg', '.webp', '.ico'}
 SOURCE_SUFFIXES = BINARY_SUFFIXES | {
     '.py', '.js', '.css', '.html', '.md', '.json', '.yaml', '.yml', '.txt',
-    '.svg', '.webmanifest', '.sh', '.bat', '.ini', '.toml',
+    '.svg', '.webmanifest', '.sh', '.ps1', '.bat', '.ini', '.toml',
 }
 FORBIDDEN_SUFFIXES = {
     '.sqlite', '.sqlite3', '.db', '.pem', '.key', '.p12', '.pfx', '.crt', '.cer',
@@ -48,7 +48,11 @@ def source_path_allowed(path: str | PurePosixPath) -> bool:
         return False
     if any(part.lower() in EXCLUDED_DIRS for part in p.parts):
         return False
+    if p.parts[0] == 'benchmarks' and (p.suffix.lower() not in {'.py', '.md'} or any(x in {'suites', 'results', 'datasets'} for x in p.parts)):
+        return False
     name = p.name.lower()
+    if re.fullmatch(r'all_.*\.jsonl|unique_tasks_registry.*\.json', name):
+        return False
     if name.startswith('.env') and p.as_posix() != '.env.example':
         return False
     if name in {'source_manifest.json', '.ds_store', 'thumbs.db', 'desktop.ini'}:
