@@ -19,7 +19,7 @@ from pydantic import ConfigDict, ValidationError, create_model
 
 from .assistant import detect, digest, dump, parse_clock
 from .clock_service import aware, resolve_range, resolve_source_dates
-from .command_semantics import status_evidence, unsupported_personal
+from .command_semantics import status_evidence, unsupported_personal, read_status
 from .fast_reads import match_read, format_read
 from .command_routing import exact_alarm, read_candidates, unsafe_source
 from .store import utcnow
@@ -251,6 +251,10 @@ class WidgetBridge:
         domain = domain_for(text, self.registry)
         if domain == 'timer':
             return self.prepare_timer(record)
+        from .semantic_bridge import prepare_semantic
+        semantic = prepare_semantic(self, record)
+        if semantic is not None:
+            return semantic
         personal = self.has_domain(text)
         if personal:
             record['_widget_domain_request'] = True
@@ -488,6 +492,9 @@ class WidgetBridge:
                 record['final_text'] = label + '에는 다음과 같이 적혀 있습니다:\n' + (data['body'] or '(본문이 비어 있습니다.)')
                 record['routing']['resolved_context'] = {k: snapshot.get(k) for k in (
                     'selection_policy', 'widget_id', 'note_id', 'version', 'updated_at', 'shared', 'active_card_known')}
+            elif request.widget in {'todo', 'calendar'} and request.action == 'list' and record.get('semantic_frame'):
+                from .semantic_bridge import format_semantic_list
+                record['final_text'] = format_semantic_list(record, request, data)
             elif request.widget in {'todo', 'calendar'} and request.action == 'list':
                 if fast_plan is None:
                     from .fast_reads import ReadPlan
@@ -603,6 +610,9 @@ class WidgetBridge:
 
     async def ground(self, record, request, spec):
         """Strict critical-slot proof. Intent recovery never repairs transcript data."""
+        if record.get('semantic_frame'):
+            from .semantic_bridge import ground_semantic
+            return await ground_semantic(self, record, request, spec)
         text, args = record['normalized'], deepcopy(request.args)
         def reject(message, field=None):
             raise ProtocolFault('needs_clarification', 'SOURCE_NOT_GROUNDED', message, field)
@@ -636,8 +646,13 @@ class WidgetBridge:
             if request.action == 'list' and request.widget in {'todo', 'calendar'}:
                 # Read dates are server-owned. The model may omit but may not alter them.
                 args.pop('date', None); args.update(start=expected.start, end=expected.end)
-                state = status_evidence(text) or 'all'
-                if args.get('status', state) not in {None, state}:
+                state = read_status(text, request.widget)
+                allowed_states = {None, state}
+                if state == 'pending' and status_evidence(text) is None:
+                    # Older model output may include the API default 'all'. The
+                    # approved Assistant default is server-owned, never a guess.
+                    allowed_states.add('all')
+                if args.get('status', state) not in allowed_states:
                     reject('완료 조건이 원문과 다릅니다.', 'args.status')
                 args['status'] = state
                 period = 'morning' if '오전' in text else 'afternoon' if '오후' in text else None
@@ -736,6 +751,10 @@ class WidgetBridge:
             widget=request.widget, action=request.action, target=target, args=args, context={'source': 'assistant'})
 
     async def direct(self, rid, record):
+        if record.get('semantic_frame'):
+            from .semantic_bridge import verified_frame
+            frame = verified_frame(record)
+            return await self.stage(rid, record, {'output': dump(frame.proposal()), 'finish_reason': 'stop'})
         if record.get('widget_trace', {}).get('domain') == 'timer':
             proof = exact_timer(record['normalized'])
             if not proof or proof != record.get('direct_widget'):
@@ -755,6 +774,11 @@ class WidgetBridge:
         request = None
         trace = record['widget_trace']
         trace['latency_ms']['llm_ms'] = record['routing'].get('llm_seconds', 0) * 1000
+        if record.get('semantic_frame'):
+            with closing(self.store.connect()) as db:
+                old = db.execute('SELECT receipt_json FROM assistant_effects WHERE action_key=?', (record['action_key'],)).fetchone()
+            if old:
+                return self.replay(rid, record, json.loads(old[0]))
         try:
             fresh(record, self.store)
             request, spec = self.validate_projection(record, result)
@@ -793,6 +817,14 @@ class WidgetBridge:
                        'resolved_target': trace.get('resolved_target')}
             record.update(preview=preview, preview_sha256=digest(preview), validation='confirmation_required',
                           final_text=f'{request.widget}.{request.action}\n{dump(request.args)}\n아직 변경하지 않았습니다. 날짜·시간·대상을 확인하고 실행하세요.')
+            if record.get('semantic_frame'):
+                target = trace.get('resolved_target')
+                if target:
+                    record['final_text'] += f'\n실제 대상: {target["title"]} · {target["date"]} {target["time"] or "시간 미지정"}'
+                if trace.get('existing_same'):
+                    record['final_text'] += f'\n같은 날짜·제목·시간의 항목이 {trace["existing_same"]}개 있습니다. 중복 추가인지 확인하세요.'
+                if trace.get('duplicate_check_truncated'):
+                    record['final_text'] += '\n기존 항목 조회가 잘려 중복 여부를 전부 확인하지 못했습니다.'
             if request.widget == 'memo':
                 record['protocol_private'] = True
             self.engine.put(rid, record)

@@ -73,3 +73,13 @@
 - Run scripts/check_benchmark_policy.py plus benchmark, transport and timer regressions.
 - PRoot bind is not an enforced read-only mount; never claim it prevents same-UID writes.
 - A clean replacement PR is not proof of global deletion of older GitHub PR/commit refs.
+
+## M3 semantic routing contract
+
+- Approved Assistant-only todo read default is pending; explicit completed/all remain explicit. UI/Store/TaskQuery defaults stay all. "전체 날짜" is a date scope, not an implicit completion-state override.
+- Keep exact FAST_PATH, timer/Alarm rules and correct atomic legacy writes. New semantic frames are source-only and have no IDs, versions, permissions or confirmation authority.
+- Recompute exact/missing plans from stored source + request clock before use. Only server-read rows may supply IDs/versions. Exact normalized title first, then unique literal substring; refuse truncated, ambiguous or missing target sets. No fuzzy/ASR repair or context guessing.
+- Every non-timer write still requires manager confirmation and existing version/digest/expiry/receipt checks. Never retarget a replay after the old item was deleted.
+- Unsupported before/after time filters and non-minute-exact relative alarm times must clarify, not be rounded or silently weakened. No new operation, DB schema, UI, model/prompt or Whisper changes in M3.
+- Preserve external dataset and frozen M1/M2 results. Do not re-analyze old raw with changed app bytes. Compare preserved analyses on common supported IDs; never repair gold/projection/scoring to inflate gains.
+- M3 docs: docs/SEMANTIC_PARSER_M3.md. Run four tests/*m3*.py suites plus complete existing tests and timer/UI regression. Distinguish synthetic CI from actual V35/Qwen results.

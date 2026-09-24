@@ -403,6 +403,16 @@ class Runtime:
         self.trace['latency']['adapter_ms'] = sum(c['latency_ms'] for c in self.trace['adapter_calls'])
         record = self.trace['record']
         routing = record.get('routing', {})
+        semantic = record.get('semantic_parser')
+        if semantic:
+            self.trace['layers']['semantic_parser'] = {k: semantic.get(k) for k in ('enabled', 'version', 'scope')}
+            self.trace['latency']['parser_ms'] = semantic.get('parser_ms')
+        self.trace['stages_semantic_frame'] = deepcopy(record.get('semantic_frame'))
+        self.trace['stages_entity_resolution'] = deepcopy(record.get('entity_resolution') or (record.get('widget_trace') or {}).get('entity_resolution'))
+        self.trace['layers']['entity_resolver'] = {
+            'enabled': bool(self.trace['stages_entity_resolution']),
+            'scope': 'single_turn_server_rows; exact_then_unique_literal_substring',
+            'general_session_resolver_enabled': False}
         router_seconds = routing.get('router_seconds')
         self.trace['latency']['router_ms'] = router_seconds * 1000 if router_seconds is not None else None
         self.trace['stages'] = {

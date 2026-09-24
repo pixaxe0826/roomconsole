@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass
 import re
 
 from .clock_service import prefix_date, resolve_range
-from .command_semantics import known_read, READ_END, status_evidence
+from .command_semantics import known_read, READ_END, status_evidence, read_status
 from .life import memo_snapshot
 from .read_patterns import MEMO_PATTERNS, CALENDAR_PERIOD, DATED_BRIEF
 
@@ -53,7 +53,7 @@ def match_read(text: str, at: str, tz: str) -> ReadPlan | None:
     if brief and not (brief['period'] and '할' in brief['noun']):
         resolve_range(day, at, tz)
         return ReadPlan('todo.list' if '할' in brief['noun'] else 'calendar.query', day,
-                        period={'오전': 'morning', '오후': 'afternoon'}.get(brief['period']),
+                        status=read_status(rest, 'todo' if '할' in brief['noun'] else 'calendar'), period={'오전': 'morning', '오후': 'afternoon'}.get(brief['period']),
                         pattern='dated.brief')
     old = known_read(s, at, tz)
     if old:
