@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Literal
 
-SEMANTIC_VERSION = '1.1.0'
+SEMANTIC_VERSION = '1.2.0'
 Scalar = str | int | None
 
 

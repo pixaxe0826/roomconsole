@@ -95,3 +95,13 @@
 - No actual dataset/gold/trace in source; use tiny generated synthetic tests only.
 - Run tests/test_case_diff_m31.py and tests/test_semantic_stability_m31.py, all M3/M2/timer suites,
   complete pytest, repository policy and existing HTTP/browser CI. See docs/SEMANTIC_PARSER_M31.md.
+
+## M3.2 semantic residue precision contract
+- Parser coverage must not expand by treating every non-empty read residue as an entity title.
+- After domain/date/state extraction, only bounded collection scaffolding is consumed as LIST; literal text stays GET.
+- Search/include/related constraints remain unsupported while search operations are not registered. Never weaken them to an unfiltered list or named GET.
+- Mixed-domain reads joined by 같이/한 번에/랑/하고 must not partially execute one side. Do not register multi.read in this patch.
+- The bounded source phrase 낮부터 저녁 전까지 may map to the existing afternoon period; unsupported time filters remain blocked rather than dropped.
+- Keep fuzzy target matching, pronoun/context guessing, new operations, DB schema, model/prompt and Whisper out of M3.2.
+- Do not change scoring/gold/projection to make private evaluation cases pass. Synthetic tests must not copy private benchmark cases verbatim.
+- Calendar add all-day versus missing-time semantics remain unresolved in M3.2; do not add title-based heuristics merely to repair one benchmark item.

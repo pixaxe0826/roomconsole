@@ -33,6 +33,35 @@ UNSAFE = re.compile(r'["“”‘’\'`;\n\r\x00]|만약|조건|경우|라면|�
                     r'그리고|추가하고|삭제하고|완료하고|하고\s*(?:나서|그리고)|매일|매주|매월|반복|마다|'
                     r'공유|고정|우선순위|카테고리')
 
+SEARCH_FILTER = re.compile(r'들어간|포함(?:된|한)?|관련(?:된|한)?|검색|찾아')
+COLLECTION_RESIDUE = re.compile(
+    r'(?:'
+    r'(?:(?:뭐|뭐가|무엇|뭔가|어떤\s*(?:게|거|것|항목)?|무슨(?:\s*(?:게|거|것|항목))?)'
+    r'(?:\s*(?:잡혀|잡힌|잡혔|예정돼|예정된|예정되어|남아|남은))?)|'
+    r'(?:잡힌|예정된|남은)'
+    r')(?:\s*(?:게|거|것|항목)(?:들)?)?(?:\s*(?:은|는|이|가|도|만))?')
+MULTI_JOIN = re.compile(r'한\s*번에|같이|함께|(?:랑|하고|와|과)\s+')
+MULTI_DOMAIN_CUES = {
+    'todo': r'할\s*일|해야\s*(?:할\s*)?(?:거|것|일)|남은\s*(?:거|것|일)',
+    'calendar': r'일정|스케줄|달력|캘린더',
+    'memo': r'메모(?!리)|노트',
+    'alarm': r'알람|알림',
+}
+
+
+def _collection_residue(text: str) -> bool:
+    value = re.sub(r'\s+', ' ', text).strip(' ,，')
+    return bool(value and COLLECTION_RESIDUE.fullmatch(value))
+
+
+def _multi_domain_hits(text: str):
+    hits = []
+    for name, pattern in MULTI_DOMAIN_CUES.items():
+        found = re.search(pattern, text)
+        if found:
+            hits.append((found.start(), name, found))
+    return sorted(hits)
+
 
 def _erase(text, start, end):
     return text[:start] + ' ' * (end-start) + text[end:]
@@ -42,6 +71,18 @@ def parse_semantic(text: str, at: str, tz: str, *, raw: str | None = None) -> Se
     if not isinstance(text, str) or not 1 <= len(text) <= 1500:
         return None
     source = re.sub(r'[?？!！.。]+$', '', text).rstrip()
+    # Mixed-domain reads are never silently reduced to one widget. This is a
+    # source-only block; it does not register or execute a multi operation.
+    multi_hits = _multi_domain_hits(source)
+    if len(multi_hits) > 1 and MULTI_JOIN.search(source):
+        mixed = READ.fullmatch(source)
+        if mixed:
+            widget = multi_hits[0][1]
+            evidence = (Evidence('action', mixed.start('verb'), mixed.end('verb'), mixed['verb']),)
+            return SemanticFrame(
+                widget, 'list', (), Temporal(), None, evidence,
+                'UNSUPPORTED', 'MULTI_INTENT_UNSUPPORTED', None,
+                '여러 영역을 한 번에 실행하지 않습니다. 할 일과 일정을 한 요청씩 말씀해 주세요.')
     names = [k for k, p in DOMAIN.items() if re.search(p, source, re.I)]
     # Timer semantics/ownership and memo selection keep their existing exact paths.
     if 'timer' in names or 'memo' in names or len(names) > 1:
@@ -113,6 +154,9 @@ def parse_semantic(text: str, at: str, tz: str, *, raw: str | None = None) -> Se
     if unsafe_source(guarded_source):
         return frame('UNSUPPORTED', 'UNSAFE_SEMANTIC_SOURCE', None,
                      '부정·조건·인용·반복·복합 요청은 실행하지 않습니다. 한 요청으로 다시 말씀해 주세요.')
+    if action == 'list' and SEARCH_FILTER.search(remaining):
+        return frame('UNSUPPORTED', 'UNSUPPORTED_SEARCH_FILTER', None,
+                     '검색·포함·관련 조건은 현재 목록 계약으로 표현할 수 없습니다. 조건을 버리고 전체 목록을 실행하지 않았습니다.')
     if UNSUPPORTED.search(remaining):
         return frame('UNSUPPORTED', 'UNSUPPORTED_SEMANTIC_CONSTRAINT', None,
                      '이 요청의 검색·순서·문맥·추가 조건은 아직 안전하게 적용할 수 없습니다. 조건을 생략하지 않았습니다.')
@@ -144,6 +188,13 @@ def parse_semantic(text: str, at: str, tz: str, *, raw: str | None = None) -> Se
                 remaining = ''
         if remaining == '해야':
             remaining = ''  # "해야 할 일": a pending-list noun phrase.
+        # A bounded interrogative scaffold is collection syntax, not an entity
+        # title. Other nonempty literal text still uses the existing GET path.
+        if _collection_residue(remaining):
+            remaining = ''
+        elif re.search(r'부터|까지|이후|이전|(?<![가-힣\w])전(?=\s|$)', remaining):
+            return frame('UNSUPPORTED', 'UNCONSUMED_READ_CONSTRAINT', None,
+                         '남은 시간·범위 조건을 생략해 조회하지 않습니다. 지원되는 날짜 범위나 오전·오후로 다시 요청하세요.')
 
         if remaining:
             # A literal named item can use an existing get, but ordinal/session references cannot.

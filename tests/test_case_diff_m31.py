@@ -159,7 +159,7 @@ def test_installed_parser_metadata_is_not_per_case_route():
     from app.semantic_types import SEMANTIC_VERSION
     metadata = source_state()
     assert metadata['parser_enabled'] is True
-    assert metadata['parser_version'] == SEMANTIC_VERSION == '1.1.0'
+    assert metadata['parser_version'] == SEMANTIC_VERSION == '1.2.0'
     assert len(metadata['layer_versions']['semantic_parser']) == 64
     assert 'per-case' in metadata['parser_metadata_scope']
 
