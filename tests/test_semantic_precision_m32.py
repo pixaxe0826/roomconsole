@@ -5,6 +5,7 @@ from app.assistant import normalize
 from app.semantic_parser import parse_semantic
 from app.semantic_temporal import extract_temporal
 from test_assistant import hub, request, wait, enable
+from test_llm_widget_bridge import spy_adapter
 
 AT = '2028-02-28T09:00:00+09:00'
 TZ = 'Asia/Seoul'
@@ -68,8 +69,9 @@ def test_unconsumed_read_range_cannot_turn_into_named_get(text):
     assert f is None or f.confidence != 'EXACT' or f.action != 'get', f
 
 
-def test_search_constraint_integration_never_calls_model_or_adapter(hub):
+def test_search_constraint_integration_never_calls_model_or_adapter(hub, monkeypatch):
     app, c, model = hub
+    calls = spy_adapter(app, 'todo', monkeypatch)
     enable(c)
     d = wait(c, request(c, '내일 할 일 중 합성표식 들어간 거 있어?'))
     assert d['status'] == 'needs_clarification', d
@@ -77,13 +79,15 @@ def test_search_constraint_integration_never_calls_model_or_adapter(hub):
     assert d['assistant']['semantic_frame']['issue'] == 'UNSUPPORTED_SEARCH_FILTER'
     wt = d['assistant']['widget_trace']
     assert wt['execution_eligibility']['decision'] == 'BLOCKED'
-    # Request projection may exist before grounding rejects the source plan; execution must not.
-    assert wt.get('adapter') is None
-    assert wt.get('widget_response') is None
+    # The trace can identify the selected adapter class and request projection before
+    # grounding rejects the plan. The adapter service itself must never be entered.
+    assert not calls
+    assert wt['widget_response']['status'] == 'needs_clarification'
 
 
-def test_multi_intent_integration_never_calls_model_or_adapter(hub):
+def test_multi_intent_integration_never_calls_model_or_adapter(hub, monkeypatch):
     app, c, model = hub
+    calls = spy_adapter(app, 'todo', monkeypatch)
     enable(c)
     d = wait(c, request(c, '내일 해야 할 거하고 오후 일정 같이 알려줘'))
     assert d['status'] == 'needs_clarification', d
@@ -91,9 +95,10 @@ def test_multi_intent_integration_never_calls_model_or_adapter(hub):
     assert d['assistant']['semantic_frame']['issue'] == 'MULTI_INTENT_UNSUPPORTED'
     wt = d['assistant']['widget_trace']
     assert wt['execution_eligibility']['decision'] == 'BLOCKED'
-    # Request projection may exist before grounding rejects the source plan; execution must not.
-    assert wt.get('adapter') is None
-    assert wt.get('widget_response') is None
+    # The trace can identify the selected adapter class and request projection before
+    # grounding rejects the plan. The adapter service itself must never be entered.
+    assert not calls
+    assert wt['widget_response']['status'] == 'needs_clarification'
 
 
 def test_daypart_range_extractor_does_not_leave_boundary_words():
