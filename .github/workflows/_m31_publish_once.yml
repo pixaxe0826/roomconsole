@@ -1,0 +1,90 @@
+name: Temporary M3.1 source materialization
+on:
+  push:
+    branches: [automation/m31-source-publish-20260925]
+    paths: [.github/workflows/_m31_publish_once.yml]
+permissions:
+  contents: write
+jobs:
+  materialize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 798d8a70945c04cd4e3c528b4dd4e335e5334787
+          persist-credentials: false
+      - name: Reconstruct exact tested source without modifying refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYTHONDONTWRITEBYTECODE: '1'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, os, pathlib, subprocess, urllib.request
+          base = '798d8a70945c04cd4e3c528b4dd4e335e5334787'
+          expected_tree = 'ef57d19305d74a2932c1cf5e1aec531f19da9cdf'
+          chunks = ['c0a376f8d6eface410e869c9dca140d4cceba450',
+                    '4b1e091df88edb0909a935d39b4eccfc08ce48e1']
+          allowed = {'.github/workflows/ci.yml', 'AGENTS.md', 'README.md',
+                     'app/entity_resolver.py', 'app/semantic_bridge.py',
+                     'app/semantic_parser.py', 'app/semantic_temporal.py',
+                     'app/semantic_types.py', 'app/widget_bridge.py',
+                     'benchmarks/__init__.py', 'benchmarks/__main__.py',
+                     'benchmarks/analysis_compare.py', 'benchmarks/case_diff.py',
+                     'benchmarks/runner.py', 'benchmarks/runtime.py',
+                     'docs/SEMANTIC_PARSER_M31.md', 'tests/test_benchmark_m3.py',
+                     'tests/test_case_diff_m31.py', 'tests/test_semantic_parser_m3.py',
+                     'tests/test_semantic_stability_m31.py'}
+          def git(*args):
+              return subprocess.check_output(['git', *args])
+          def digest(data):
+              return hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+          def api(path, payload=None):
+              req = urllib.request.Request('https://api.github.com/repos/pixaxe0826/roomconsole/' + path,
+                  data=None if payload is None else json.dumps(payload, ensure_ascii=False).encode('utf-8'),
+                  headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                           'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json',
+                           'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'roomconsole-m31-source-publication'})
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  return json.load(response)
+          assert git('rev-parse', 'HEAD').decode().strip() == base
+          encoded = []
+          for sha in chunks:
+              raw = base64.b64decode(api('git/blobs/' + sha)['content'])
+              assert digest(raw) == sha
+              encoded.append(raw.decode('ascii'))
+          payload = lzma.decompress(base64.b64decode(''.join(encoded), validate=True))
+          assert len(payload) == 56332
+          assert hashlib.sha256(payload).hexdigest() == '44ce5d70e17dc60b11872ea904eb4c1bd2201a7c4e9b5d66653d4da4bafb0264'
+          files = json.loads(payload)
+          assert set(files) == allowed
+          for path, spec in files.items():
+              target = pathlib.Path(path)
+              if spec['base_blob'] is None:
+                  assert not target.exists()
+                  old = b''
+              else:
+                  old = git('show', base + ':' + path)
+                  assert digest(old) == spec['base_blob']
+              lines = old.decode('utf-8').splitlines(keepends=True)
+              for start, end, text in reversed(spec['edits']):
+                  assert 0 <= start <= end <= len(lines)
+                  lines[start:end] = text.splitlines(keepends=True)
+              data = ''.join(lines).encode('utf-8')
+              assert digest(data) == spec['result_blob'], path
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(data)
+          subprocess.run(['git', 'add', '--', *sorted(allowed)], check=True)
+          assert git('write-tree').decode().strip() == expected_tree, 'Validated source tree mismatch'
+          assert set(git('diff', '--cached', '--name-only').decode().splitlines()) == allowed
+          subprocess.run(['git', 'diff', '--cached', '--check'], check=True)
+          for path in sorted(allowed):
+              data = pathlib.Path(path).read_bytes()
+              expected = digest(data)
+              result = api('git/blobs', {'content': data.decode('utf-8'), 'encoding': 'utf-8'})
+              assert result['sha'] == expected, path
+              print(path, expected, flush=True)
+          print('SOURCE_BLOBS_VERIFIED=20; TREE=' + expected_tree)
+          print('No refs, PRs, deployments, datasets or operational data were modified by this job.')
+          PY
