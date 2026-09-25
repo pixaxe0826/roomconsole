@@ -85,6 +85,7 @@ jobs:
           tests/test_benchmark_m3.py
           tests/test_case_diff_m31.py
           tests/test_semantic_stability_m31.py
+          tests/test_semantic_precision_m32.py
           --timeout=30
           --timeout-method=thread
           --junitxml=artifacts/test-results/backend.xml
