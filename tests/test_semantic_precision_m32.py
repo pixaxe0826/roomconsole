@@ -77,7 +77,9 @@ def test_search_constraint_integration_never_calls_model_or_adapter(hub):
     assert d['assistant']['semantic_frame']['issue'] == 'UNSUPPORTED_SEARCH_FILTER'
     wt = d['assistant']['widget_trace']
     assert wt['execution_eligibility']['decision'] == 'BLOCKED'
-    assert wt.get('widget_request') is None
+    # Request projection may exist before grounding rejects the source plan; execution must not.
+    assert wt.get('adapter') is None
+    assert wt.get('widget_response') is None
 
 
 def test_multi_intent_integration_never_calls_model_or_adapter(hub):
@@ -89,7 +91,9 @@ def test_multi_intent_integration_never_calls_model_or_adapter(hub):
     assert d['assistant']['semantic_frame']['issue'] == 'MULTI_INTENT_UNSUPPORTED'
     wt = d['assistant']['widget_trace']
     assert wt['execution_eligibility']['decision'] == 'BLOCKED'
-    assert wt.get('widget_request') is None
+    # Request projection may exist before grounding rejects the source plan; execution must not.
+    assert wt.get('adapter') is None
+    assert wt.get('widget_response') is None
 
 
 def test_daypart_range_extractor_does_not_leave_boundary_words():
