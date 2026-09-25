@@ -30,7 +30,11 @@ PERIOD = re.compile(r'(?<![가-힣\w])(?P<period>오전|오후)(?:에는|에|의
 
 
 class TemporalError(ValueError):
-    pass
+    """Carry only already proven, nonconflicting source facts on parse failure."""
+    def __init__(self, message, *, partial=None):
+        super().__init__(message)
+        self.partial = partial or Temporal()
+
 
 
 def _erase(text: str, start: int, end: int) -> str:
@@ -100,9 +104,18 @@ def extract_temporal(text: str, at: str, tz: str) -> tuple[Temporal, str]:
         evidence.append(Evidence('relative_minutes', match.start(), match.end(), text[match.start():match.end()],
                                  'elapsed_minutes_from_frozen_request_instant; no_rounding'))
         residual = _erase(residual, match.start(), match.end())
+    def partial_error(message):
+        return TemporalError(message, partial=replace(fact, evidence=tuple(evidence)))
+    approximate = (r'(?:(?:오전|오후|아침|저녁|밤|낮)\s*)?'
+                   r'(?:\d{1,2}|열두|열한|열|한|두|세|네|다섯|여섯|일곱|여덟|아홉)\s*'
+                   r'(?:시(?:\s*(?:\d{1,2}\s*분|반))?|:\d{2})\s*(?:쯤|경|정도|무렵)')
+    if (re.search(approximate, residual) or
+            re.search(r'(?:아마|대략|약)\s*(?:(?:오전|오후)\s*)?(?:\d|한\s*시|두\s*시)', residual) or
+            re.search(r'(?:아침|저녁|밤|오전|오후)\s*(?:쯤|무렵|정도)', residual)):
+        raise partial_error('대략적인 시각은 확정할 수 없습니다. 오전·오후와 정확한 시간을 말씀해 주세요.')
     clocks = list(CLOCK.finditer(residual))
     if len(clocks) > 1 or (clocks and relative):
-        raise TemporalError('시각이 여러 개입니다. 한 시각으로 다시 요청하세요.')
+        raise partial_error('시각이 여러 개입니다. 한 시각으로 다시 요청하세요.')
     if clocks:
         # Lazy import avoids introducing a second civil clock parser.
         from .assistant import parse_clock
@@ -111,14 +124,17 @@ def extract_temporal(text: str, at: str, tz: str) -> tuple[Temporal, str]:
         without_relation = re.sub(r'(?:이전|이후|전|후|까지)\s*(?:에는|에)?\s*$', '', raw).strip()
         clock, left, error = parse_clock(without_relation)
         if error or clock is None or left:
-            raise TemporalError(error or '오전·오후를 포함한 정확한 시간을 말씀해 주세요.')
+            raise partial_error(error or '오전·오후를 포함한 정확한 시간을 말씀해 주세요.')
         fact = replace(fact, time=clock, relation=match['relation'])
         evidence.append(Evidence('time', match.start(), match.end(), text[match.start():match.end()],
                                  'existing_room_hub_clock_parser'))
         residual = _erase(residual, match.start(), match.end())
     periods = list(PERIOD.finditer(residual))
     if periods and (len(periods) > 1 or clocks or relative):
-        raise TemporalError('시간대와 시각이 중복됩니다. 하나의 조건으로 다시 요청하세요.')
+        # Neither clock nor period is uniquely established in a conflicting pair.
+        fact = replace(fact, time=None, period=None, relation=None)
+        evidence = [e for e in evidence if e.field not in {'time', 'period'}]
+        raise partial_error('시간대와 시각이 중복됩니다. 하나의 조건으로 다시 요청하세요.')
     if periods:
         match = periods[0]
         fact = replace(fact, period='morning' if match['period'] == '오전' else 'afternoon')
@@ -127,5 +143,5 @@ def extract_temporal(text: str, at: str, tz: str) -> tuple[Temporal, str]:
     # A partially parsed numeric expression must never turn into an unconditional request.
     if re.search(r'(?<![가-힣\w])(?:\d{1,4}[-/:년월]|\d+\s*(?:일|시|분|시간|초)(?:\s|에|전|후|뒤|$))|'
                  r'몇\s*시|저녁쯤|오전쯤|오후쯤|밤쯤|[~～]', residual):
-        raise TemporalError('남은 날짜·시간 표현을 확정할 수 없습니다. 숫자나 시간을 추측하지 않습니다.')
+        raise partial_error('남은 날짜·시간 표현을 확정할 수 없습니다. 숫자나 시간을 추측하지 않습니다.')
     return replace(fact, evidence=tuple(evidence)), residual

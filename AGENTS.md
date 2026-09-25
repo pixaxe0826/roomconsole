@@ -83,3 +83,15 @@
 - Unsupported before/after time filters and non-minute-exact relative alarm times must clarify, not be rounded or silently weakened. No new operation, DB schema, UI, model/prompt or Whisper changes in M3.
 - Preserve external dataset and frozen M1/M2 results. Do not re-analyze old raw with changed app bytes. Compare preserved analyses on common supported IDs; never repair gold/projection/scoring to inflate gains.
 - M3 docs: docs/SEMANTIC_PARSER_M3.md. Run four tests/*m3*.py suites plus complete existing tests and timer/UI regression. Distinguish synthetic CI from actual V35/Qwen results.
+
+## M3.1 paired evidence and bounded grammar
+
+- Preserve original scores and old analysis files. Case comparisons join saved rows by ID,
+  verify gold/input compatibility, and show improvements, regressions and missing evidence separately.
+- Safety reporting must include unsupported/unevaluated cases. Fast refusal is not successful execution.
+- Temporal ambiguity must not become literal title text; title-less filler must not create a task.
+- EXACT source plans still require server resolution and the existing validation/confirmation boundary.
+- Keep whole-range parsing before date endpoints; do not silently drop unsupported filters.
+- No actual dataset/gold/trace in source; use tiny generated synthetic tests only.
+- Run tests/test_case_diff_m31.py and tests/test_semantic_stability_m31.py, all M3/M2/timer suites,
+  complete pytest, repository policy and existing HTTP/browser CI. See docs/SEMANTIC_PARSER_M31.md.

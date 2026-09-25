@@ -53,10 +53,10 @@ def test_source_only_frames(text, widget, action, date, clock, title):
 
 @pytest.mark.parametrize('text,start,end,status,period', [
     ('할 일 오늘 보여줘', '2028-02-28', '2028-02-28', 'pending', None),
-    ('할 일 내일 완료한 것 보여줘', None, None, None, None),  # not our exact read grammar
+    ('할 일 내일 완료한 것 보여줘', '2028-02-29', '2028-02-29', 'completed', None),  # M3.1 bounded collection grammar
     ('2월 28일부터 3월 1일까지 할 일 보여줘', '2028-02-28', '2028-03-01', 'pending', None),
     ('2월 28~29일 일정 알려줘', '2028-02-28', '2028-02-29', 'all', None),
-    ('할 일 2월 28일부터 29일까지 남은 목록 보여줘', None, None, None, None),
+    ('할 일 2월 28일부터 29일까지 남은 목록 보여줘', '2028-02-28', '2028-02-29', 'pending', None),
     ('이번 주 오후 일정 보여줘', '2028-02-28', '2028-03-05', 'all', 'afternoon'),
     ('내일 완료한 할 일 보여줘', '2028-02-29', '2028-02-29', 'completed', None),
     ('오늘 전체 할 일 알려줘', '2028-02-28', '2028-02-28', 'all', None),

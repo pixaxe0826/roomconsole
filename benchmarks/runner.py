@@ -47,7 +47,12 @@ def source_state():
     layer_versions = {key: fingerprint({name: hashlib.sha256((ROOT/name).read_bytes()).hexdigest()
                                       for name in names if (ROOT/name).is_file()})
                       for key, names in layers.items()}
-    return {'layer_versions': layer_versions, 'parser_enabled': False, 'parser_version': None,
+    from app.semantic_types import SEMANTIC_VERSION
+    parser_files = ['app/semantic_parser.py', 'app/semantic_temporal.py', 'app/semantic_types.py',
+                    'app/semantic_bridge.py', 'app/entity_resolver.py']
+    layer_versions['semantic_parser'] = fingerprint({n: hashlib.sha256((ROOT/n).read_bytes()).hexdigest() for n in parser_files})
+    return {'layer_versions': layer_versions, 'parser_enabled': True, 'parser_version': SEMANTIC_VERSION,
+            'parser_metadata_scope': 'Installed production parser; per-case routing and traces decide actual use.',
             'proposal_repair_enabled': False, 'layer_metadata_scope': 'Current baseline component hashes; observed production traces remain authoritative.',
             'git_commit': commit, 'production_git_sha': commit, 'benchmark_git_sha': commit, 'git_tree': tree, 'working_tree_dirty': dirty,
             'production_source_hash': files_hash(ROOT / 'app'), 'harness_source_hash': files_hash(ROOT / 'benchmarks')}

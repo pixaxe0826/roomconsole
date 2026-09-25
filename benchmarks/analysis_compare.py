@@ -5,6 +5,7 @@ from .analysis import _json, _write_bundle, load_analysis, inventory
 from .paths import NAME, result_directory
 from .reports import write_json, html_report, score_label
 from .scoring import aggregate
+from .case_diff import compare_cases, write_case_reports
 
 
 def compare_analyses(results_root, before, after, name):
@@ -42,7 +43,10 @@ def compare_analyses(results_root, before, after, name):
     for key in ('mode_success', 'task_success', 'capability_ok', 'slot_accuracy', 'policy_ok', 'llm_call_rate', 'false_execution'):
         x, y = left[key]['rate'], right[key]['rate']
         result['changes'][key] = None if x is None or y is None else (y-x)*100
+    case_rows, case_summary = compare_cases(ar, br, ad, bd, acfg['selected_ids'], common)
+    result['case_diff_summary'] = case_summary
     def build(stage):
+        write_case_reports(stage, case_rows, case_summary, before, after)
         write_json(stage / 'comparison.json', result)
         text = '\n'.join(['# M2 지원 범위 고정 비교', '', f'{before} → {after}',
             f'양쪽에서 지원하고 실제 채점한 동일 {len(common)}개 문항만 비교합니다.',
@@ -55,7 +59,15 @@ def compare_analyses(results_root, before, after, name):
             '원본 전체 성능은 기존 compare 명령으로 따로 비교합니다. 위 표의 분모 변경으로 전체 개선을 주장하지 않습니다.',
             '모델 설정 일치: ' + str(result['performance_conditions_equal']),
             '별칭 근거 일치: ' + str(result['alias_provenance_equal']),
-            '하드웨어/발열/서비스 부하는 자동으로 같다고 확정하지 않습니다.']) + '\n'
+            '하드웨어/발열/서비스 부하는 자동으로 같다고 확정하지 않습니다.',
+            '', '## 문항별 비교',
+            'PASS→FAIL: ' + ', '.join(case_summary['all_selected']['lost_success_ids']),
+            'FAIL→PASS: ' + ', '.join(case_summary['all_selected']['gained_success_ids']),
+            '필요한 명확화 회귀: ' + ', '.join(case_summary['all_selected']['clarification_regression_ids']),
+            '실행 경계 회귀: ' + ', '.join(case_summary['all_selected']['execution_regression_ids']),
+            '회귀/누락 게이트: ' + ('검토 필요' if case_summary['regression_gate_failed'] else '관측된 회귀 없음'),
+            'CASE_TRANSITIONS.md / REGRESSIONS.md / IMPROVEMENTS.md / ROUTE_TRANSITIONS.csv / PARSER_OUTCOMES.md 참조.',
+            '모든 파일은 새 비교 폴더에만 생성합니다. 기존 비교 폴더는 덮어쓰지 않습니다.']) + '\n'
         (stage / 'comparison.md').write_text(text, encoding='utf-8')
         (stage / 'comparison.html').write_text(html_report(text, 'M2 지원 범위 고정 비교'), encoding='utf-8')
         if inventory(aroot) != ahash or inventory(broot) != bhash:

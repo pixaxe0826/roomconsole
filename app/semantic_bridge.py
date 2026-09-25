@@ -10,7 +10,7 @@ import time
 
 from .entity_resolver import resolve_target
 from .semantic_parser import parse_semantic
-from .semantic_types import SEMANTIC_VERSION
+from .semantic_types import SEMANTIC_VERSION, semantic_decision
 from .widget_protocol import WidgetRequest
 from .widget_protocol.core import ProtocolFault
 
@@ -31,6 +31,7 @@ def prepare_semantic(bridge, record):
     started = time.perf_counter()
     frame = parse_semantic(text, at, tz, raw=record['raw'])
     elapsed = (time.perf_counter() - started) * 1000
+    record['semantic_parser_attempt'] = dict(semantic_decision(frame), version=SEMANTIC_VERSION, parser_ms=elapsed)
     if frame is None:
         return None
     previous = record.get('proposal') or {}
@@ -54,7 +55,8 @@ def prepare_semantic(bridge, record):
                   _widget_domain_request=True, widget_bridge=BRIDGE_VERSION,
                   semantic_frame=frame.data(), direct_widget=frame.proposal(),
                   semantic_parser={'enabled': True, 'version': SEMANTIC_VERSION, 'parser_ms': elapsed,
-                                   'scope': 'single_turn_source_spans; no authority or entity IDs'})
+                                   'scope': 'single_turn_source_spans; no authority or entity IDs',
+                                   **semantic_decision(frame)})
     record['routing'].update(route='SEMANTIC_PARSER', route_reason='semantic.' + frame.widget + '.' + frame.action,
                              resolved_intent=frame.widget + '.' + frame.action, confidence=frame.confidence)
     record['widget_trace'] = {
@@ -83,6 +85,9 @@ async def ground_semantic(bridge, record, request, spec):
     frame = verified_frame(record)
     if request.widget != frame.widget or request.action != frame.action or request.args != dict(frame.arguments) or request.target is not None:
         raise ProtocolFault('needs_clarification', 'SEMANTIC_PLAN_CHANGED', '원문에서 확인한 제안만 사용할 수 있습니다.')
+    record['widget_trace']['execution_eligibility'] = {
+        'decision': 'BLOCKED', 'reason_code': semantic_decision(frame)['reason_code'],
+        'authority': 'existing_registry_and_confirmation_only'}
     if frame.confidence != 'EXACT':
         raise ProtocolFault('needs_clarification', frame.issue or 'SEMANTIC_NOT_EXACT',
                             frame.message or '요청을 명확히 다시 말씀해 주세요.', frame.field)
@@ -119,7 +124,11 @@ async def ground_semantic(bridge, record, request, spec):
         data = response.data
         selected = resolve_target(data['items'], frame.target_text or '', truncated=data.get('truncated', False))
         record['widget_trace']['entity_resolution'] = selected.evidence()
+        record['widget_trace']['entity_resolution']['selection_scope'] = {
+            'date_explicit': fact.start is not None, 'start': fact.start, 'end': fact.end,
+            'completion_filter': 'all', 'source_target_text': frame.target_text}
         if selected.status != 'resolved':
+            record['widget_trace']['execution_eligibility']['reason_code'] = 'TARGET_' + selected.status.upper()
             messages = {'ambiguous': '제목에 일치하는 대상이 여러 개입니다. 정확한 제목과 날짜로 다시 요청하세요.',
                         'incomplete': '조회 결과가 잘려 대상의 유일성을 확인할 수 없습니다. 날짜를 지정해 주세요.',
                         'missing': '일치하는 대상이 없습니다. 정확한 제목과 날짜를 확인해 주세요.'}
@@ -130,6 +139,16 @@ async def ground_semantic(bridge, record, request, spec):
         if not spec.read_only:
             args['version'] = item['version']
         record['widget_trace']['resolved_target'] = {k: item[k] for k in ('id', 'title', 'version', 'date', 'time')}
+    record['widget_trace']['field_provenance'] = {
+        'target_text': frame.target_text, 'create_title': dict(frame.arguments).get('title'),
+        'resolved_title': (record['widget_trace'].get('resolved_target') or {}).get('title'),
+        'sources': {'target_text': 'source_span', 'create_title': 'source_span',
+                    'resolved_title': 'server_read_only_lookup'}}
+    record['widget_trace']['execution_eligibility'] = {
+        'decision': 'READY_FOR_EXISTING_POLICY',
+        'reason_code': 'SOURCE_AND_TARGET_CHECKED',
+        'read_only': spec.read_only,
+        'authority': 'existing_registry_and_confirmation_only'}
     return WidgetRequest(request_id=record['action_key'], idempotency_key=record['action_key'],
                          widget=request.widget, action=request.action, target=target,
                          args=args, context={'source': 'assistant'})
