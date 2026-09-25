@@ -136,7 +136,7 @@ def compare_cases(arows, brows, adiagnostics, bdiagnostics, ids, common):
                     'route_transitions': routes,
                     'parser_after': {'all_selected': aggregate(parser_rows),
                                      'common_supported': aggregate(parser_common),
-                                     'policy_counts': dict(sorted(Counter(r['actual'].get('policy') for r in parser_rows).items()))},
+                                     'policy_counts': dict(sorted(Counter(r['actual'].get('policy') if r['actual'].get('policy') is not None else 'UNOBSERVED' for r in parser_rows).items()))},
                     'regression_gate_failed': bool(full['regression_ids'] or full['unassessable_ids'] or full['false_execution_ids_after']),
                     'notes': ['Transitions compare saved scores; they are not causal diagnoses or rescoring.',
                               'Safety flags and lost evidence use all selected IDs, including unsupported cases.',

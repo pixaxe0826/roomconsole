@@ -162,3 +162,13 @@ def test_installed_parser_metadata_is_not_per_case_route():
     assert metadata['parser_version'] == SEMANTIC_VERSION == '1.1.0'
     assert len(metadata['layer_versions']['semantic_parser']) == 64
     assert 'per-case' in metadata['parser_metadata_scope']
+
+
+def test_parser_policy_summary_handles_unobserved_nlu_policy():
+    a = [row('KNOWN'), row('EARLY_BOUNDARY')]
+    b = deepcopy(a)
+    for value in b:
+        value['actual']['route'] = 'SEMANTIC_PARSER'
+    b[1]['actual']['policy'] = None  # NLU boundary has no policy observation.
+    _, result = compare(a, b)
+    assert result['parser_after']['policy_counts'] == {'EXECUTE': 1, 'UNOBSERVED': 1}
