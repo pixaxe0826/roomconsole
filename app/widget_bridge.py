@@ -255,6 +255,7 @@ class WidgetBridge:
         semantic = prepare_semantic(self, record)
         if semantic is not None:
             return semantic
+        semantic_attempt = record.get('semantic_parser_attempt')
         personal = self.has_domain(text)
         if personal:
             record['_widget_domain_request'] = True
@@ -269,6 +270,8 @@ class WidgetBridge:
                 mode = record['mode']
                 record = detect(record['raw'], record['reference_at'], record['timezone'], 'auto')
                 record['mode'] = mode
+                if semantic_attempt is not None:
+                    record['semantic_parser_attempt'] = semantic_attempt
                 record['_widget_domain_request'] = True
                 if re.search(DOMAIN_WORDS['memo'], text) or read_candidates(text):
                     record.update(memo_read=True, protocol_private=True)
@@ -469,6 +472,9 @@ class WidgetBridge:
                      widget_response=response.model_dump(mode='json'),
                      adapter=response.meta.adapter, source_of_truth=response.meta.source_of_truth,
                      policy_result=response.status)
+        if record.get('semantic_frame') and trace.get('execution_eligibility'):
+            trace['execution_eligibility']['policy_outcome'] = response.status
+            trace['execution_eligibility']['rejection_code'] = response.error.code if response.error else None
         record['routing'].update(source_of_truth=response.meta.source_of_truth,
                                  resolved_intent=(request.widget + '.' + request.action) if request else None)
         record['origin'] = 'server'

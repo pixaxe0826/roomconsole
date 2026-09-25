@@ -38,6 +38,8 @@ def resolve_target(items: list[dict], target_text: str, *, truncated: bool = Fal
            or not isinstance(r.get('version'), int) or isinstance(r.get('version'), bool)
            for r in items):
         raise ValueError('Invalid server target rows')
+    if len({r['id'] for r in items}) != len(items):
+        raise ValueError('Duplicate server target identities')
     exact = tuple(r for r in items if normalize_title(r['title']) == needle)
     if exact:
         return Resolution('resolved' if len(exact) == 1 else 'ambiguous', 'exact_normalized', exact)

@@ -9,18 +9,18 @@ from __future__ import annotations
 import re
 
 from .clock_service import resolve_range
-from .command_semantics import read_status
+from .command_semantics import read_status, READ_END
 from .semantic_temporal import extract_temporal, TemporalError
 from .semantic_types import Evidence, SemanticFrame, Temporal
 
 ENDING = r'(?:\s*(?:해\s*(?:줘|주세요|줘요)?|해요|해주세요|처리해\s*(?:줘|주세요)?))?(?:요)?'
-READ = re.compile(r'(?P<body>.*?)\s*(?P<verb>보여\s*(?:줘|주세요)|알려\s*(?:줘|주세요)|'
-                  r'읽어\s*(?:줘|주세요)|확인(?:해)?\s*(?:줘|주세요)?|조회(?:해)?\s*(?:줘|주세요)?|뭐야)(?:요)?$')
+READ = re.compile(r'(?P<body>.*?)\s*(?P<verb>' + READ_END +
+                  r'|읽어\s*(?:줘|주세요|줘요))(?:요)?$')
 ADD = re.compile(r'(?P<body>.*?)\s*(?P<verb>추가|등록)' + ENDING + r'$')
 MUTATIONS = (
     ('reopen', re.compile(r'(?P<body>.*?)\s*(?P<verb>완료\s*취소|다시\s*미완료(?:로)?\s*(?:바꿔|변경해)?|미완료(?:로)?\s*(?:바꿔|변경해)?)' + ENDING + r'(?:\s*(?:줘|주세요|줘요))?$')),
-    ('complete', re.compile(r'(?P<body>.*?)\s*(?P<verb>완료(?:\s*처리)?|끝냈어|끝났어|마쳤어)' + ENDING + r'$')),
-    ('delete', re.compile(r'(?P<body>.*?)\s*(?P<verb>삭제|지워)(?:\s*(?:해\s*)?(?:줘|주세요|줘요)|해요|해)?(?:요)?$')),
+    ('complete', re.compile(r'(?P<body>.*?)\s*(?P<verb>완료했어|완료했어요|다\s*했어|다\s*했어요|완료(?:\s*처리)?|끝냈어|끝났어|마쳤어)' + ENDING + r'$')),
+    ('delete', re.compile(r'(?P<body>.*?)\s*(?P<verb>삭제|지워|없애)(?:\s*(?:해\s*)?(?:줘|주세요|줘요)|해요|해)?(?:요)?$')),
 )
 ALARM = re.compile(r'(?P<body>.*?)\s*알람(?:을)?\s*(?P<verb>맞춰|설정(?:해)?|등록(?:해)?)(?:\s*(?:줘|주세요|줘요))?(?:요)?$')
 DOMAIN = {'todo': r'할\s*일', 'calendar': r'일정|스케줄|달력|캘린더',
@@ -96,7 +96,12 @@ def parse_semantic(text: str, at: str, tz: str, *, raw: str | None = None) -> Se
     try:
         fact, remaining = extract_temporal(body, at, tz)
     except TemporalError as exc:
-        return frame('MISSING', 'TEMPORAL_NOT_EXACT', 'args.date', str(exc))
+        fact = exc.partial
+        if action in {'add', 'set'}:
+            args = {'date': fact.start, 'time': fact.time}
+            if action == 'add':
+                args['title'] = None
+        return frame('MISSING', 'TEMPORAL_NOT_EXACT', 'args.time' if fact.start else 'args.date', str(exc))
     # Preserve the old safety gate except for temporal spans that this parser
     # has now proved as a complete range/clock (rather than deleting guard words).
     from .command_routing import unsafe_source
@@ -132,6 +137,14 @@ def parse_semantic(text: str, at: str, tz: str, *, raw: str | None = None) -> Se
         remaining = re.sub(r'(?<![가-힣])(?:아직\s*)?(?:완료하지\s*않은|하지\s*않은|안\s*끝낸|'
                            r'완료된|완료한|끝낸|미완료(?:인)?|남은|전체|모든|전부|모두)(?:\s|$)', ' ', remaining)
         remaining = re.sub(r'(?<![가-힣])(?:좀|간단히|짧게)(?=\s|$)', ' ', remaining).strip(' ,，')
+        # Collection nouns after an explicit state are not a literal item title.
+        # An unqualified "것" is NOT a conversation reference resolver.
+        if re.fullmatch(r'(?:해야\s*)?(?:목록|것|거|항목)(?:들)?(?:을|를|만|이|은|는)?', remaining):
+            if remaining.startswith('목록') or read_status(state_text, widget) != ('pending' if widget == 'todo' else 'all') or re.search(r'남은|미완료|해야|완료한|완료된|끝낸', state_text):
+                remaining = ''
+        if remaining == '해야':
+            remaining = ''  # "해야 할 일": a pending-list noun phrase.
+
         if remaining:
             # A literal named item can use an existing get, but ordinal/session references cannot.
             action = 'get'
@@ -166,7 +179,7 @@ def parse_semantic(text: str, at: str, tz: str, *, raw: str | None = None) -> Se
         remaining = remaining.strip(' ,，')
         # Suffix particles are grammar, not fuzzy title editing. Only boundary spans are removed.
         target = re.sub(r'(?:을|를)$', '', remaining).strip()
-        if target in {'', '하나', '한 개', '하나만'}:
+        if not target or re.fullmatch(r'(?:좀|하나(?:만)?|한\s*개(?:만)?)(?:\s+(?:좀|하나(?:만)?|한\s*개(?:만)?))*', target):
             target = None
         if action == 'add':
             args = {'title': target, 'date': fact.start, 'time': fact.time}

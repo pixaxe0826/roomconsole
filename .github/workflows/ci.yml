@@ -83,6 +83,8 @@ jobs:
           tests/test_entity_resolver_m3.py
           tests/test_m3_assistant_regression.py
           tests/test_benchmark_m3.py
+          tests/test_case_diff_m31.py
+          tests/test_semantic_stability_m31.py
           --timeout=30
           --timeout-method=thread
           --junitxml=artifacts/test-results/backend.xml

@@ -196,3 +196,12 @@ M3는 기존 FAST_PATH/정확한 atomic write를 유지하면서, 명확한 단�
 타이머 즉시 실행 예외는 기존 그대로입니다. 미지원 시간 필터/문맥/새 operation을 묵시적으로
 추가하지 않으며, 실제 benchmark 개선은 별도 V35 실행으로 확인합니다.
 [구현 범위·안전 경계·M1/M2 보존·V35 테스트](docs/SEMANTIC_PARSER_M3.md).
+
+### M3.1 parser stabilization and paired regression audit
+
+같은 평가 집합의 성공 순증과 실제 회귀 문항을 구분합니다. `compare-analysis`는
+기존 저장 점수를 그대로 사용해 `REGRESSIONS.md`, `IMPROVEMENTS.md`,
+`ROUTE_TRANSITIONS.csv`, `PARSER_OUTCOMES.md`를 새 비교 폴더에 생성합니다.
+파서는 모호한 시각을 제목에 섞거나 `좀`만으로 제목을 만들지 않고, 확정한 날짜 근거를
+보존합니다. 새 capability나 확인 권한은 추가하지 않습니다.
+[구현 범위·회귀 검사·V35 검증 순서](docs/SEMANTIC_PARSER_M31.md).

@@ -408,6 +408,9 @@ class Runtime:
             self.trace['layers']['semantic_parser'] = {k: semantic.get(k) for k in ('enabled', 'version', 'scope')}
             self.trace['latency']['parser_ms'] = semantic.get('parser_ms')
         self.trace['stages_semantic_frame'] = deepcopy(record.get('semantic_frame'))
+        self.trace['stages_semantic_attempt'] = deepcopy(record.get('semantic_parser_attempt'))
+        self.trace['stages_execution_eligibility'] = deepcopy((record.get('widget_trace') or {}).get('execution_eligibility'))
+        self.trace['stages_field_provenance'] = deepcopy((record.get('widget_trace') or {}).get('field_provenance'))
         self.trace['stages_entity_resolution'] = deepcopy(record.get('entity_resolution') or (record.get('widget_trace') or {}).get('entity_resolution'))
         self.trace['layers']['entity_resolver'] = {
             'enabled': bool(self.trace['stages_entity_resolution']),

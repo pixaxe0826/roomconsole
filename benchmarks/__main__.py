@@ -44,6 +44,9 @@ def main(argv=None):
     comparison = sub.add_parser('compare-analysis', help='Compare the fixed common supported cohort')
     comparison.add_argument('before'); comparison.add_argument('after')
     comparison.add_argument('--name', required=True)
+    comparison.add_argument('--full-json', action='store_true', help='Print full metrics; default prints compact transition summary')
+    comparison.add_argument('--fail-on-regression', action='store_true',
+        help='Write report, then exit 3 on saved-score regression, lost evidence, or false execution')
     args = parser.parse_args(argv)
     try:
         if args.command == 'list':
@@ -91,7 +94,19 @@ def main(argv=None):
         elif args.command == 'compare-analysis':
             from .analysis_compare import compare_analyses
             folder, result = compare_analyses(args.results_root, args.before, args.after, args.name)
-            print(json.dumps({'output': str(folder), **result}, ensure_ascii=False, indent=2))
+            shown = result if args.full_json else {
+                'before': result['before'], 'after': result['after'], 'scope': result['scope'],
+                'common_case_count': result['common_case_count'], 'changes': result['changes'],
+                'case_transitions': result['case_diff_summary']['common_supported'],
+                'all_selected_safety_and_regressions': result['case_diff_summary']['all_selected'],
+                'regression_gate_failed': result['case_diff_summary']['regression_gate_failed'],
+                'alias_provenance_equal': result['alias_provenance_equal'],
+                'performance_conditions_equal': result['performance_conditions_equal'],
+                'report': str(folder / 'REGRESSIONS.md'),
+                'full_metrics': str(folder / 'comparison.json'), 'note': result['note']}
+            print(json.dumps({'output': str(folder), **shown}, ensure_ascii=False, indent=2))
+            if args.fail_on_regression and result['case_diff_summary']['regression_gate_failed']:
+                return 3
         else:
             from .dataset import NAME
             if not NAME.fullmatch(args.before) or not NAME.fullmatch(args.after):

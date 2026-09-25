@@ -5,6 +5,7 @@ from copy import deepcopy
 import pytest
 from benchmarks.runtime import Runtime, TextInput
 from benchmarks.support import capture_snapshot
+from app.semantic_types import SEMANTIC_VERSION
 
 AT = '2028-02-28T09:00:00+09:00'
 FIXTURE = {'todos': [{'id': 'synthetic-owned', 'title': '장비 포장', 'date': '2028-02-29', 'completed': False}]}
@@ -28,7 +29,7 @@ def test_semantic_runtime_boundaries_trace_and_no_model(mode, text):
     assert result['harness_error'] is None, result
     trace = result
     assert trace['layers']['semantic_parser']['enabled'] is True
-    assert trace['layers']['semantic_parser']['version'] == '1.0.0'
+    assert trace['layers']['semantic_parser']['version'] == SEMANTIC_VERSION
     assert trace['latency']['parser_ms'] >= 0
     assert trace['stages_semantic_frame'] and not trace['business_state_changed']
     assert not trace['llm']['attempts']
