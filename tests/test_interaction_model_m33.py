@@ -87,7 +87,7 @@ def test_source_literal_is_not_command_reference_or_authority(raw):
     assert decode_reply(SlotSpec('title','source_literal',True),raw,AT,TZ).state=='invalid'
 
 
-@pytest.mark.parametrize('raw', ['합성 포장재 분류','좀 더 읽기','받침대 (파랑)','USB 2.5G 어댑터 구입'])
+@pytest.mark.parametrize('raw', ['합성 포장재 분류','좀 더 읽기','받침대 (파랑)','USB 2.5G 어댑터 구입','합성 봉투 정리','부품 재고 확인','자료 요약'])
 def test_open_vocabulary_noun_phrase_preserved(raw):
     d=decode_reply(SlotSpec('title','source_literal',True),raw,AT,TZ)
     assert (d.state,d.value)==('filled',raw)

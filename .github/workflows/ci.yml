@@ -88,6 +88,7 @@ jobs:
           tests/test_semantic_precision_m32.py
           tests/test_interaction_model_m33.py
           tests/test_dialog_state_m33.py
+          tests/test_dialog_integrity_m33.py
           --timeout=30
           --timeout-method=thread
           --junitxml=artifacts/test-results/backend.xml

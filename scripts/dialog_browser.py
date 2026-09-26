@@ -65,6 +65,7 @@ def main():
                         page = browser.new_page(viewport={'width': 1440, 'height': 1100})
                         page.on('pageerror', lambda e: results['page_errors'].append(str(e)))
                         load_bridged(page, api, 'manager')
+                        page.add_script_tag(content=(ROOT / 'web/manager-dialog.js').read_text(encoding='utf-8'))
                         page.wait_for_selector('.kpis')
 
                         def open_voice(index):
@@ -82,9 +83,10 @@ def main():
                         page.wait_for_timeout(3600)
                         check('unsent dialog draft survives periodic invalidation',
                               page.locator('[data-dialog-input]').input_value() == '합성 브라우저 포장')
-                        page.locator('[data-llm=dialog-reply]').click()
+                        page.locator('[data-dialog-send]').click()
                         page.wait_for_selector('[data-agent-state=awaiting_confirmation]')
                         child_id = page.evaluate('RoomLLM.getSelection()')
+                        page.wait_for_selector(f'[data-dialog-panel][data-dialog-observed="{child_id}"]')
                         child = api.get('/api/llm/requests/' + child_id).json()
                         check('reply is a different request bound to exact parent',
                               child_id != root_id and child['parent_id'] == root_id)
@@ -93,7 +95,7 @@ def main():
                         check('filled dialog does not write before manager confirmation',
                               not api.get('/api/state').json()['tasks'])
                         check('generic retry is hidden for source-proof child',
-                              page.locator('#llmDetail [data-llm=retry]').count() == 0)
+                              page.locator('#llmDetail [data-llm=retry]:visible').count() == 0)
                         page.locator('[data-llm=confirm-action]').click()
                         page.wait_for_selector('[data-agent-state=succeeded]')
                         check('existing confirmation creates exactly one requested task',
@@ -101,14 +103,14 @@ def main():
 
                         open_voice(1)
                         page.locator('[data-dialog-input]').fill('3시')
-                        page.locator('[data-llm=dialog-reply]').click()
+                        page.locator('[data-dialog-send]').click()
                         page.wait_for_function("() => document.querySelector('[data-dialog-input]') && !document.querySelector('[data-dialog-input]').value")
                         selected = api.get('/api/llm/requests/' + page.evaluate('RoomLLM.getSelection()')).json()
                         check('ambiguous clock asks again and keeps the date',
                               selected['dialog']['awaiting_slot'] == 'time' and
                               selected['dialog']['known_slots']['date'] is not None and
                               selected['dialog']['known_slots']['time'] is None)
-                        page.locator('[data-llm=dialog-cancel]').click()
+                        page.locator('[data-dialog-cancel]').click()
                         page.wait_for_function("() => !document.querySelector('[data-dialog-input]')")
                         selected = api.get('/api/llm/requests/' + page.evaluate('RoomLLM.getSelection()')).json()
                         check('dialog cancel terminates only this pending input',

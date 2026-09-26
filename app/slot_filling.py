@@ -34,9 +34,13 @@ def decode_reply(slot: SlotSpec, raw: str, at: str, timezone: str) -> SlotReply:
     if slot.kind == 'source_literal':
         # Bounded literals only. "yes" is not approval and an imperative is not
         # a title/target. Preserve real noun phrases; never rewrite a title.
+        read = READ.fullmatch(text)
+        # Bare nominal endings such as '정리' or '확인' are valid task titles
+        # when the server explicitly asked for a title, not imperative requests.
+        nominal_read = {'확인', '조회', '보고', '브리핑', '정리', '요약'}
         if (len(text) > 240 or re.fullmatch(r'네|예|응|아니|아니요|그거|그것|이거|저거|취소|좀|하나', text)
                 or re.search(r'번째|한\s*번에|[{}\[\]<>]|(?:^|\s)(?:ID|아이디)\b', text, re.I)
-                or READ.fullmatch(text)
+                or (read and read['verb'] not in nominal_read)
                 or re.search(r'(?:해|줘|주세요|해요|했어|했어요|할래|바꿔|삭제|완료|등록)$', text)):
             return SlotReply('invalid', normalized=text, reason='LITERAL_REQUIRED')
         return SlotReply('filled', text, text)

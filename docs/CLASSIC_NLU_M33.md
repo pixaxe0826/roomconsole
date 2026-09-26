@@ -98,7 +98,10 @@ requests are not retroactively given dialogue state. Its detail shows the known
 values, the missing value, expiry and an additional-information field. Send only
 the requested value. On completion the new child detail displays the EXISTING
 confirmation button; merely filling the slot does not modify business data.
-Unsent field text is kept through periodic refresh. A consumed root links to the
+The runtime-only `manager-dialog.js` add-on preserves the existing notebook code.
+Unsent field text is kept through periodic refresh. Static standalone previews
+intentionally omit this live-only panel; they have no authenticated pending state.
+`dialog_browser.py` tests the exact production add-on over the test HTTP bridge. A consumed root links to the
 next request. The generic 'retry original request' action is disabled for dialogue
 children because their raw source is only a slot reply, not a standalone command.
 
