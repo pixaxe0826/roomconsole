@@ -240,12 +240,20 @@ class WidgetBridge:
     def __init__(self, store, engine, registry):
         self.store, self.engine, self.registry = store, engine, registry
         self.confirm_lock = asyncio.Lock()
+        from .interaction_model import validate_registry
+        validate_registry(registry)
 
     def has_domain(self, text: str) -> bool:
         return read_candidates(text) or domain_for(text, self.registry) is not None or any(
             re.search(pattern, text) for pattern in DOMAIN_WORDS.values())
 
     def prepare(self, record: dict) -> dict:
+        result = self._prepare(record)
+        from .interaction_model import shadow
+        result['interaction_model'] = shadow(result)
+        return result
+
+    def _prepare(self, record: dict) -> dict:
         """EXACT -> local plan; CANDIDATE -> constrained parser; UNSAFE -> clarify."""
         text = record['normalized']
         domain = domain_for(text, self.registry)
@@ -759,7 +767,7 @@ class WidgetBridge:
     async def direct(self, rid, record):
         if record.get('semantic_frame'):
             from .semantic_bridge import verified_frame
-            frame = verified_frame(record)
+            frame = verified_frame(record, store=self.store)
             return await self.stage(rid, record, {'output': dump(frame.proposal()), 'finish_reason': 'stop'})
         if record.get('widget_trace', {}).get('domain') == 'timer':
             proof = exact_timer(record['normalized'])
@@ -887,6 +895,12 @@ class WidgetBridge:
                     raise HTTPException(409, '실행 제안 무결성을 확인하지 못했습니다.')
                 if self.fingerprint(record['widget_trace']) != record['widget_trace']['capability_fingerprint']:
                     raise HTTPException(409, '확인 후 capability가 달라졌습니다. 새 요청으로 진행하세요.')
+                if record.get('dialog_state'):
+                    from .dialog_state import verify_record, DialogFault
+                    try:
+                        verify_record(record, db=db)
+                    except (ValueError, KeyError, TypeError) as exc:
+                        raise HTTPException(409, '대화 원문·규칙이 바뀌었습니다. 새 요청으로 확인하세요.') from exc
                 # Durable reservation BEFORE entering any Adapter. With no new DB
                 # transaction plumbing, a crash gap is uncertain (not exactly-once).
                 receipt = {'protocol_state': 'reserved', 'request_digest': request_digest(request),

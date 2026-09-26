@@ -419,7 +419,16 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
   if not 1<=limit<=100 or offset<0 or len(query)>240 or len(voice_id)>80:raise HTTPException(422,'조회 범위를 확인하세요.')
   return llm.listing(limit,offset,status,voice_id,query)
  @app.post('/api/llm/requests',status_code=202)
- async def llm_submit(body:LLMCreate,_=Depends(admin)):return await llm.submit(body)
+ async def llm_submit(body:LLMCreate,session=Depends(admin)):
+  return await llm.submit(body,dialog_owner=dialog_owner(session))
+
+ # Hash a server-validated session identity, never a browser-supplied owner.
+ # Shared Bearer credentials represent the same administrator, not separate people.
+ def dialog_owner(session):return llm_sha('dialog-owner:'+session.get('hash','shared-admin-bearer'))
+ from .dialog_service import DialogReply, reply as dialog_reply
+ @app.post('/api/llm/requests/{rid}/dialog/reply',status_code=202)
+ async def llm_dialog_reply(rid:str,body:DialogReply,session=Depends(admin)):
+  return await dialog_reply(llm,rid,body,dialog_owner(session))
  @app.get('/api/llm/requests/{rid}')
  async def llm_get(rid:str,_=Depends(admin)):return llm.get(rid)
  @app.get('/api/llm/requests/{rid}/export')

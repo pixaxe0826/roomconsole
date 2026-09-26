@@ -105,3 +105,17 @@
 - Keep fuzzy target matching, pronoun/context guessing, new operations, DB schema, model/prompt and Whisper out of M3.2.
 - Do not change scoring/gold/projection to make private evaluation cases pass. Synthetic tests must not copy private benchmark cases verbatim.
 - Calendar add all-day versus missing-time semantics remain unresolved in M3.2; do not add title-based heuristics merely to repair one benchmark item.
+
+
+## M3.3-A explicit dialogue exception
+- Interaction Model is linguistic metadata only; validate against WidgetRegistry, never grant authority.
+- Initial requests keep old behavior. Shadow reuses the existing parser; it is not an independent classifier or trained phrase model.
+- Only explicit manager replies to the selected pending request can fill one genuinely missing typed slot. Never use a global last-pending request.
+- Bind cookie-session ownership, expected state digest, parent chain and request-key replay. An unbound internal/speech source needs an explicit first manager claim. Shared Bearer credentials are one manager identity, not separate devices.
+- Fixed 180-second root TTL, at most six replies; no reset on invalid inputs. Reject day/timezone/version/source changes.
+- Persist raw turns separately in existing request/assistant JSON tables. Replay typed source evidence, not a fabricated concatenated command. No entity ID/version/permission/digest from user replies.
+- Reuse existing server target lookup and manager confirmation/receipt. Cancel information entry only; do not mutate business state or undo execution. Do not generically retry a slot-only child as a fresh command.
+- Follow-up UI is manager text input, not automatic voice capture or voice approval. No paired-display permission expansion.
+- Keep calendar optional-time/all-day behavior, dynamic entity/ASR/general context/new capabilities out of this patch.
+- Existing 250-case suite remains single-turn; synthetic dialogue tests must stay separate. Never register context.* only to alter support coverage.
+- Run test_interaction_model_m33.py, test_dialog_state_m33.py, full pytest, dialog_browser.py and existing CI; rebuild previews after UI changes. See docs/CLASSIC_NLU_M33.md.

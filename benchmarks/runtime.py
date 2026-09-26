@@ -407,6 +407,9 @@ class Runtime:
         if semantic:
             self.trace['layers']['semantic_parser'] = {k: semantic.get(k) for k in ('enabled', 'version', 'scope')}
             self.trace['latency']['parser_ms'] = semantic.get('parser_ms')
+        self.trace['stages_interaction_model'] = deepcopy(record.get('interaction_model'))
+        from app.dialog_state import descriptor
+        self.trace['stages_dialog'] = descriptor(record.get('dialog_state'))
         self.trace['stages_semantic_frame'] = deepcopy(record.get('semantic_frame'))
         self.trace['stages_semantic_attempt'] = deepcopy(record.get('semantic_parser_attempt'))
         self.trace['stages_execution_eligibility'] = deepcopy((record.get('widget_trace') or {}).get('execution_eligibility'))
