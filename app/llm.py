@@ -295,6 +295,8 @@ class LLMHub:
         d['request_payload']=json.loads(d['request_body'])
         d['dispatch_attempted']=bool(d['dispatch_attempted'])
         d['assistant']=self.assistant.get(rid)
+        from .dialog_state import descriptor
+        d['dialog'] = descriptor((d['assistant'] or {}).get('dialog_state'))
         # Idempotency implementation details do not belong to displayed request body.
         d.pop('signature'); d.pop('request_key')
         return d
@@ -340,7 +342,7 @@ class LLMHub:
         if row['signature']!=signature:raise HTTPException(409,'같은 요청 ID에 다른 입력을 보낼 수 없습니다.')
         return self.get(row['id']) | {'duplicate':True}
 
-    async def submit(self, req):
+    async def submit(self, req, *, dialog_owner=None):
         sig=sha(encoded({'voice_id':req.voice_id,'text_hash':req.expected_text_sha256,**({'mode':req.mode} if req.mode!='legacy' else {})}))
         duplicate=self._duplicate(req.request_id,sig)
         if duplicate:return duplicate
@@ -352,7 +354,7 @@ class LLMHub:
         if not v['text'].strip():raise HTTPException(422,'저장된 전사 텍스트가 없습니다.')
         if sha(v['text'])!=req.expected_text_sha256:raise HTTPException(409,'전사 내용이 변경되었습니다. 최신 저장 내용을 확인하고 다시 보내세요.')
         meta={k:v[k] for k in ('source','locale','kind','created_at','status')}
-        return await self._insert(req.request_id,sig,v['id'],v['id'],v['text'],meta,mode=req.mode)
+        return await self._insert(req.request_id,sig,v['id'],v['id'],v['text'],meta,mode=req.mode,dialog_owner=dialog_owner)
 
     async def submit_transcription(self, job_id: str, voice_id: str, text: str):
         """Submit one successful STT result through the normal auto assistant route.
@@ -366,6 +368,8 @@ class LLMHub:
 
     async def retry(self,rid,req):
         prev=self.get(rid)
+        if ((prev.get('assistant') or {}).get('dialog_state') or {}).get('proof', {}).get('steps'):
+            raise HTTPException(409, '대화 답변만 새 명령으로 재전송하지 않습니다. 최신 대화를 잇거나 전체 요청을 새로 입력하세요.')
         if prev['status'] in ACTIVE:raise HTTPException(409,'현재 요청을 완료하거나 취소한 뒤 재요청하세요.')
         mode=req.mode or (prev.get('assistant') or {}).get('mode','legacy')
         sig=sha(encoded({'parent':rid,**({'mode':mode} if mode!='legacy' else {})}))
@@ -374,7 +378,7 @@ class LLMHub:
         # Preserve the ORIGINAL user text. Current system/settings/time become a new snapshot.
         return await self._insert(req.request_id,sig,prev['voice_id'],prev['source_voice_id'],prev['source_text'],prev['source_meta'],rid,mode=mode)
 
-    async def _insert(self,key,sig,voice_id,source_id,text,meta,parent=None,mode='legacy'):
+    async def _insert(self,key,sig,voice_id,source_id,text,meta,parent=None,mode='legacy',dialog_owner=None):
         async with self.start_lock:
             duplicate=self._duplicate(key,sig)
             if duplicate:return duplicate
@@ -382,6 +386,7 @@ class LLMHub:
             router_start=time.perf_counter()
             agent=detect(text,now,self.store.get('settings')['timezone'],mode)
             if self.widget_bridge:agent=self.widget_bridge.prepare(agent)
+            agent['dialog_owner'] = dialog_owner
             agent['routing']['router_seconds']=time.perf_counter()-router_start
             if agent.get('widget_trace'):
                 agent['widget_trace']['latency_ms']['router_ms']=agent['routing']['router_seconds']*1000
@@ -433,6 +438,8 @@ class LLMHub:
     async def cancel(self,rid):
         if self.widget_bridge:self.widget_bridge.assert_not_executing(rid)
         d=self.get(rid)
+        if (d.get('assistant') or {}).get('dialog_state') and d['status'] == 'running':
+            raise HTTPException(409, '로컬 대화 처리가 진행 중입니다. 완료 후 취소하세요.')
         if d['status'] not in ACTIVE|{'prepared','awaiting_confirmation'}:return d
         # Cancellation is local: backend may not abort its computation instantly.
         with self.store.connect() as db:
@@ -568,6 +575,12 @@ class LLMHub:
         await self.notify(event,rid)
         return self.get(rid)|{'execution':result}
 
+    def attach_dialog_state(self, rid, record):
+        from .dialog_state import seed
+        state = seed(record, rid)
+        if state is not None:
+            record['dialog_state'] = state
+
     async def _execute_fast_read(self,rid):
         """Finish bounded reads and exact-rule previews independently of the model/speech worker.
 
@@ -587,6 +600,7 @@ class LLMHub:
             else:
                 record=(await self.widget_bridge.fast_read(rid,record) if self.widget_bridge and record.get('widget_bridge')
                         else self.assistant.stage(rid,record,record['proposal']))
+            self.attach_dialog_state(rid, record)
             elapsed=time.perf_counter()-start
             record['routing']['fast_path_seconds']=elapsed+record['routing']['router_seconds']
             if record.get('widget_trace'):record['widget_trace']['latency_ms']['total_ms']=record['routing']['fast_path_seconds']*1000
@@ -688,6 +702,8 @@ class LLMHub:
                 record=self.assistant.stage(rid,record,record['proposal'])
             # 'clarify' already contains a safe explanation, with no model call.
             if self.get(rid)['status']!='running':return
+            self.attach_dialog_state(rid, record)
+            self.assistant.put(rid, record)
             result['output']=record['final_text'];result['action_state']=record['state']
             result['output_source']=record['origin'];result['assistant_seconds']=time.perf_counter()-start
             if record.get('widget_trace'):

@@ -81,3 +81,16 @@ one running timer; scoped controls cannot target another card. The same ID remai
 shared across displays in this single-user workspace. Duration/target grounding, actor-scoped durable idempotency,
 CSRF, revocation and resource caps remain enforced. Foreground audio is opt-in and
 is not an OS alarm or a guarantee of background delivery. See [TIMERS](docs/TIMERS.md).
+
+
+## Explicit dialogue continuations (M3.3-A)
+
+Additional-information replies are manager-only and bound to an exact parent,
+server-derived session owner, state digest and fixed 180-second lifetime. Identical
+Bearer credentials represent one manager; only distinct cookie sessions provide
+per-session separation. Unbound internal/speech requests need explicit first claim.
+No new general display permissions or voice approval are introduced. Source proof
+replay checks immutable per-turn text/hash/timestamps/parent links before final
+grounding and confirmation. No global pending request or concatenated synthetic
+utterance is used. Existing reservation/uncertain receipt and target version guards
+remain in force. See [dialogue contract](docs/CLASSIC_NLU_M33.md).

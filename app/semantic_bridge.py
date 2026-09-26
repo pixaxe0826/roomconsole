@@ -43,6 +43,10 @@ def prepare_semantic(bridge, record):
         if (frame.widget == 'todo' and previous.get('intent') == expected.get(frame.action)
                 and previous.get('title') == title):
             return None
+    return install_semantic_frame(bridge, record, frame, elapsed)
+
+
+def install_semantic_frame(bridge, record, frame, elapsed):
     adapter = bridge.registry.get(frame.widget)
     spec = adapter.operations.get(frame.action) if adapter else None
     if spec is None:
@@ -70,7 +74,10 @@ def prepare_semantic(bridge, record):
     return record
 
 
-def verified_frame(record):
+def verified_frame(record, *, store=None):
+    if record.get('dialog_state'):
+        from .dialog_state import verify_record
+        return verify_record(record, store=store)
     from .assistant import normalize
     if normalize(record['raw'])[0] != record['normalized']:
         raise ProtocolFault('needs_clarification', 'SEMANTIC_SOURCE_CHANGED', '저장된 원문과 분석 기준이 달라졌습니다. 새 요청으로 확인하세요.')
@@ -82,7 +89,7 @@ def verified_frame(record):
 
 
 async def ground_semantic(bridge, record, request, spec):
-    frame = verified_frame(record)
+    frame = verified_frame(record, store=bridge.store)
     if request.widget != frame.widget or request.action != frame.action or request.args != dict(frame.arguments) or request.target is not None:
         raise ProtocolFault('needs_clarification', 'SEMANTIC_PLAN_CHANGED', '원문에서 확인한 제안만 사용할 수 있습니다.')
     record['widget_trace']['execution_eligibility'] = {

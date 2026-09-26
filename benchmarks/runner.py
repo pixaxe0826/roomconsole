@@ -51,7 +51,15 @@ def source_state():
     parser_files = ['app/semantic_parser.py', 'app/semantic_temporal.py', 'app/semantic_types.py',
                     'app/semantic_bridge.py', 'app/entity_resolver.py']
     layer_versions['semantic_parser'] = fingerprint({n: hashlib.sha256((ROOT/n).read_bytes()).hexdigest() for n in parser_files})
-    return {'layer_versions': layer_versions, 'parser_enabled': True, 'parser_version': SEMANTIC_VERSION,
+    from app.interaction_model import INTERACTION_VERSION, model_hash
+    from app.dialog_state import DIALOG_VERSION, TTL_SECONDS
+    layer_versions['interaction_model'] = model_hash()
+    layer_versions['dialog'] = fingerprint({n: hashlib.sha256((ROOT/n).read_bytes()).hexdigest() for n in
+        ['app/dialog_state.py', 'app/dialog_service.py', 'app/slot_filling.py']})
+    return {'interaction_model_version': INTERACTION_VERSION, 'interaction_model_hash': model_hash(),
+            'dialog_version': DIALOG_VERSION, 'dialog_ttl_seconds': TTL_SECONDS,
+            'dialog_benchmark_scope': 'single-turn observations only; explicit multi-turn HTTP tests are separate',
+            'layer_versions': layer_versions, 'parser_enabled': True, 'parser_version': SEMANTIC_VERSION,
             'parser_metadata_scope': 'Installed production parser; per-case routing and traces decide actual use.',
             'proposal_repair_enabled': False, 'layer_metadata_scope': 'Current baseline component hashes; observed production traces remain authoritative.',
             'git_commit': commit, 'production_git_sha': commit, 'benchmark_git_sha': commit, 'git_tree': tree, 'working_tree_dirty': dirty,

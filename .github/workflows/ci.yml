@@ -86,6 +86,8 @@ jobs:
           tests/test_case_diff_m31.py
           tests/test_semantic_stability_m31.py
           tests/test_semantic_precision_m32.py
+          tests/test_interaction_model_m33.py
+          tests/test_dialog_state_m33.py
           --timeout=30
           --timeout-method=thread
           --junitxml=artifacts/test-results/backend.xml
@@ -125,6 +127,7 @@ jobs:
       - run: python scripts/llm_widget_regression.py
       - run: python scripts/llm_widget_live.py
       - run: python scripts/assistant_browser.py
+      - run: python scripts/dialog_browser.py
       - run: python scripts/context_browser.py
       - run: python scripts/life_browser.py
       - run: python scripts/fast_reads_browser.py
