@@ -119,3 +119,11 @@
 - Keep calendar optional-time/all-day behavior, dynamic entity/ASR/general context/new capabilities out of this patch.
 - Existing 250-case suite remains single-turn; synthetic dialogue tests must stay separate. Never register context.* only to alter support coverage.
 - Run test_interaction_model_m33.py, test_dialog_state_m33.py, full pytest, dialog_browser.py and existing CI; rebuild previews after UI changes. See docs/CLASSIC_NLU_M33.md.
+
+## M3.3-B catalog / named memo grounding
+- Catalogs contain server metadata only, are request-local, and never go into model prompts or the shared-display DTO. Reuse entity_resolver.py; no fuzzy aliases or context guesses.
+- Private notes participate in title uniqueness; pin/shared flags never select a named target. Current/latest/legacy fixed-text behavior stays distinct and unchanged.
+- Named read/clear/append/body replacement use existing operations; no search/rename/delete/list/multi capability. Missing named update target must not create a new note or fall back to the default card.
+- Preserve raw body spans, metadata/body-read version checks, private result redaction, existing preview/confirmation/receipt, and receipt-before-reselection semantics.
+- Todo and calendar still share the production task table. Do not filter completion/date to force uniqueness unless already source-qualified.
+- Test synthetic catalog, memo grounding, benchmark isolation, and memo_catalog_browser; keep existing dialogue/timer/CI tests intact. See docs/ENTITY_CATALOG_M33B.md.

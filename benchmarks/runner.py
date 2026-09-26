@@ -56,7 +56,12 @@ def source_state():
     layer_versions['interaction_model'] = model_hash()
     layer_versions['dialog'] = fingerprint({n: hashlib.sha256((ROOT/n).read_bytes()).hexdigest() for n in
         ['app/dialog_state.py', 'app/dialog_service.py', 'app/slot_filling.py']})
-    return {'interaction_model_version': INTERACTION_VERSION, 'interaction_model_hash': model_hash(),
+    from app.entity_catalog import CATALOG_VERSION
+    from app.memo_grounding import MEMO_GROUNDING_VERSION
+    layer_versions['entity_catalog'] = fingerprint({n: hashlib.sha256((ROOT/n).read_bytes()).hexdigest() for n in
+        ['app/entity_catalog.py', 'app/entity_resolver.py', 'app/memo_grounding.py', 'app/life.py']})
+    return {'entity_catalog_version': CATALOG_VERSION, 'memo_grounding_version': MEMO_GROUNDING_VERSION,
+            'interaction_model_version': INTERACTION_VERSION, 'interaction_model_hash': model_hash(),
             'dialog_version': DIALOG_VERSION, 'dialog_ttl_seconds': TTL_SECONDS,
             'dialog_benchmark_scope': 'single-turn observations only; explicit multi-turn HTTP tests are separate',
             'layer_versions': layer_versions, 'parser_enabled': True, 'parser_version': SEMANTIC_VERSION,

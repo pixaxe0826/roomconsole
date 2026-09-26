@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 import time
 
-from .entity_resolver import resolve_target
+from .entity_catalog import EntityCatalog
 from .semantic_parser import parse_semantic
 from .semantic_types import SEMANTIC_VERSION, semantic_decision
 from .widget_protocol import WidgetRequest
@@ -129,7 +129,10 @@ async def ground_semantic(bridge, record, request, spec):
         if response.status != 'success':
             raise ProtocolFault('error', 'TARGET_READ_FAILED', '실제 대상을 조회하지 못했습니다. 변경하지 않았습니다.')
         data = response.data
-        selected = resolve_target(data['items'], frame.target_text or '', truncated=data.get('truncated', False))
+        catalog = EntityCatalog.from_rows(request.widget, data['items'], source=response.meta.source_of_truth, as_of=data['as_of'],
+            truncated=data.get('truncated', False), scope={'start': fact.start, 'end': fact.end, 'completion_filter': 'all'})
+        record['widget_trace']['entity_catalog'] = catalog.evidence()
+        selected = catalog.resolve(frame.target_text or '')
         record['widget_trace']['entity_resolution'] = selected.evidence()
         record['widget_trace']['entity_resolution']['selection_scope'] = {
             'date_explicit': fact.start is not None, 'start': fact.start, 'end': fact.end,

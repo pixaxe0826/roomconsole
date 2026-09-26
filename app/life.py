@@ -570,3 +570,21 @@ def memo_result_is_public(store, snapshot):
         cfg = widget.get('config') or {}
         body = data.get('text') if data.get('text') is not None else cfg.get('text', '')
         return isinstance(body, str) and body == snapshot.get('body')
+
+
+def note_catalog_snapshot(store):
+    """Server-internal metadata read; NOT a new API, search action or permission.
+
+    Include private titles in the manager resolver to avoid false uniqueness.
+    Never read bodies until an actual unique note is selected via MemoAdapter.
+    Detect externally oversized stores instead of silently treating a prefix as
+    the complete catalog. Neither pin order nor sharing chooses a named target.
+    """
+    with store.connect() as db:
+        db.execute('BEGIN')
+        rows = db.execute('SELECT id,title,version,shared,updated_at FROM hub_notes ORDER BY id LIMIT ?',
+                          (MAX_NOTES + 1,)).fetchall()
+        revision = db.execute('SELECT revision FROM hub_life_meta WHERE id=1').fetchone()[0]
+        return {'items': [dict(r) | {'shared': bool(r['shared'])} for r in rows[:MAX_NOTES]],
+                'truncated': len(rows) > MAX_NOTES, 'revision': revision,
+                'source': 'room_hub_sqlite.hub_notes', 'as_of': stamp(time.time())}

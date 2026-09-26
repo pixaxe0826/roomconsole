@@ -259,6 +259,10 @@ class WidgetBridge:
         domain = domain_for(text, self.registry)
         if domain == 'timer':
             return self.prepare_timer(record)
+        from .memo_grounding import prepare_memo
+        named_memo = prepare_memo(self, record)
+        if named_memo is not None:
+            return named_memo
         from .semantic_bridge import prepare_semantic
         semantic = prepare_semantic(self, record)
         if semantic is not None:
@@ -624,12 +628,19 @@ class WidgetBridge:
 
     async def ground(self, record, request, spec):
         """Strict critical-slot proof. Intent recovery never repairs transcript data."""
+        if record.get('memo_plan'):
+            from .memo_grounding import ground_memo
+            return await ground_memo(self, record, request, spec)
         if record.get('semantic_frame'):
             from .semantic_bridge import ground_semantic
             return await ground_semantic(self, record, request, spec)
         text, args = record['normalized'], deepcopy(request.args)
         def reject(message, field=None):
             raise ProtocolFault('needs_clarification', 'SOURCE_NOT_GROUNDED', message, field)
+        if request.widget == 'memo':
+            from .memo_grounding import has_unhandled_name
+            if has_unhandled_name(record['raw']):
+                reject('명시한 메모 제목을 기본 메모로 바꾸어 처리하지 않습니다. 정확한 제목과 한 동작으로 다시 요청하세요.', 'target')
         inferred_read = spec.read_only and (record.get('candidate_read_only') or record.get('candidate_action_unknown'))
         if unsafe_source(text) or (not inferred_read and not action_evidence(request.action, text)):
             reject('원문에서 단일 동작을 확인하지 못했습니다. 한 작업으로 다시 요청해 주세요.')
@@ -765,6 +776,11 @@ class WidgetBridge:
             widget=request.widget, action=request.action, target=target, args=args, context={'source': 'assistant'})
 
     async def direct(self, rid, record):
+        if record.get('memo_plan'):
+            from .memo_grounding import verified_plan
+            with closing(self.store.connect()) as db:
+                proof = verified_plan(record, db=db, rid=rid)
+            return await self.stage(rid, record, {'output': dump(proof.proposal()), 'finish_reason': 'stop'})
         if record.get('semantic_frame'):
             from .semantic_bridge import verified_frame
             frame = verified_frame(record, store=self.store)
@@ -788,7 +804,7 @@ class WidgetBridge:
         request = None
         trace = record['widget_trace']
         trace['latency_ms']['llm_ms'] = record['routing'].get('llm_seconds', 0) * 1000
-        if record.get('semantic_frame'):
+        if record.get('semantic_frame') or record.get('memo_plan'):
             with closing(self.store.connect()) as db:
                 old = db.execute('SELECT receipt_json FROM assistant_effects WHERE action_key=?', (record['action_key'],)).fetchone()
             if old:
@@ -803,6 +819,9 @@ class WidgetBridge:
             request = await self.ground(record, request, spec)
             if spec.read_only:
                 response = await self.query(request, record)
+                if record.get('memo_plan'):
+                    from .memo_grounding import catalog_matches_response
+                    catalog_matches_response(record, response)
             else:
                 # Validates metadata/slots/permission but has NO confirmation authority.
                 response = await self.registry.execute(request, PREVIEW_AUTHORITY)
@@ -895,6 +914,12 @@ class WidgetBridge:
                     raise HTTPException(409, '실행 제안 무결성을 확인하지 못했습니다.')
                 if self.fingerprint(record['widget_trace']) != record['widget_trace']['capability_fingerprint']:
                     raise HTTPException(409, '확인 후 capability가 달라졌습니다. 새 요청으로 진행하세요.')
+                if record.get('memo_plan'):
+                    from .memo_grounding import verified_plan
+                    try:
+                        verified_plan(record, db=db, rid=rid)
+                    except (ValueError, ProtocolFault, TypeError, KeyError):
+                        raise HTTPException(409, '메모 원문·선택 계획이 바뀌었습니다. 새 요청으로 확인하세요.') from None
                 if record.get('dialog_state'):
                     from .dialog_state import verify_record, DialogFault
                     try:

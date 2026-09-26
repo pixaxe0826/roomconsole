@@ -89,6 +89,9 @@ jobs:
           tests/test_interaction_model_m33.py
           tests/test_dialog_state_m33.py
           tests/test_dialog_integrity_m33.py
+          tests/test_entity_catalog_m33b.py
+          tests/test_memo_grounding_m33b.py
+          tests/test_benchmark_catalog_m33b.py
           --timeout=30
           --timeout-method=thread
           --junitxml=artifacts/test-results/backend.xml
@@ -129,6 +132,7 @@ jobs:
       - run: python scripts/llm_widget_live.py
       - run: python scripts/assistant_browser.py
       - run: python scripts/dialog_browser.py
+      - run: python scripts/memo_catalog_browser.py
       - run: python scripts/context_browser.py
       - run: python scripts/life_browser.py
       - run: python scripts/fast_reads_browser.py
