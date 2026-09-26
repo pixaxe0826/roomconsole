@@ -414,6 +414,8 @@ class Runtime:
         self.trace['stages_semantic_attempt'] = deepcopy(record.get('semantic_parser_attempt'))
         self.trace['stages_execution_eligibility'] = deepcopy((record.get('widget_trace') or {}).get('execution_eligibility'))
         self.trace['stages_field_provenance'] = deepcopy((record.get('widget_trace') or {}).get('field_provenance'))
+        self.trace['stages_entity_catalog'] = deepcopy(record.get('entity_catalog') or (record.get('widget_trace') or {}).get('entity_catalog'))
+        self.trace['stages_memo_plan'] = deepcopy(record.get('memo_plan'))
         self.trace['stages_entity_resolution'] = deepcopy(record.get('entity_resolution') or (record.get('widget_trace') or {}).get('entity_resolution'))
         self.trace['layers']['entity_resolver'] = {
             'enabled': bool(self.trace['stages_entity_resolution']),

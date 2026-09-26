@@ -406,7 +406,7 @@ class AssistantEngine:
                             else:
                                 rows=[dict(t) for t in db.execute('SELECT * FROM tasks WHERE date=? ORDER BY time IS NULL,time,created_at,id',(target_day,))]
                                 if p.scope=='one':
-                                    from .entity_resolver import resolve_target
+                                    from .entity_catalog import EntityCatalog
                                     if p.date_ref is None:
                                         # A named single-turn reference can span dates; never select
                                         # 'today' merely to turn duplicate titles into one match.
@@ -414,7 +414,11 @@ class AssistantEngine:
                                         candidates=snapshot['items'];truncated=snapshot['truncated']
                                     else:
                                         candidates=rows;truncated=False
-                                    resolved_target=resolve_target(candidates,p.title,truncated=truncated)
+                                    metadata=[dict(t, completed=bool(t['completed'])) for t in candidates]
+                                    catalog=EntityCatalog.from_rows('todo',metadata,source='room_hub_sqlite.tasks',as_of=utcnow(),
+                                        truncated=truncated,scope={'date':target_day if p.date_ref else None,'completion_filter':'all'})
+                                    record['entity_catalog']=catalog.evidence()
+                                    resolved_target=catalog.resolve(p.title)
                                     record['entity_resolution']=resolved_target.evidence()
                                     if resolved_target.status!='resolved':raise ValueError('일치하는 할 일이 없거나 같은 제목이 여러 개입니다. 정확한 제목과 날짜를 확인하세요.')
                                     rows=list(resolved_target.matches)
