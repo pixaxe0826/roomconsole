@@ -50,6 +50,7 @@ jobs:
       - run: python -m pip install -r requirements-dev.txt
       - run: python scripts/check_repo.py --json artifacts/test-results/repository.json
       - run: python scripts/check_benchmark_policy.py
+      - run: python scripts/check_memo_language.py --json artifacts/test-results/memo-grammar.json
       - name: V35 Git updater shell syntax
         if: runner.os == 'Linux'
         run: bash -n deploy/termux/adopt-git.sh deploy/termux/update-from-git.sh deploy/termux/benchmark.sh deploy/termux/benchmark-data.sh
@@ -92,6 +93,7 @@ jobs:
           tests/test_entity_catalog_m33b.py
           tests/test_memo_grounding_m33b.py
           tests/test_benchmark_catalog_m33b.py
+          tests/test_memo_language_m33b1.py
           --timeout=30
           --timeout-method=thread
           --junitxml=artifacts/test-results/backend.xml

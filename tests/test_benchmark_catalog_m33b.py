@@ -51,6 +51,6 @@ def test_catalog_read_does_not_escape_owned_sqlite(monkeypatch):
 def test_version_metadata_is_explicit_not_a_claim_of_case_coverage():
     state=source_state()
     assert state['entity_catalog_version']=='1.0.0'
-    assert state['memo_grounding_version']=='1.0.0'
+    assert state['memo_grounding_version']=='1.1.0'
     assert state['layer_versions']['entity_catalog']
     assert state['parser_version']=='1.2.0'

@@ -1,8 +1,11 @@
 """Anchored read-only Korean grammar; deliberately not fuzzy STT correction."""
+from .memo_language import RECENT_READ
+
 # This table is separate from context/DB code so variations can be tested without I/O.
 MEMO_END = (r'(?:읽어\s*(?:줘|주세요)|보여\s*(?:줘|주세요)|'
             r'알려\s*(?:줘|주세요)|확인해\s*(?:줘|주세요))(?:요)?')
 MEMO_PATTERNS = (
+    ('memo.latest.expanded', 'last_modified', RECENT_READ),
     ('memo.latest', 'last_modified',
      r'(?:방금|아까|최근(?:에)?)\s*(?:(?:적은|작성한|수정한|저장한)\s*메모(?:\s*(?:내용|본문))?|'
      r'메모(?:에\s*(?:작성한|적은|저장한|수정한)\s*내용)?)(?:을|를)?\s*(?:좀\s*)?' + MEMO_END),
