@@ -17,6 +17,7 @@ from .clock_service import clock_context
 from .capabilities import manifest as capability_manifest
 from .assistant import Confirmation
 from .store import Store,uid,utcnow
+from .sqlite_connection import ClosingConnection
 from .recurrence import occurrences
 from .widgets import discover
 from .weather import fetch_weather
@@ -147,6 +148,8 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
   auth=request.headers.get('authorization','')
   if auth.startswith('Bearer ') and hmac.compare_digest(auth[7:],ingest_key):return {'role':'ingest'}
   return authenticate(request,'admin')
+ from .ai_runtime import register_routes as register_ai_runtime
+ register_ai_runtime(app,speech,llm,admin)
  register_life_routes(app,life,admin,viewer,changed)
  register_timer_routes(app,timers,viewer)
  def new_session(role,device_id,days):
@@ -162,6 +165,8 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
  async def client_page():return FileResponse(ROOT/'web/client.html')
  @app.get('/manager')
  async def manager_page():return FileResponse(ROOT/'web/manager.html')
+ @app.get('/manager/runtime')
+ async def runtime_page(_=Depends(admin)):return FileResponse(ROOT/'web/runtime.html')
  @app.post('/api/auth/login')
  async def login(body:Login,request:Request,response:Response):
   ip=request.client.host if request.client else 'unknown';recent=[x for x in attempts.get(ip,[]) if x>time.time()-300];attempts[ip]=recent
@@ -336,7 +341,7 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
  @app.get('/api/admin/backup')
  async def backup(_=Depends(admin)):
   path=data/'room-hub-backup.sqlite3'
-  with store.connect() as src,sqlite3.connect(path) as dest:src.backup(dest)
+  with store.connect() as src,sqlite3.connect(path,factory=ClosingConnection) as dest:src.backup(dest)
   return FileResponse(path,media_type='application/octet-stream',filename=path.name)
  @app.post('/api/widgets/reload')
  async def reload_widgets(_=Depends(admin)):

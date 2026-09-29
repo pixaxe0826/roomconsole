@@ -30,3 +30,6 @@
 
 ## 0.1.7
 [메모·알람](NOTES_ALARMS.md) · [업데이트와 롤백](UPDATE_017.md) · [검증 기록](TEST_REPORT_017.md)
+
+## M3.4-0
+[원격 AI 런타임 · 설정 이관 · 상태 진단 · 롤백](RUNTIME_M340.md) · [검증 기록](TEST_REPORT_M340.md)

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ko">
+<head>
+ <meta charset="utf-8">
+ <meta name="viewport" content="width=device-width,initial-scale=1">
+ <title>AI 노드 연결 진단 · Room Hub</title>
+ <link rel="stylesheet" href="/static/runtime.css">
+ <script defer src="/static/runtime.js"></script>
+</head>
+<body>
+ <main>
+  <header><a href="/manager">← 관리자</a><h1>AI 노드 연결 진단</h1>
+   <p>Odyssey의 기본 서비스와 PC의 AI 연결을 구분합니다. 모델 실행·재시작·다운로드는 하지 않습니다.</p></header>
+  <div class="controls"><button id="probe" type="button">전사·LLM 연결 확인</button><span id="core" role="status">기본 서버 확인 중</span></div>
+  <p id="message" role="status"></p>
+  <section><h2>음성 전사</h2><dl id="speech"></dl></section>
+  <section><h2>LLM</h2><dl id="llm"></dl></section>
+  <aside>연결 확인은 전사 서버의 /health와 LLM 서버의 /v1/models만 조회합니다.
+   성공해도 실제 음성 인식·토큰 생성·CUDA 사용을 증명하지 않습니다.
+   30초가 지난 확인 결과는 미확인으로 표시하며, 자동으로 모델을 호출하지 않습니다.</aside>
+ </main>
+</body>
+</html>
