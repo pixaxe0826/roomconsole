@@ -15,21 +15,9 @@ from .life import note_catalog_snapshot
 from .widget_protocol import WidgetRequest
 from .widget_protocol.core import ProtocolFault
 
-MEMO_GROUNDING_VERSION = '1.0.0'
-NOUN = r'(?:메모(?!리)|노트)'
-PREFIX = r'(?P<title>.+?)\s+' + NOUN
-PLEASE = r'(?:\s*(?:줘|주세요|줘요))?(?:요)?'
-PATTERNS = (
-    ('read', re.compile(PREFIX + r'(?:의)?(?:\s*(?:내용|본문))?(?:을|를)?\s*(?:좀\s*)?'
-                       r'(?P<verb>읽어\s*(?:줘|주세요|줘요)|보여\s*(?:줘|주세요|줘요)|'
-                       r'알려\s*(?:줘|주세요|줘요)|확인해\s*(?:줘|주세요|줘요))' + r'(?:요)?$')),
-    ('clear', re.compile(PREFIX + r'(?:의)?(?:\s*(?:내용|본문))?(?:을|를)?\s*'
-                        r'(?P<verb>비워)' + PLEASE + r'$')),
-    ('append', re.compile(PREFIX + r'(?:의\s*본문)?에\s+(?P<text>.+?)\s*'
-                         r'(?P<verb>덧붙여|추가해)' + PLEASE + r'$')),
-    ('write', re.compile(PREFIX + r'(?:의)?(?:\s*(?:내용|본문))?(?:을|를)\s+'
-                        r'(?P<body>.+?)(?:으로|로)\s*(?P<verb>바꿔|교체해)' + PLEASE + r'$')),
-)
+MEMO_GROUNDING_VERSION = '1.1.0'
+from .memo_language import NOUN, PREFIX, recognize, grammar_hash
+
 # These are selectors/commands/filters, not literal title evidence. Keep the
 # ordinary current/latest and explicit-ID paths delegated to the existing core.
 DELEGATED = re.compile(r'^(?:현재|지금|방금|아까|최근|마지막|새|기본)(?:\s|$)')
@@ -48,6 +36,8 @@ class MemoPlan:
     arguments: tuple[tuple[str, str], ...] = ()
     evidence: tuple[tuple[str, int, int, str], ...] = ()
     issue: str | None = None
+    family: str = 'named.literal'
+    grammar_sha256: str = ''
     version: str = MEMO_GROUNDING_VERSION
 
     def data(self):
@@ -70,24 +60,28 @@ def parse_memo(raw: str) -> MemoPlan | None:
     if (unsafe_source(raw) or re.search(r'[\r\n\x00-\x1f]|["“”‘’\'`]', raw)
             or not re.search(NOUN, source)):
         return None  # Existing global unsafe checks remain authoritative.
-    for action, pattern in PATTERNS:
-        match = pattern.fullmatch(source)
-        if not match:
-            continue
-        title = normalize_title(match['title'])
-        if DELEGATED.search(title) or ID.search(title):
-            return None
-        issue = None
-        if (not title or title in {'그', '이', '저'} or len(title) > 120 or UNSUPPORTED_TITLE.search(title) or MIXED_TITLE.search(title)
-                or re.search(NOUN, title)):
-            issue = 'MEMO_NAMED_CONSTRAINT_UNSUPPORTED'
-        args = tuple((key, match[key]) for key in ('body', 'text') if key in match.groupdict())
-        if any(not value.strip() for _, value in args):
-            issue = 'MEMO_CONTENT_REQUIRED'
-        evidence = tuple((key, match.start(key), match.end(key), match[key])
-                         for key in ('title', 'verb', 'body', 'text') if key in match.groupdict())
-        return MemoPlan(action, title, args, evidence, issue)
-    return None
+    match = recognize(raw)
+    if match is None or match.family.disposition == 'delegate':
+        return None
+    if match.family.disposition == 'block':
+        return MemoPlan(match.family.action, '', evidence=match.captures, issue=match.family.issue,
+                        family=match.family.name, grammar_sha256=grammar_hash())
+    title = normalize_title(match.value('title') or '')
+    if match.family.name.startswith('named.literal.') and (DELEGATED.search(title) or ID.search(title)):
+        return None
+    issue = None
+    if (not title or title in {'그', '이', '저'} or len(title) > 120 or UNSUPPORTED_TITLE.search(title)
+            or MIXED_TITLE.search(title) or re.search(NOUN, title)):
+        issue = 'MEMO_NAMED_CONSTRAINT_UNSUPPORTED'
+    # "X라고 써둔" can describe BODY, not necessarily a note name. Do not
+    # remove arbitrary quoted/reporting material to manufacture a title.
+    if re.search(r'(?:이)?라고|(?:이)?라는', title):
+        issue = 'MEMO_NAMING_AMBIGUOUS'
+    args = tuple((key, match.value(key)) for key in ('body', 'text') if match.value(key) is not None)
+    if any(not value.strip() for _, value in args):
+        issue = 'MEMO_CONTENT_REQUIRED'
+    return MemoPlan(match.family.action, title, args, match.captures, issue,
+                    match.family.name, grammar_hash())
 
 
 def has_unhandled_name(raw: str) -> bool:
@@ -97,6 +91,11 @@ def has_unhandled_name(raw: str) -> bool:
     authorize a named source plan. Existing selectors, new-note syntax and IDs
     remain owned by the old protocol path.
     """
+    match = recognize(raw)
+    if match and match.family.disposition == 'delegate':
+        return False  # Whole selector/content-first family, NOT a keyword anywhere.
+    if match and match.family.disposition in {'named', 'block'} and not match.family.name.startswith('named.literal.'):
+        return True  # Explicit naming cannot be replaced by current/latest.
     prefix = re.match(PREFIX, raw.strip())
     if not prefix:
         return False
@@ -105,11 +104,16 @@ def has_unhandled_name(raw: str) -> bool:
 
 
 def prepare_memo(bridge, record):
+    match = recognize(record['raw'])
+    if match is not None:
+        record['memo_language'] = match.audit() | {'claimed': False, 'scope': 'linguistic_candidate; actual_route_authoritative'}
     if record.get('fast_read'):
         return None  # Never reinterpret current/latest as a named catalog item.
     plan = parse_memo(record['raw'])
     if plan is None:
         return None
+    if match is not None:
+        record['memo_language']['claimed'] = True
     from .assistant import digest
     from .widget_bridge import BRIDGE_VERSION
     adapter = bridge.registry.get('memo')
@@ -121,7 +125,8 @@ def prepare_memo(bridge, record):
                   _widget_domain_request=True, widget_bridge=BRIDGE_VERSION,
                   memo_read=True, protocol_private=not spec.read_only,
                   memo_plan=plan.data(), direct_widget=plan.proposal())
-    record['routing'].update(route='ENTITY_CATALOG', route_reason='named_memo.' + plan.action,
+    record['routing'].update(route='MEMO_GUARD' if plan.issue else 'ENTITY_CATALOG',
+                             route_reason=plan.family + ('.blocked' if plan.issue else ''),
                              resolved_intent='memo.' + plan.action, confidence='UNSUPPORTED' if plan.issue else 'EXACT')
     record['widget_trace'] = {
         'domain': 'memo', 'candidate_domains': ['memo'], 'available_capabilities': ['memo.' + plan.action],
