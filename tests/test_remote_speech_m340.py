@@ -50,7 +50,7 @@ def test_endpoint_accepts_literal_loopback(endpoint):
 
 def test_old_configuration_defaults_and_remote_no_local_model_requirement(config, tmp_path):
     p = tmp_path / 'speech-config.json'
-    p.write_text(json.dumps({'enabled': False}))
+    p.write_text(json.dumps({'enabled': False, 'ffmpeg': sys.executable}))
     assert SpeechConfig.read(p).backend == 'local_cli'
     p.write_text(json.dumps(asdict(config)))
     cfg = SpeechConfig.read(p)

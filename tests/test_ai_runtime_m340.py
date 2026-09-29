@@ -134,7 +134,7 @@ def test_llm_model_mismatch_is_not_connection_success(environment):
 
 
 def test_config_migration_dry_run_backup_preserves_policy(tmp_path):
-    config=SpeechConfig(enabled=True,binary='/opt/synthetic-wrapper',model='/opt/unused-model.bin',ffmpeg=sys.executable,threads=6)
+    config=SpeechConfig(enabled=True,binary=str(tmp_path/'synthetic-wrapper'),model=str(tmp_path/'unused-model.bin'),ffmpeg=sys.executable,threads=6)
     path=tmp_path/'speech-config.json';path.write_text(json.dumps(asdict(config)),encoding='utf-8');before=path.read_bytes()
     policy=tmp_path/'stt-accuracy.json';policy.write_text('{"profile":"careful"}');before_policy=policy.read_bytes()
     kwargs=dict(endpoint='http://127.0.0.1:8178/inference',model='medium',device='cuda')
@@ -151,7 +151,7 @@ def test_config_migration_dry_run_backup_preserves_policy(tmp_path):
 
 
 def test_bad_migration_no_overwrite(tmp_path):
-    path=tmp_path/'speech-config.json';path.write_text(json.dumps(asdict(SpeechConfig())))
+    path=tmp_path/'speech-config.json';path.write_text(json.dumps(asdict(SpeechConfig(ffmpeg=sys.executable))))
     before=path.read_bytes()
     with pytest.raises(ValueError):
         configure(tmp_path,endpoint='http://192.0.2.2:8178/inference',model='medium',device='cuda',apply=True)
