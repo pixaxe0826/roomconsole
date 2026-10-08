@@ -48,7 +48,9 @@ def run():
                                            'threads': None, 'max_seconds': 30}}
         return {'status': 404, 'data': {}}
 
-    summary = '<div class="llm-connection-tools"></div><div class="speech-engine"><strong>base</strong><span>CPU null스레드</span></div>'
+    # The actual manager document declares UTF-8. Mirror that in the reduced
+    # fixture so Korean text from external scripts is decoded correctly.
+    summary = '<meta charset="utf-8"><div class="llm-connection-tools"></div><div class="speech-engine"><strong>base</strong><span>CPU null스레드</span></div>'
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=os.getenv('CHROMIUM_PATH') or shutil.which('chromium') or shutil.which('google-chrome'), args=['--no-sandbox'])
         def open_page(summary_only=False):
@@ -70,11 +72,11 @@ def run():
                     req = route.request; path = urlsplit(req.url).path
                     if path == '/manager/runtime':
                         body = html if not summary_only else summary + '<script defer src="/static/runtime-summary.js"></script>'
-                        route.fulfill(body=body, content_type='text/html', headers={
+                        route.fulfill(body=body, content_type='text/html; charset=utf-8', headers={
                             'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'"})
                     elif path.startswith('/static/'):
                         asset = ROOT/'web'/path.split('/')[-1]
-                        route.fulfill(body=asset.read_text('utf-8'), content_type='text/javascript' if asset.suffix=='.js' else 'text/css')
+                        route.fulfill(body=asset.read_text('utf-8'), content_type='text/javascript; charset=utf-8' if asset.suffix=='.js' else 'text/css; charset=utf-8')
                     else:
                         result = api(path, req.method)
                         route.fulfill(status=result['status'], json=result['data'])
