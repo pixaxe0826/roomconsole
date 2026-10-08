@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlite3
 import subprocess
 import shutil
+import sys
 
 import pytest
 from fastapi import HTTPException
@@ -161,6 +162,10 @@ def test_removed_instance_is_not_reused_or_silently_stopped(service):
     assert start(s,None,90,'new-slot')['widget_id']=='timer-b'
 
 
+# The 260-iteration WAL/receipt retention regression performs hundreds of real
+# commits; Windows hosted runners can exceed the generic 30s per-test deadline
+# under transient filesystem/antivirus load. Keep all iterations and assertions.
+@pytest.mark.timeout(120 if sys.platform == 'win32' else 30)
 def test_latest_duration_retained_for_each_placed_widget(service):
     s,at=service;a=start(s,duration=90);s.stop(a['id'],TimerStop(request_id='stop'),'test')
     for i in range(260):

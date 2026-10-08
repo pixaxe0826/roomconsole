@@ -50,11 +50,32 @@ class SpeechConfig:
     max_pending: int = 4
     max_bytes: int = 8 * 1024 * 1024
     max_stored_bytes: int = 128 * 1024 * 1024
+    backend: str = 'local_cli'
+    remote_url: str = ''
+    remote_model: str = ''
+    remote_device: str = 'unknown'
+
+    def validate_backend(self) -> None:
+        if self.backend not in {'local_cli', 'remote_http'}:
+            raise ValueError('Unknown speech backend')
+        if not isinstance(self.remote_model, str) or len(self.remote_model) > 160 or any(ord(c) < 32 for c in self.remote_model):
+            raise ValueError('Invalid configured remote model')
+        if self.backend == 'remote_http' and (not self.remote_model.strip() or self.remote_model != self.remote_model.strip() or any(c in self.remote_model for c in '/\\')):
+            raise ValueError('Supply a remote model label, not a file path')
+        if self.remote_device not in {'unknown', 'cpu', 'cuda', 'vulkan', 'metal', 'openvino'}:
+            raise ValueError('Invalid configured remote device')
+        if not isinstance(self.remote_url, str):
+            raise ValueError('Invalid remote URL')
+        if self.backend == 'remote_http' or self.remote_url:
+            from .remote_speech import validate_endpoint
+            validate_endpoint(self.remote_url)
 
     @classmethod
     def read(cls, path: Path) -> 'SpeechConfig':
         if not path.exists():
             return cls()
+        if path.is_symlink() or path.stat().st_size > 16384:
+            raise ValueError('Invalid speech configuration file')
         raw = json.loads(path.read_text('utf-8'))
         if not isinstance(raw, dict) or set(raw) - {f.name for f in fields(cls)}:
             raise ValueError('Invalid speech configuration fields')
@@ -75,14 +96,21 @@ class SpeechConfig:
         for value in (cfg.binary, cfg.model, cfg.ffmpeg):
             if not isinstance(value, str) or ('\x00' in value) or (value and not Path(value).is_absolute()):
                 raise ValueError('Runtime paths must be absolute')
+        cfg.validate_backend()
         return cfg
 
     def readiness(self) -> tuple[bool, str]:
+        try:
+            self.validate_backend()
+        except (ValueError, TypeError):
+            return False, '전사 backend 또는 원격 연결 설정을 확인하세요.'
         if not self.enabled:
+            if self.backend == 'remote_http':
+                return False, '원격 전사 기능이 꺼져 있습니다. 서버 설정을 확인하세요.'
             return False, '로컬 전사 엔진을 먼저 설치하세요. 서버의 install-speech.sh를 실행합니다.'
-        if not self.binary or not Path(self.binary).is_file() or not os.access(self.binary, os.X_OK):
+        if self.backend == 'local_cli' and (not self.binary or not Path(self.binary).is_file() or not os.access(self.binary, os.X_OK)):
             return False, 'whisper-cli 실행 파일이 준비되지 않았습니다.'
-        if not self.model or not Path(self.model).is_file() or Path(self.model).stat().st_size < 1024:
+        if self.backend == 'local_cli' and (not self.model or not Path(self.model).is_file() or Path(self.model).stat().st_size < 1024):
             return False, '다국어 Whisper 모델 파일을 확인하세요.'
         if not Path(self.ffmpeg).is_file() or not os.access(self.ffmpeg, os.X_OK):
             return False, 'FFmpeg를 먼저 설치하세요.'
@@ -155,6 +183,17 @@ def inspect_wav(path: Path, max_seconds: int) -> float:
         raise TranscriptionError('유효한 음성 파일로 변환할 수 없습니다.') from exc
 
 
+async def prepare_wav(source: Path, cfg: SpeechConfig, cancel: asyncio.Event, wav: Path) -> float:
+    """Unchanged local codec/rate/duration/silence checks, shared by both backends."""
+    await _run_process([cfg.ffmpeg, '-nostdin', '-hide_banner', '-loglevel', 'error',
+        '-protocol_whitelist', 'file,pipe', '-format_whitelist',
+        'mov,matroska,webm,wav,mp3,ogg,flac,aac', '-threads', '1', '-i', str(source),
+        '-map', '0:a:0', '-vn', '-sn', '-dn', '-t', str(cfg.max_seconds + 1),
+        '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-threads', '1',
+        '-y', str(wav)], cancel, 20)
+    return await asyncio.to_thread(inspect_wav, wav, cfg.max_seconds)
+
+
 class WhisperRunner:
     async def transcribe(self, source: Path, cfg: SpeechConfig, cancel: asyncio.Event,
                          temp_root: Path) -> tuple[str, float]:
@@ -173,13 +212,7 @@ class WhisperRunner:
             # Capture, codec handling, rate, gain, max duration and silence check
             # are identical to 0.1.5. No VAD/filter/AGC/microphone changes.
             conversion_start = time.monotonic()
-            await _run_process([cfg.ffmpeg, '-nostdin', '-hide_banner', '-loglevel', 'error',
-                '-protocol_whitelist', 'file,pipe', '-format_whitelist',
-                'mov,matroska,webm,wav,mp3,ogg,flac,aac', '-threads', '1', '-i', str(source),
-                '-map', '0:a:0', '-vn', '-sn', '-dn', '-t', str(cfg.max_seconds + 1),
-                '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-threads', '1',
-                '-y', str(wav)], cancel, 20)
-            duration = await asyncio.to_thread(inspect_wav, wav, cfg.max_seconds)
+            duration = await prepare_wav(source, cfg, cancel, wav)
             conversion_seconds = time.monotonic() - conversion_start
             out = Path(folder) / 'transcript'
             args = [cfg.binary, '-m', cfg.model, '-f', str(wav), '-l', cfg.language,
@@ -202,6 +235,8 @@ class WhisperRunner:
             text = text[:16000]
             report = {
                 'schema': 1, 'patch_id': PATCH_ID, 'profile': policy.profile,
+                'runtime_patch_id': 'room-hub-m3.4-0', 'backend': 'local_cli',
+                'model_identity_source': 'local_cli_argument', 'device': 'cpu',
                 'beam_size': policy.beam, 'best_of': 1, 'temperature_fallback': 'engine default (unchanged)',
                 'model_file': Path(cfg.model).name, 'model_name': cfg.model_name,
                 'threads': cfg.threads, 'language': cfg.language, 'cpu_only': True,
@@ -236,6 +271,13 @@ class SpeechHub:
         self.store, self.data, self.changed = store, data, changed
         self.override = config
         self.runner = runner or WhisperRunner()
+        self.runner_override = runner is not None
+        from .remote_speech import RemoteWhisperRunner
+        self.remote_runner = RemoteWhisperRunner()
+        self.probe_lock = asyncio.Lock()
+        self.last_probe = None
+        self._probe_config = None
+        self._probe_time = None
         self.wake = asyncio.Event()
         self.task = None
         self.active_id = None
@@ -276,12 +318,50 @@ class SpeechHub:
         with self.store.connect() as db:
             counts = dict(db.execute('SELECT status,COUNT(*) FROM speech_jobs GROUP BY status').fetchall())
         return {'ready': ready, 'enabled': cfg.enabled, 'engine': 'whisper.cpp',
-                'model': cfg.model_name, 'language': cfg.language, 'threads': cfg.threads,
+                'model': (cfg.remote_model or cfg.model_name) if cfg.backend == 'remote_http' else cfg.model_name,
+                'backend': cfg.backend, 'model_identity_source': 'operator_config_not_verified' if cfg.backend == 'remote_http' else 'local_cli_argument',
+                'language': cfg.language, 'threads': None if cfg.backend == 'remote_http' else cfg.threads,
                 'max_seconds': cfg.max_seconds, 'max_bytes': cfg.max_bytes,
                 'max_pending': cfg.max_pending, 'queued': counts.get('queued', 0),
                 'running': counts.get('running', 0), 'reason': reason,
                 'auto_execute': False, 'auto_submit_llm': self.on_transcribed is not None,
-                'local_only': True, 'accuracy': accuracy.public()}
+                'local_only': cfg.backend == 'local_cli', 'loopback_transport_only': True,
+                'readiness_scope': 'local_prerequisites_and_worker; not remote availability',
+                'accuracy': accuracy.public()}
+
+    async def probe(self):
+        """Manager-only caller. No audio sent, no model load/restart or retry."""
+        if self.probe_lock.locked():
+            raise HTTPException(409, '전사 연결 확인이 진행 중입니다.')
+        async with self.probe_lock:
+            cfg = self.config()
+            ready, reason = cfg.readiness()
+            if not ready or cfg.backend == 'local_cli':
+                result = {'ok': ready, 'reachable': None, 'checked_at': utcnow(),
+                          'state': 'configured' if ready else 'unavailable',
+                          'message': reason or '로컬 실행 파일/모델 경로 확인. 실제 전사는 별도 검사입니다.'}
+            else:
+                result = await self.remote_runner.probe(cfg)
+            # A settings-file edit during the request must not verify a new endpoint.
+            if cfg != self.config():
+                raise HTTPException(409, '확인 중 전사 설정이 바뀌었습니다. 다시 확인하세요.')
+            self.last_probe, self._probe_config = result, cfg
+            self._probe_time = time.monotonic()
+            return result
+
+    def connection_status(self):
+        cfg = self.config()
+        fresh = (cfg == self._probe_config and self._probe_time is not None
+                 and time.monotonic() - self._probe_time <= 30)
+        return {'backend': cfg.backend,
+                'configured_model': (cfg.remote_model or cfg.model_name) if cfg.backend == 'remote_http' else cfg.model_name,
+                'reported_model': None, 'model_verified': False,
+                'configured_device': cfg.remote_device if cfg.backend == 'remote_http' else 'cpu',
+                'reported_device': None,
+                'identity_note': '원격 API는 모델/장치 ID를 제공하지 않습니다.' if cfg.backend == 'remote_http' else '설치 경로 확인은 실제 전사 검사가 아닙니다.',
+                'state': self.last_probe['state'] if fresh else 'unknown',
+                'last_probe': self.last_probe if cfg == self._probe_config else None,
+                'stale': not fresh, 'stale_after_seconds': 30}
 
     @staticmethod
     def owner(session: dict) -> str:
@@ -482,13 +562,15 @@ class SpeechHub:
             await self.changed('speech.running', jid)
             source = self.data / 'audio' / Path(row['filename']).name
             report = None
-            if isinstance(self.runner, WhisperRunner):
+            cfg = self.config()
+            runner = self.remote_runner if cfg.backend == 'remote_http' and not self.runner_override else self.runner
+            if isinstance(runner, WhisperRunner):
                 policy = AccuracyConfig.read(self.data / 'stt-accuracy.json')
                 hint = task_hint(self.store, policy)
-                text, duration, report = await self.runner.transcribe_detailed(
-                    source, self.config(), self.active_cancel, self.data/'speech-tmp', policy, hint)
+                text, duration, report = await runner.transcribe_detailed(
+                    source, cfg, self.active_cancel, self.data/'speech-tmp', policy, hint)
             else:
-                text, duration = await self.runner.transcribe(source, self.config(), self.active_cancel, self.data/'speech-tmp')
+                text, duration = await runner.transcribe(source, cfg, self.active_cancel, self.data/'speech-tmp')
             if self.active_cancel.is_set():
                 raise asyncio.CancelledError
             succeeded = False

@@ -1,6 +1,7 @@
 import sqlite3,json,uuid
 from datetime import datetime,timezone
 from pathlib import Path
+from .sqlite_connection import ClosingConnection
 
 def uid():return uuid.uuid4().hex
 def utcnow():return datetime.now(timezone.utc).isoformat()
@@ -28,7 +29,14 @@ class Store:
      ''')
      for k,v in [('layout',DEFAULT_LAYOUT),('settings',DEFAULT_SETTINGS),('weather',None),('revision',0)]:db.execute('INSERT OR IGNORE INTO kv VALUES(?,?)',(k,json.dumps(v,ensure_ascii=False)))
  def connect(self):
-    db=sqlite3.connect(self.path,timeout=15);db.row_factory=sqlite3.Row;db.execute('PRAGMA foreign_keys=ON');return db
+    db=sqlite3.connect(self.path,timeout=15,factory=ClosingConnection)
+    try:
+     db.row_factory=sqlite3.Row
+     db.execute('PRAGMA foreign_keys=ON')
+     return db
+    except BaseException:
+     db.close()
+     raise
  def get(self,k):
     with self.connect() as db:r=db.execute('SELECT value FROM kv WHERE key=?',(k,)).fetchone()
     return json.loads(r['value']) if r else None

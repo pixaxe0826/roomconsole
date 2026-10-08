@@ -13,7 +13,7 @@ from pathlib import Path
 
 import httpx
 import uvicorn
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 from assistant_browser import ROOT, load_bridged
 from app.main import create_app
@@ -105,12 +105,20 @@ def main():
                         page.locator('[data-dialog-input]').fill('3시')
                         page.locator('[data-dialog-send]').click()
                         page.wait_for_function("() => document.querySelector('[data-dialog-input]') && !document.querySelector('[data-dialog-input]').value")
-                        selected = api.get('/api/llm/requests/' + page.evaluate('RoomLLM.getSelection()')).json()
+                        selected_id = page.evaluate('RoomLLM.getSelection()')
+                        selected = api.get('/api/llm/requests/' + selected_id).json()
                         check('ambiguous clock asks again and keeps the date',
                               selected['dialog']['awaiting_slot'] == 'time' and
                               selected['dialog']['known_slots']['date'] is not None and
                               selected['dialog']['known_slots']['time'] is None)
-                        page.locator('[data-dialog-cancel]').click()
+                        # Navigation must not leave an earlier request's actionable
+                        # cancel button in the DOM. Do not just click .first().
+                        selected_panel = page.locator(
+                            f'[data-dialog-panel][data-dialog-observed="{selected_id}"]')
+                        expect(page.locator('[data-dialog-cancel]')).to_have_count(1)
+                        check('only the selected pending dialog has cancel controls',
+                              selected_panel.locator('[data-dialog-cancel]').count() == 1)
+                        selected_panel.locator('[data-dialog-cancel]').click()
                         page.wait_for_function("() => !document.querySelector('[data-dialog-input]')")
                         selected = api.get('/api/llm/requests/' + page.evaluate('RoomLLM.getSelection()')).json()
                         check('dialog cancel terminates only this pending input',
