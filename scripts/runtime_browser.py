@@ -12,7 +12,7 @@ import re
 import shutil
 from urllib.parse import urlsplit
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -82,17 +82,20 @@ def run():
                 page.goto('https://roomhub.test/manager/runtime')
             return page
         try:
+            # Playwright wait_for_function() uses page eval while polling; the real
+            # strict CSP intentionally forbids unsafe-eval. Locator assertions
+            # poll DOM text without weakening the application's CSP.
             page = open_page()
-            page.wait_for_function("document.querySelector('#core').textContent.includes('정상')")
+            expect(page.locator('#core')).to_contain_text('정상')
             check('initial GET has no outbound probe trigger', not any(m=='POST' for m,_ in calls))
             check('unknown device clearly labelled', '미확인' in page.locator('#speech').inner_text())
             page.locator('#probe').click()
-            page.wait_for_function("document.querySelector('#llm').textContent.includes('최근 연결 확인 성공')")
+            expect(page.locator('#llm')).to_contain_text('최근 연결 확인 성공')
             check('probe is one explicit POST', sum((m,path)==('POST','/api/ai/probe') for m,path in calls)==1)
             check('untrusted model names rendered only as text', page.locator('#llm img').count()==0 and not page.evaluate('!!window.BAD'))
             check('configured CUDA is not reported CUDA', page.locator('#speech dd').nth(5).inner_text()=='미확인')
             state['speech']['state']='unknown'; state['llm']['state']='unknown'
-            page.wait_for_function("document.querySelector('#speech').textContent.includes('확인 만료')", timeout=8000)
+            expect(page.locator('#speech')).to_contain_text('확인 만료', timeout=8000)
             check('polling expires status without re-probing', sum(m=='POST' for m,_ in calls)==1)
             for width,height in [(1024,900), (390,844)]:
                 page.set_viewport_size({'width':width,'height':height})
@@ -102,7 +105,7 @@ def run():
             page.close()
             # Separate document: no interval/CSP left over from the diagnostics page.
             page = open_page(summary_only=True)
-            page.wait_for_function("document.querySelector('.speech-engine span').textContent.includes('원격')")
+            expect(page.locator('.speech-engine span')).to_contain_text('원격')
             check('legacy CPU label replaced for remote only', 'CPU' not in page.locator('.speech-engine').inner_text())
             check('manager has one diagnostics link', page.locator('[data-runtime-link]').count()==1)
             before=sum(path=='/api/speech/status' for _,path in calls)
