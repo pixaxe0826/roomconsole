@@ -23,7 +23,7 @@ jobs:
           git archive --format=zip --output=artifacts/source-review/source.zip HEAD
           git rev-parse HEAD HEAD^{tree} > artifacts/source-review/identity.txt
           sha256sum artifacts/source-review/source.zip > artifacts/source-review/source.zip.sha256
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: source-review
           path: artifacts/source-review/
