@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse,JSONResponse,RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from .models import *
 from . import llm_display
+from .indoor_temperature import register_routes as register_temperature_routes
 from .life import LifeService, register_routes as register_life_routes
 from .timers import TimerService, register_routes as register_timer_routes
 from . import widget_protocol
@@ -149,6 +150,7 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
   return authenticate(request,'admin')
  register_life_routes(app,life,admin,viewer,changed)
  register_timer_routes(app,timers,viewer)
+ register_temperature_routes(app,data,store,admin,viewer)
  def new_session(role,device_id,days):
   token=secrets.token_urlsafe(32)
   with store.connect() as db:

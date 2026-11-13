@@ -1,0 +1,18 @@
+{
+  "id": "indoor-temperature",
+  "name": "실내 온도",
+  "description": "하나의 센서 API에서 조회한 실내 온도·상대 습도·기압을 표시합니다. 확대하면 최근 1시간 온도 기록과 조회 상태를 확인할 수 있습니다.",
+  "icon": "home",
+  "apiVersion": 1,
+  "version": "3.0.0",
+  "entry": "widget.js",
+  "style": "style.css",
+  "defaultSize": {
+    "w": 2,
+    "h": 2
+  },
+  "configDefaults": {
+    "device_id": "room-temp-01",
+    "location": "내 방"
+  }
+}

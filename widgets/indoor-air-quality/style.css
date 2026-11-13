@@ -1,0 +1,106 @@
+/* Every rule is scoped to the indoor-air-quality widget. */
+.indoor-air-quality-content{padding:16px 18px 13px;gap:6px;min-width:0;justify-content:space-between;background:linear-gradient(145deg,var(--surface),var(--surface2));--iq-color:var(--accent)}
+.indoor-air-quality-content .iq-head{display:flex;align-items:center;justify-content:space-between;gap:7px;flex-shrink:0;min-width:0}
+.indoor-air-quality-content .iq-head h2{display:flex;align-items:center;gap:5px;font-size:13px;font-weight:650;min-width:0}
+.indoor-air-quality-content .iq-head h2>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.indoor-air-quality-content .iq-head h2 svg{color:var(--accent);flex-shrink:0}
+.indoor-air-quality-content .iq-status{display:inline-flex;align-items:center;gap:5px;font-size:9px;font-weight:600;white-space:nowrap;flex-shrink:0;background:var(--accent-soft);color:var(--iq-color);padding:4px 7px;border-radius:20px}
+.indoor-air-quality-content .iq-status i{width:5px;height:5px;display:block;border-radius:50%;background:currentColor}
+.indoor-air-quality-content .iq-location{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted);min-width:0;flex-shrink:0}
+.indoor-air-quality-content .iq-location>span:first-of-type{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.indoor-air-quality-content .iq-demo{font-size:8px;letter-spacing:.03em;margin-left:auto;border:1px solid var(--line);border-radius:5px;padding:1px 4px}
+.indoor-air-quality-content .iq-body{min-height:0;flex:1;display:flex;align-items:center;gap:24px}
+.indoor-air-quality-content .iq-reading{min-width:0;padding:2px 0;position:relative}
+.indoor-air-quality-content .iq-reading-label{font-size:9px;color:var(--muted);display:block;margin-bottom:1px}
+.indoor-air-quality-content .iq-number{display:flex;align-items:baseline;gap:6px;line-height:1.02;white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--ink)}
+.indoor-air-quality-content .iq-number strong{font-size:clamp(36px,4.9vw,63px);font-weight:350;letter-spacing:-.065em}
+.indoor-air-quality-content .iq-unit{font-size:20px;font-weight:400;color:var(--muted);letter-spacing:-.02em}
+.indoor-air-quality-content .iq-calibration{display:inline-block;font-size:8px;color:#8b6b38;margin-top:4px;line-height:1.3}
+.indoor-air-quality-content .iq-raw{display:flex;gap:13px;font-size:9px;line-height:1.4;color:var(--muted);margin-top:6px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.indoor-air-quality-content .iq-raw>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.indoor-air-quality-content .iq-raw b{font-weight:500}
+.indoor-air-quality-content .iq-diagnostics{width:100%;border-collapse:collapse;margin-top:23px;font-variant-numeric:tabular-nums}
+.indoor-air-quality-content .iq-diagnostics th,.indoor-air-quality-content .iq-diagnostics td{border-top:1px solid var(--line);padding:8px 0;line-height:1.4}
+.indoor-air-quality-content .iq-diagnostics th{font-size:11px;color:var(--muted);font-weight:400;text-align:left;white-space:nowrap}
+.indoor-air-quality-content .iq-diagnostics td{font-size:13px;color:var(--ink);text-align:right;padding-left:12px;overflow-wrap:anywhere}
+.indoor-air-quality-content .iq-footer{flex-shrink:0;min-width:0;border-top:1px solid var(--line);padding-top:7px}
+.indoor-air-quality-content .iq-received{display:flex;align-items:center;justify-content:space-between;gap:5px;color:var(--muted);font-size:9px;font-variant-numeric:tabular-nums}
+.indoor-air-quality-content .iq-received>span,.indoor-air-quality-content .iq-received time{white-space:nowrap}
+.indoor-air-quality-content .iq-note{font-size:8px;color:var(--muted);line-height:1.45;margin-top:3px;overflow-wrap:anywhere}
+.indoor-air-quality-content .iq-calibration-note{color:#8b6b38;font-size:12px;line-height:1.5;margin-top:8px}
+.indoor-air-quality-content .iq-origin-note{color:var(--muted);font-size:11px;line-height:1.5;margin-top:8px}
+.indoor-air-quality-content[data-air-status=source_error]{--iq-color:#9b7641}
+.indoor-air-quality-content[data-air-status=source_error] .iq-status{background:#f8f0df}
+.indoor-air-quality-content[data-air-status=source_error] .iq-number{color:var(--muted)}
+.indoor-air-quality-content[data-air-status=stale]{--iq-color:#9b7641}
+.indoor-air-quality-content[data-air-status=stale] .iq-status{background:#f8f0df}
+.indoor-air-quality-content[data-air-status=offline],.indoor-air-quality-content[data-air-status=connection],.indoor-air-quality-content[data-air-status=waiting],.indoor-air-quality-content[data-air-status=unregistered]{--iq-color:var(--muted)}
+.indoor-air-quality-content[data-air-status=offline] .iq-status,.indoor-air-quality-content[data-air-status=connection] .iq-status,.indoor-air-quality-content[data-air-status=waiting] .iq-status,.indoor-air-quality-content[data-air-status=unregistered] .iq-status{background:var(--bg)}
+.indoor-air-quality-content[data-air-status=offline] .iq-number,.indoor-air-quality-content[data-air-status=connection] .iq-number,.indoor-air-quality-content[data-air-status=stale] .iq-number{color:var(--muted)}
+.indoor-air-quality-content[data-air-status=sensor_error],.indoor-air-quality-content[data-air-status=invalid],.indoor-air-quality-content[data-air-status=permission],.indoor-air-quality-content[data-air-status=unavailable],.indoor-air-quality-content[data-air-status=configuration]{--iq-color:var(--red)}
+.indoor-air-quality-content[data-air-status=sensor_error] .iq-status,.indoor-air-quality-content[data-air-status=invalid] .iq-status,.indoor-air-quality-content[data-air-status=permission] .iq-status,.indoor-air-quality-content[data-air-status=unavailable] .iq-status,.indoor-air-quality-content[data-air-status=configuration] .iq-status{background:var(--surface2)}
+.indoor-air-quality-content.iq-compact{padding:12px 13px 10px;gap:4px}
+.indoor-air-quality-content.iq-compact .iq-head h2{font-size:11px;gap:3px}
+.indoor-air-quality-content.iq-compact .iq-head h2 svg{width:15px;height:15px}
+.indoor-air-quality-content.iq-compact .iq-status{font-size:8px;padding:3px 5px;gap:4px}
+.indoor-air-quality-content.iq-compact .iq-number strong{font-size:42px}
+.indoor-air-quality-content.iq-compact .iq-unit{font-size:17px}
+.indoor-air-quality-content.iq-compact .iq-raw{font-size:8px;gap:10px;margin-top:5px}
+.indoor-air-quality-content.iq-compact .iq-normal-note{display:none}
+.indoor-air-quality-content.expanded{padding:30px 36px!important;gap:14px;overflow:auto}
+.indoor-air-quality-content.expanded .iq-head h2{font-size:23px;gap:9px}
+.indoor-air-quality-content.expanded .iq-head h2 svg{width:27px;height:27px}
+.indoor-air-quality-content.expanded .iq-status{font-size:12px;padding:7px 12px;gap:7px}
+.indoor-air-quality-content.expanded .iq-location{font-size:13px;gap:7px}
+.indoor-air-quality-content.expanded .iq-demo{font-size:10px;padding:3px 6px}
+.indoor-air-quality-content.expanded .iq-body{display:grid;grid-template-columns:minmax(180px,.75fr) minmax(240px,1.25fr);gap:44px;min-height:250px;flex:1 0 auto;padding:15px 0;align-items:center}
+.indoor-air-quality-content.expanded .iq-number strong{font-size:clamp(80px,12vw,150px)}
+.indoor-air-quality-content.expanded .iq-unit{font-size:35px}
+.indoor-air-quality-content.expanded .iq-reading-label{font-size:14px;margin-bottom:10px}
+.indoor-air-quality-content.expanded .iq-calibration{font-size:12px;margin-top:13px}
+.indoor-air-quality-content.expanded .iq-footer{padding-top:16px}
+.indoor-air-quality-content.expanded .iq-received{font-size:13px;justify-content:flex-start;gap:18px}
+.indoor-air-quality-content.expanded .iq-note{font-size:12px;margin-top:8px}
+.indoor-air-quality-content .iq-history{min-width:0;border:1px solid var(--line);background:var(--surface);padding:20px;border-radius:19px}
+.indoor-air-quality-content .iq-history-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:20px}
+.indoor-air-quality-content .iq-history-head h3{font-size:14px;font-weight:600;white-space:nowrap}
+.indoor-air-quality-content .iq-history-head>span{font-size:10px;color:var(--muted);text-align:right}
+.indoor-air-quality-content .iq-chart{display:block;width:100%;height:auto;overflow:visible}
+.indoor-air-quality-content .iq-chart-grid line{stroke:var(--line);stroke-width:1;stroke-dasharray:3 4}
+.indoor-air-quality-content .iq-chart-grid text{fill:var(--muted);font-size:10px;font-family:inherit}
+.indoor-air-quality-content .iq-chart-data{stroke:var(--accent);stroke-width:2.3;stroke-linecap:round;stroke-linejoin:round;fill:var(--accent)}
+.indoor-air-quality-content .iq-chart-axis{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);padding:0 4% 0 8%;margin-top:-8px}
+.indoor-air-quality-content .iq-stats{display:flex;align-items:center;gap:24px;margin-top:22px;padding-top:17px;border-top:1px solid var(--line)}
+.indoor-air-quality-content .iq-stats>div>span{display:block;font-size:10px;color:var(--muted);margin-bottom:5px}
+.indoor-air-quality-content .iq-stats strong{font-size:23px;font-weight:500;font-variant-numeric:tabular-nums;white-space:nowrap}
+.indoor-air-quality-content .iq-stats small{font-size:12px;font-weight:400;color:var(--muted)}
+.indoor-air-quality-content .iq-stats p{font-size:9px;line-height:1.5;color:var(--muted);margin-left:auto}
+.indoor-air-quality-content .iq-history-empty{display:flex;align-items:center;justify-content:center;min-height:180px;color:var(--muted);font-size:13px;line-height:1.8;text-align:center;padding:16px}
+.widget.micro .indoor-air-quality-content .iq-location,.widget.micro .indoor-air-quality-content .iq-reading-label,.widget.micro .indoor-air-quality-content .iq-footer,.widget.micro .indoor-air-quality-content .iq-calibration,.widget.micro .indoor-air-quality-content .iq-raw{display:none}
+.widget.micro .indoor-air-quality-content .iq-head h2{font-size:8px}
+.widget.micro .indoor-air-quality-content .iq-head h2 svg{display:none}
+.widget.micro .indoor-air-quality-content .iq-status{font-size:7px;padding:2px 3px}
+.widget.micro .indoor-air-quality-content .iq-number strong{font-size:23px}
+.widget.micro .indoor-air-quality-content .iq-unit{font-size:10px}
+.widget.nano .indoor-air-quality-content .iq-head{display:none}
+.dark .indoor-air-quality-content[data-air-status=stale] .iq-status{background:#493d28;color:#d1b47c}
+.dark .indoor-air-quality-content[data-air-status=source_error] .iq-status{background:#493d28;color:#d1b47c}
+.dark .indoor-air-quality-content .iq-calibration,.dark .indoor-air-quality-content .iq-calibration-note{color:#c5ab7c}
+@media(max-width:750px){.indoor-air-quality-content.expanded{padding:22px!important}.indoor-air-quality-content.expanded .iq-body{grid-template-columns:1fr;gap:22px}.indoor-air-quality-content.expanded .iq-number strong{font-size:88px}.indoor-air-quality-content.expanded .iq-head h2{font-size:19px}.indoor-air-quality-content.expanded .iq-status{font-size:10px}.indoor-air-quality-content .iq-history{padding:16px}.indoor-air-quality-content .iq-stats{gap:20px}}
+
+.indoor-air-quality-content .iq-environment{display:flex;flex-wrap:wrap;gap:3px 12px;font-size:9px;line-height:1.5;color:var(--muted);margin-top:7px;font-variant-numeric:tabular-nums}
+.indoor-air-quality-content .iq-environment>span{white-space:nowrap}.indoor-air-quality-content .iq-environment b{font-weight:550;color:var(--ink)}.indoor-air-quality-content .iq-environment small{font-size:inherit}
+.indoor-air-quality-content.iq-compact .iq-environment{font-size:8px;gap:2px 9px;margin-top:5px}
+.widget.micro .indoor-air-quality-content .iq-environment{display:none}
+
+.indoor-air-quality-content .iq-calibration{color:var(--muted);font-size:8px;border:1px solid var(--line);padding:1px 5px;border-radius:4px;line-height:1.4;margin-top:5px}
+.indoor-air-quality-content .iq-raw{display:flex;flex-wrap:wrap;gap:2px 10px;margin-top:4px;font-size:8px}
+.indoor-air-quality-content .iq-unit{font-size:14px;letter-spacing:.01em}
+.indoor-air-quality-content .iq-number.iq-long strong{font-size:27px;letter-spacing:-.04em}
+.indoor-air-quality-content.iq-compact .iq-number strong{font-size:40px}
+.indoor-air-quality-content.expanded .iq-calibration{font-size:11px;margin-top:12px;padding:3px 8px}
+.indoor-air-quality-content.expanded .iq-unit{font-size:23px}
+.indoor-air-quality-content.expanded .iq-number.iq-long strong{font-size:55px}
+.indoor-air-quality-content[data-air-status=unsupported]{--iq-color:var(--muted)}
+.indoor-air-quality-content[data-air-status=unsupported] .iq-status{background:var(--bg)}
+.dark .indoor-air-quality-content .iq-calibration{color:var(--muted)}
