@@ -94,3 +94,11 @@ replay checks immutable per-turn text/hash/timestamps/parent links before final
 grounding and confirmation. No global pending request or concatenated synthetic
 utterance is used. Existing reservation/uncertain receipt and target version guards
 remain in force. See [dialogue contract](docs/CLASSIC_NLU_M33.md).
+
+## M3.4-0 원격 전사 경계
+
+원격 전사는 명시적으로 선택한 숫자 loopback HTTP `/inference`에만 WAV를 보냅니다.
+LAN/DNS/redirect/ambient proxy/자동 fallback/모델 load는 허용하지 않습니다. 기존 SSH 터널의
+끝점 PC도 음원과 기존 어휘 힌트(작업 제목 포함 가능)를 받는 신뢰 경계입니다. 선택적 speech 키는
+admin/ingest/LLM 키와 별개입니다. 관리자 전용 AI probe는 health/models만 조회하며 모델·GPU 인증이 아닙니다.
+자세한 제한과 취소/시간초과 계약은 [M3.4-0](docs/RUNTIME_M340.md)을 참고하세요.

@@ -42,7 +42,10 @@ function render(box,d){
   box.querySelectorAll('[data-llm=retry]').forEach(b=>{b.hidden=true;b.disabled=true;b.style.display='none'});
  panel.addEventListener('input',e=>{if(e.target.matches('[data-dialog-input]'))putDraft(d.id,e.target.value)});
  panel.addEventListener('click',async e=>{
-  const b=e.target.closest('[data-dialog-send],[data-dialog-cancel]');if(!b||busy.has(d.id))return;
+  // A stale panel must not submit a reply or cancellation for a request
+  // that is no longer selected, even before the observer removes it.
+  const b=e.target.closest('[data-dialog-send],[data-dialog-cancel]');
+  if(!b||busy.has(d.id)||current()!==d.id)return;
   const text=b.hasAttribute('data-dialog-cancel')?'취소':(drafts.get(d.id)||'');
   const message=panel.querySelector('[data-dialog-message]');
   if(!text.trim()){message.textContent='요청한 값을 입력하세요.';return}
@@ -62,9 +65,17 @@ function render(box,d){
   finally{busy.delete(d.id);if(panel.isConnected)panel.querySelectorAll('[data-dialog-send],[data-dialog-cancel]').forEach(n=>n.disabled=false)}
  });
 }
+function discardOtherPanels(box,id){
+ // Mutations from older selections otherwise leave working cancel buttons
+ // alongside the current request. Only one request may be actionable.
+ box.querySelectorAll('[data-dialog-observed]').forEach(node=>{
+  if(!id||node.dataset.dialogObserved!==id)node.remove();
+ });
+}
 async function update(){
  const box=root(),id=current();
- if(!box||!id){clear();return}
+ if(!box||!id){if(box)discardOtherPanels(box,null);clear();return}
+ discardOtherPanels(box,id);
  if(box.querySelector(`[data-dialog-observed="${CSS.escape(id)}"]`))return;
  // Install a marker synchronously to coalesce repeated renders and our own DOM mutation.
  const marker=document.createElement('span');marker.hidden=true;marker.dataset.dialogObserved=id;box.append(marker);
