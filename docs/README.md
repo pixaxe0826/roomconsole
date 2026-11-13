@@ -29,4 +29,7 @@
 [비서 기능](ASSISTANT.md) · [업데이트](ASSISTANT_UPDATE.md) · [검증](ASSISTANT_TEST_REPORT.md)
 
 ## 0.1.7
-[메모·알람](NOTES_ALARMS.md) · [업데이트와 롤백](UPDATE_017.md) · [검증 기록](TEST_REPORT_017.md) · [OpenAI 개인 에이전트 ($100/월 하이브리드)](OPENAI_PERSONAL_AGENT.md)
+[메모·알람](NOTES_ALARMS.md) · [업데이트와 롤백](UPDATE_017.md) · [검증 기록](TEST_REPORT_017.md)
+
+## M3.4-0
+[원격 AI 런타임 · 설정 이관 · 상태 진단 · 롤백](RUNTIME_M340.md) · [검증 기록](TEST_REPORT_M340.md) · [실내 온도·공기질 센서](INDOOR_TEMPERATURE.md) · [OpenAI 개인 에이전트](OPENAI_PERSONAL_AGENT.md)

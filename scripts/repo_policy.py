@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 from typing import Iterator
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_DIRS = {'.github', 'app', 'web', 'widgets', 'docs', 'deploy', 'examples', 'scripts', 'tests', 'previews', 'benchmarks'}
+SOURCE_DIRS = {'.github', 'app', 'web', 'widgets', 'docs', 'deploy', 'examples', 'scripts', 'tests', 'previews', 'benchmarks', 'firmware'}
 ROOT_FILES = {
     '.gitignore', '.gitattributes', '.editorconfig', '.dockerignore', '.env.example',
     'README.md', 'README_KO.md', 'CHANGELOG.md', 'CONTRIBUTING.md', 'SECURITY.md',
@@ -48,6 +48,13 @@ def source_path_allowed(path: str | PurePosixPath) -> bool:
         return False
     if any(part.lower() in EXCLUDED_DIRS for part in p.parts):
         return False
+    # Only the public example is publishable; config.h contains device secrets.
+    if p.parts[0] == 'firmware':
+        return p.as_posix() in {
+            'firmware/room_temperature_esp8266/room_temperature_esp8266.ino',
+            'firmware/room_temperature_esp8266/config.example.h',
+            'firmware/room_temperature_esp8266/README_KO.md',
+        }
     if p.parts[0] == 'benchmarks' and (p.suffix.lower() not in {'.py', '.md'} or any(x in {'suites', 'results', 'datasets'} for x in p.parts)):
         return False
     name = p.name.lower()

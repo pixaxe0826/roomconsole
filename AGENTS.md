@@ -127,3 +127,10 @@
 - Preserve raw body spans, metadata/body-read version checks, private result redaction, existing preview/confirmation/receipt, and receipt-before-reselection semantics.
 - Todo and calendar still share the production task table. Do not filter completion/date to force uniqueness unless already source-qualified.
 - Test synthetic catalog, memo grounding, benchmark isolation, and memo_catalog_browser; keep existing dialogue/timer/CI tests intact. See docs/ENTITY_CATALOG_M33B.md.
+
+## M3.4-0 runtime stabilization exception
+- Shared app.sqlite_connection.ClosingConnection must retain transaction semantics and close deterministically; keep benchmark temp-tree and exact factory identity guards.
+- Optional remote_http STT is explicitly operator-configured; preserve local_cli, accuracy policy, original audio and no automatic retry/fallback. No model installation or live service changes.
+- Remote metadata is configured versus observed; stock whisper health cannot verify model/GPU. Keep unknown values null and distinguish HTTP time from CLI load/inference time.
+- Manager-only AI diagnostics do not grant paired-display permissions or generate inference from polling/startup. Core uptime does not depend on the PC.
+- Keep parser/prompt/capability/scoring/dataset frozen. Run M340 lifetime/offline/transport tests plus existing complete suites. See docs/RUNTIME_M340.md.

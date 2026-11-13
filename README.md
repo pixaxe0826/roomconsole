@@ -225,9 +225,14 @@ M3는 기존 FAST_PATH/정확한 atomic write를 유지하면서, 명확한 단�
 모델에 전달하지 않고, 공유 화면은 기존 비공개/버전 재검사를 거칩니다.
 [구현 범위·검증·V35 적용](docs/ENTITY_CATALOG_M33B.md).
 
-## OpenAI Personal Agent ($100/Month Hybrid Architecture · GPT-6.1 Sol High)
+## M3.4-0 — 선택적 PC 추론 런타임
 
-기존 로컬 `Whisper + Qwen` 구조의 Tier 0 결정론적 빠른 경로(`fast_reads`, `timer_commands`, `memo_grounding`, `semantic_parser`)를 그대로 재사용하면서, 월 **$100.00 (`100,000,000` microdollars) 예산 거버너(`BudgetGovernor`)** 하에 **GPT-6.1 Sol High (`model="gpt-6.1-sol"`, `reasoning_effort="high"`)** Structured Outputs와 OpenAI Audio STT(`gpt-4o-mini-transcribe`)를 결합한 하이브리드 개인 비서 계층(`/api/agent/*`)을 제공합니다.
-- Room Hub의 **11개 전체 위젯 및 시스템 어댑터(`memo`, `todo`, `calendar`, `alarm`, `timer`, `clock`, `weather`, `llm-response`, `layout`, `settings`, `system`)**를 `WidgetProtocol 1.0` 규격(`WidgetAdapter`, `WidgetRegistry`, `WidgetRequest`, `request_digest`)으로 통합 제어합니다.
-- 복합 명령(일정 + 할 일 + 알람 + 메모 + 타이머 + 시스템/레이아웃/설정 동시 제어), 일정 충돌 자동 감지, 통합 데일리 브리핑(`mode="briefing"`), 예산 단계별 자동 제어 및 하드 캡 로컬 폴백을 지원합니다.
-- 아키텍처·예산 수식·어댑터 규격·API 명세: [OpenAI Personal Agent 설계 문서](docs/OPENAI_PERSONAL_AGENT.md).
+SQLite FD 수명/벤치마크 factory를 통합하고, 기존 local CLI를 보존한 채 원격 Whisper HTTP backend를 추가합니다.
+관리자 AI 노드 진단은 설정값과 실제 API 확인 범위를 구분합니다. 자동 배포·모델 교체·Parser 변경은 없습니다.
+적용/롤백과 모의·실기기 검증 구분은 [런타임 안정화](docs/RUNTIME_M340.md)를 참고하세요.
+
+## OpenAI Personal Agent (Opt-In Hybrid Architecture · GPT-6.1 Sol High)
+
+기본값은 비활성화(`HUB_PERSONAL_AGENT_ENABLED=false`, `HUB_OPENAI_ENABLED=false`)되어 기존 로컬 음성·LLM·위젯 흐름을 그대로 유지하며, 관리자가 명시적으로 활성화할 때만 Tier 0 결정론적 빠른 경로(`fast_reads`, `timer_commands`, `memo_grounding`, `semantic_parser`)와 월 예산 거버너(`BudgetGovernor`, 예약·정산 원장) 하에 **GPT-6.1 Sol High (`model="gpt-6.1-sol"`, `reasoning_effort="high"`)** Structured Outputs 및 선택적 OpenAI Audio STT를 결합한 하이브리드 개인 비서 계층(`/api/agent/*`)을 제공합니다.
+- Room Hub의 위젯 및 실내 센서·시스템 어댑터(`memo`, `todo`, `calendar`, `alarm`, `timer`, `clock`, `weather`, `indoor`, `llm-response`, `layout`, `settings`, `system`)를 `WidgetProtocol 1.0` 규격으로 제어합니다.
+- 아키텍처·예산 예약/정산·어댑터 규격·API 명세: [OpenAI Personal Agent 설계 문서](docs/OPENAI_PERSONAL_AGENT.md).

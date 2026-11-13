@@ -69,3 +69,5 @@ Desktop.ini
 /benchmark-results/
 /room-hub-benchmark-data/
 /room-hub-benchmark-results/
+# Local ESP8266 Wi-Fi credentials and per-device token.
+firmware/room_temperature_esp8266/config.h

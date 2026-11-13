@@ -5,18 +5,9 @@ import sqlite3
 from unittest.mock import patch
 
 
-class ClosingConnection(sqlite3.Connection):
-    """Keep SQLite commit/rollback semantics but release each owned handle promptly.
-
-    sqlite3.Connection.__exit__ does not close a connection. A captured exception
-    can retain that handle even after gc.collect(), preventing Windows cleanup.
-    The benchmark never reuses a connection after its transaction context ends.
-    """
-    def __exit__(self, *exc):
-        try:
-            return super().__exit__(*exc)
-        finally:
-            self.close()
+# The exact same reviewed class as production; NOT a blanket subclass allowlist.
+# Importing this module has no database/network/application-factory side effects.
+from app.sqlite_connection import ClosingConnection
 
 
 def owned_sqlite(root: Path):
