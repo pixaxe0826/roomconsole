@@ -1,0 +1,94 @@
+/* Every rule is scoped to the indoor-temperature widget. */
+.indoor-temperature-content{padding:16px 18px 13px;gap:6px;min-width:0;justify-content:space-between;background:linear-gradient(145deg,var(--surface),var(--surface2));--it-color:var(--accent)}
+.indoor-temperature-content .it-head{display:flex;align-items:center;justify-content:space-between;gap:7px;flex-shrink:0;min-width:0}
+.indoor-temperature-content .it-head h2{display:flex;align-items:center;gap:5px;font-size:13px;font-weight:650;min-width:0}
+.indoor-temperature-content .it-head h2>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.indoor-temperature-content .it-head h2 svg{color:var(--accent);flex-shrink:0}
+.indoor-temperature-content .it-status{display:inline-flex;align-items:center;gap:5px;font-size:9px;font-weight:600;white-space:nowrap;flex-shrink:0;background:var(--accent-soft);color:var(--it-color);padding:4px 7px;border-radius:20px}
+.indoor-temperature-content .it-status i{width:5px;height:5px;display:block;border-radius:50%;background:currentColor}
+.indoor-temperature-content .it-location{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted);min-width:0;flex-shrink:0}
+.indoor-temperature-content .it-location>span:first-of-type{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.indoor-temperature-content .it-demo{font-size:8px;letter-spacing:.03em;margin-left:auto;border:1px solid var(--line);border-radius:5px;padding:1px 4px}
+.indoor-temperature-content .it-body{min-height:0;flex:1;display:flex;align-items:center;gap:24px}
+.indoor-temperature-content .it-reading{min-width:0;padding:2px 0;position:relative}
+.indoor-temperature-content .it-reading-label{font-size:9px;color:var(--muted);display:block;margin-bottom:1px}
+.indoor-temperature-content .it-number{display:flex;align-items:baseline;gap:6px;line-height:1.02;white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--ink)}
+.indoor-temperature-content .it-number strong{font-size:clamp(36px,4.9vw,63px);font-weight:350;letter-spacing:-.065em}
+.indoor-temperature-content .it-unit{font-size:20px;font-weight:400;color:var(--muted);letter-spacing:-.02em}
+.indoor-temperature-content .it-calibration{display:inline-block;font-size:8px;color:#8b6b38;margin-top:4px;line-height:1.3}
+.indoor-temperature-content .it-raw{display:flex;gap:13px;font-size:9px;line-height:1.4;color:var(--muted);margin-top:6px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.indoor-temperature-content .it-raw>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.indoor-temperature-content .it-raw b{font-weight:500}
+.indoor-temperature-content .it-diagnostics{width:100%;border-collapse:collapse;margin-top:23px;font-variant-numeric:tabular-nums}
+.indoor-temperature-content .it-diagnostics th,.indoor-temperature-content .it-diagnostics td{border-top:1px solid var(--line);padding:8px 0;line-height:1.4}
+.indoor-temperature-content .it-diagnostics th{font-size:11px;color:var(--muted);font-weight:400;text-align:left;white-space:nowrap}
+.indoor-temperature-content .it-diagnostics td{font-size:13px;color:var(--ink);text-align:right;padding-left:12px;overflow-wrap:anywhere}
+.indoor-temperature-content .it-footer{flex-shrink:0;min-width:0;border-top:1px solid var(--line);padding-top:7px}
+.indoor-temperature-content .it-received{display:flex;align-items:center;justify-content:space-between;gap:5px;color:var(--muted);font-size:9px;font-variant-numeric:tabular-nums}
+.indoor-temperature-content .it-received>span,.indoor-temperature-content .it-received time{white-space:nowrap}
+.indoor-temperature-content .it-note{font-size:8px;color:var(--muted);line-height:1.45;margin-top:3px;overflow-wrap:anywhere}
+.indoor-temperature-content .it-calibration-note{color:#8b6b38;font-size:12px;line-height:1.5;margin-top:8px}
+.indoor-temperature-content .it-origin-note{color:var(--muted);font-size:11px;line-height:1.5;margin-top:8px}
+.indoor-temperature-content[data-temperature-status=source_error]{--it-color:#9b7641}
+.indoor-temperature-content[data-temperature-status=source_error] .it-status{background:#f8f0df}
+.indoor-temperature-content[data-temperature-status=source_error] .it-number{color:var(--muted)}
+.indoor-temperature-content[data-temperature-status=stale]{--it-color:#9b7641}
+.indoor-temperature-content[data-temperature-status=stale] .it-status{background:#f8f0df}
+.indoor-temperature-content[data-temperature-status=offline],.indoor-temperature-content[data-temperature-status=connection],.indoor-temperature-content[data-temperature-status=waiting],.indoor-temperature-content[data-temperature-status=unregistered]{--it-color:var(--muted)}
+.indoor-temperature-content[data-temperature-status=offline] .it-status,.indoor-temperature-content[data-temperature-status=connection] .it-status,.indoor-temperature-content[data-temperature-status=waiting] .it-status,.indoor-temperature-content[data-temperature-status=unregistered] .it-status{background:var(--bg)}
+.indoor-temperature-content[data-temperature-status=offline] .it-number,.indoor-temperature-content[data-temperature-status=connection] .it-number,.indoor-temperature-content[data-temperature-status=stale] .it-number{color:var(--muted)}
+.indoor-temperature-content[data-temperature-status=sensor_error],.indoor-temperature-content[data-temperature-status=invalid],.indoor-temperature-content[data-temperature-status=permission],.indoor-temperature-content[data-temperature-status=unavailable],.indoor-temperature-content[data-temperature-status=configuration]{--it-color:var(--red)}
+.indoor-temperature-content[data-temperature-status=sensor_error] .it-status,.indoor-temperature-content[data-temperature-status=invalid] .it-status,.indoor-temperature-content[data-temperature-status=permission] .it-status,.indoor-temperature-content[data-temperature-status=unavailable] .it-status,.indoor-temperature-content[data-temperature-status=configuration] .it-status{background:var(--surface2)}
+.indoor-temperature-content.it-compact{padding:12px 13px 10px;gap:4px}
+.indoor-temperature-content.it-compact .it-head h2{font-size:11px;gap:3px}
+.indoor-temperature-content.it-compact .it-head h2 svg{width:15px;height:15px}
+.indoor-temperature-content.it-compact .it-status{font-size:8px;padding:3px 5px;gap:4px}
+.indoor-temperature-content.it-compact .it-number strong{font-size:42px}
+.indoor-temperature-content.it-compact .it-unit{font-size:17px}
+.indoor-temperature-content.it-compact .it-raw{font-size:8px;gap:10px;margin-top:5px}
+.indoor-temperature-content.it-compact .it-normal-note{display:none}
+.indoor-temperature-content.expanded{padding:30px 36px!important;gap:14px;overflow:auto}
+.indoor-temperature-content.expanded .it-head h2{font-size:23px;gap:9px}
+.indoor-temperature-content.expanded .it-head h2 svg{width:27px;height:27px}
+.indoor-temperature-content.expanded .it-status{font-size:12px;padding:7px 12px;gap:7px}
+.indoor-temperature-content.expanded .it-location{font-size:13px;gap:7px}
+.indoor-temperature-content.expanded .it-demo{font-size:10px;padding:3px 6px}
+.indoor-temperature-content.expanded .it-body{display:grid;grid-template-columns:minmax(180px,.75fr) minmax(240px,1.25fr);gap:44px;min-height:250px;flex:1 0 auto;padding:15px 0;align-items:center}
+.indoor-temperature-content.expanded .it-number strong{font-size:clamp(80px,12vw,150px)}
+.indoor-temperature-content.expanded .it-unit{font-size:35px}
+.indoor-temperature-content.expanded .it-reading-label{font-size:14px;margin-bottom:10px}
+.indoor-temperature-content.expanded .it-calibration{font-size:12px;margin-top:13px}
+.indoor-temperature-content.expanded .it-footer{padding-top:16px}
+.indoor-temperature-content.expanded .it-received{font-size:13px;justify-content:flex-start;gap:18px}
+.indoor-temperature-content.expanded .it-note{font-size:12px;margin-top:8px}
+.indoor-temperature-content .it-history{min-width:0;border:1px solid var(--line);background:var(--surface);padding:20px;border-radius:19px}
+.indoor-temperature-content .it-history-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:20px}
+.indoor-temperature-content .it-history-head h3{font-size:14px;font-weight:600;white-space:nowrap}
+.indoor-temperature-content .it-history-head>span{font-size:10px;color:var(--muted);text-align:right}
+.indoor-temperature-content .it-chart{display:block;width:100%;height:auto;overflow:visible}
+.indoor-temperature-content .it-chart-grid line{stroke:var(--line);stroke-width:1;stroke-dasharray:3 4}
+.indoor-temperature-content .it-chart-grid text{fill:var(--muted);font-size:10px;font-family:inherit}
+.indoor-temperature-content .it-chart-data{stroke:var(--accent);stroke-width:2.3;stroke-linecap:round;stroke-linejoin:round;fill:var(--accent)}
+.indoor-temperature-content .it-chart-axis{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);padding:0 4% 0 8%;margin-top:-8px}
+.indoor-temperature-content .it-stats{display:flex;align-items:center;gap:24px;margin-top:22px;padding-top:17px;border-top:1px solid var(--line)}
+.indoor-temperature-content .it-stats>div>span{display:block;font-size:10px;color:var(--muted);margin-bottom:5px}
+.indoor-temperature-content .it-stats strong{font-size:23px;font-weight:500;font-variant-numeric:tabular-nums;white-space:nowrap}
+.indoor-temperature-content .it-stats small{font-size:12px;font-weight:400;color:var(--muted)}
+.indoor-temperature-content .it-stats p{font-size:9px;line-height:1.5;color:var(--muted);margin-left:auto}
+.indoor-temperature-content .it-history-empty{display:flex;align-items:center;justify-content:center;min-height:180px;color:var(--muted);font-size:13px;line-height:1.8;text-align:center;padding:16px}
+.widget.micro .indoor-temperature-content .it-location,.widget.micro .indoor-temperature-content .it-reading-label,.widget.micro .indoor-temperature-content .it-footer,.widget.micro .indoor-temperature-content .it-calibration,.widget.micro .indoor-temperature-content .it-raw{display:none}
+.widget.micro .indoor-temperature-content .it-head h2{font-size:8px}
+.widget.micro .indoor-temperature-content .it-head h2 svg{display:none}
+.widget.micro .indoor-temperature-content .it-status{font-size:7px;padding:2px 3px}
+.widget.micro .indoor-temperature-content .it-number strong{font-size:23px}
+.widget.micro .indoor-temperature-content .it-unit{font-size:10px}
+.widget.nano .indoor-temperature-content .it-head{display:none}
+.dark .indoor-temperature-content[data-temperature-status=stale] .it-status{background:#493d28;color:#d1b47c}
+.dark .indoor-temperature-content[data-temperature-status=source_error] .it-status{background:#493d28;color:#d1b47c}
+.dark .indoor-temperature-content .it-calibration,.dark .indoor-temperature-content .it-calibration-note{color:#c5ab7c}
+@media(max-width:750px){.indoor-temperature-content.expanded{padding:22px!important}.indoor-temperature-content.expanded .it-body{grid-template-columns:1fr;gap:22px}.indoor-temperature-content.expanded .it-number strong{font-size:88px}.indoor-temperature-content.expanded .it-head h2{font-size:19px}.indoor-temperature-content.expanded .it-status{font-size:10px}.indoor-temperature-content .it-history{padding:16px}.indoor-temperature-content .it-stats{gap:20px}}
+
+.indoor-temperature-content .it-environment{display:flex;flex-wrap:wrap;gap:3px 12px;font-size:9px;line-height:1.5;color:var(--muted);margin-top:7px;font-variant-numeric:tabular-nums}
+.indoor-temperature-content .it-environment>span{white-space:nowrap}.indoor-temperature-content .it-environment b{font-weight:550;color:var(--ink)}.indoor-temperature-content .it-environment small{font-size:inherit}
+.indoor-temperature-content.it-compact .it-environment{font-size:8px;gap:2px 9px;margin-top:5px}
+.widget.micro .indoor-temperature-content .it-environment{display:none}

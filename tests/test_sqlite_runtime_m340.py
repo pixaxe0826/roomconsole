@@ -136,14 +136,21 @@ def test_backup_destination_and_source_both_close(tmp_path, monkeypatch):
     original=sqlite3.connect
     retained=[]
     def track(*args,**kwargs):
-        db=original(*args,**kwargs);retained.append(db);return db
+        db=original(*args,**kwargs);retained.append((Path(args[0]),db));return db
     with TestClient(app) as client:
         client.headers.update({'Authorization':'Bearer '+app.state.admin_token})
         monkeypatch.setattr(sqlite3,'connect',track)
         for _ in range(5):
             result=client.get('/api/admin/backup')
             assert result.status_code==200 and result.content.startswith(b'SQLite format 3')
-        assert retained and all(type(db) is ClosingConnection for db in retained)
-        for db in retained:
-            with pytest.raises(sqlite3.ProgrammingError):
-                db.execute('SELECT 1')
+    # Wait for lifespan shutdown before inspecting handles: the independent
+    # indoor sensor poller may own a connection while this request runs.
+    # Its explicit close policy is valid without the core Store's factory.
+    backup_path=tmp_path/'room-hub-backup.sqlite3'
+    core_paths={Path(app.state.store.path),backup_path}
+    core_connections=[db for path,db in retained if path in core_paths]
+    assert core_connections and all(type(db) is ClosingConnection for db in core_connections)
+    assert sum(path==backup_path for path,db in retained)==5
+    for path,db in retained:
+        with pytest.raises(sqlite3.ProgrammingError,match='closed database'):
+            _ = db.in_transaction
