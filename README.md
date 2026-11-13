@@ -224,3 +224,9 @@ M3는 기존 FAST_PATH/정확한 atomic write를 유지하면서, 명확한 단�
 덧붙이기·교체는 여전히 관리자 확인 후에만 실행합니다. 카탈로그와 개인 메모는
 모델에 전달하지 않고, 공유 화면은 기존 비공개/버전 재검사를 거칩니다.
 [구현 범위·검증·V35 적용](docs/ENTITY_CATALOG_M33B.md).
+
+## OpenAI Personal Agent ($100/Month Hybrid Architecture)
+
+기존 로컬 `Whisper + Qwen` 구조의 Tier 0 결정론적 빠른 경로(`fast_reads`, `timer_commands`, `memo_grounding`, `semantic_parser`)를 그대로 재사용하면서, 월 **$100.00 (`100,000,000` microdollars) 예산 거버너(`BudgetGovernor`)** 하에 OpenAI Structured Outputs(`gpt-4o-mini`, `gpt-4o`)와 OpenAI Audio STT(`gpt-4o-mini-transcribe`)를 결합한 하이브리드 개인 비서 계층(`/api/agent/*`)을 제공합니다.
+- 복합 명령(일정 + 할 일 + 알람 + 메모 동시 계획), 일정 충돌 자동 감지, 통합 데일리 브리핑(`mode="briefing"`), $70 소프트 캡 자동 다운그레이드 및 $100 하드 캡 로컬 폴백을 지원합니다.
+- 아키텍처·예산 수식·API 명세: [OpenAI Personal Agent 설계 문서](docs/OPENAI_PERSONAL_AGENT.md).

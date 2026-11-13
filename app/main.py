@@ -22,11 +22,12 @@ from .widgets import discover
 from .weather import fetch_weather
 from .speech import SpeechHub
 from .llm import LLMHub, LLMConfig, LLMCreate, LLMRetry, sha as llm_sha
+from .personal_agent import PersonalAgentService, register_agent_routes
 ROOT=Path(__file__).resolve().parent.parent
 
 def hashed(value):return hashlib.sha256(value.encode()).hexdigest()
 
-def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_runner=None,llm_backend=None):
+def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_runner=None,llm_backend=None,agent_gateway=None):
  data=Path(data_dir or os.getenv('HUB_DATA_DIR',ROOT/'data')).resolve();data.mkdir(parents=True,exist_ok=True);(data/'audio').mkdir(exist_ok=True)
  widget_root=Path(os.getenv('HUB_WIDGET_DIR',ROOT/'widgets')).resolve()
  store=Store(data/'room-hub.sqlite3');connections={};attempts={};wx={'last_attempt':0.,'error':None};wx_lock=asyncio.Lock()
@@ -322,11 +323,14 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
    count=cur.rowcount;db.execute('DELETE FROM series WHERE id NOT IN(SELECT series_id FROM tasks WHERE series_id IS NOT NULL)')
   await changed('task.deleted',str(count));return {'deleted':count}
  # Reuse the exact existing CRUD handlers; protocol does not replace UI/assistant paths.
- protocol=widget_protocol.build_registry(store,life,changed,
-  widget_protocol.TaskServices(add_task,edit_task,complete_task,delete_task),timers=timers)
+ task_services=widget_protocol.TaskServices(add_task,edit_task,complete_task,delete_task)
+ protocol=widget_protocol.build_registry(store,life,changed,task_services,timers=timers)
  app.state.widget_protocol=protocol
  llm.set_widget_registry(protocol)
  widget_protocol.register_routes(app,protocol,admin)
+ personal_agent=PersonalAgentService(store,life,timers,protocol,task_services,speech=speech,gateway=agent_gateway,changed=changed)
+ app.state.personal_agent=personal_agent
+ register_agent_routes(app,personal_agent,admin)
  @app.get('/api/admin/export')
  async def export(_=Depends(admin)):
   with store.connect() as db:series=[dict(r) for r in db.execute('SELECT * FROM series')]
