@@ -1,51 +1,88 @@
-"""Personal AI Agent for Schedule, To-Do, Alarms, Memos, Timers, and Daily Briefings.
+"""Personal AI Agent for Schedule, To-Do, Alarms, Memos, Timers, and Room Hub Systems.
 
-Built on top of Room Hub's existing Store, LifeService, TimerService, and
-WidgetRegistry, governed by the $100/month BudgetGovernor:
+Built on top of Room Hub's Store, LifeService, TimerService, and Full WidgetRegistry
+(WidgetProtocol 1.0), governed by the BudgetGovernor ($100/month production default,
+configurable e.g. $5 test cap) using GPT-6.1 Sol High (`gpt-6.1-sol`,
+`reasoning_effort="high"`):
 - Tier 0 ($0, <5ms): Deterministic local fast reads, exact timers, semantic parser,
   and named memo catalog resolution.
 - Tier 1 ($0.003-$0.006/min): OpenAI Audio STT with vocabulary hints + local Whisper fallback.
-- Tier 2 ($0.15/$0.60 per 1M): gpt-4o-mini Structured Outputs for multi-step plans across
-  schedule, todos, alarms, memos, and timers.
-- Tier 3 ($2.50/$10.00 per 1M): gpt-4o deep schedule optimization & holistic daily briefings,
-  with automatic downshift to gpt-4o-mini at the $70 soft cap and local fallback at $100.
+- Tier 2/3 (GPT-6.1 Sol High): `gpt-6.1-sol` (`reasoning_effort="high"`) Structured Outputs
+  for multi-step plans across all 11 Room Hub widget/system adapters (`memo`, `todo`,
+  `calendar`, `alarm`, `timer`, `clock`, `weather`, `llm-response`, `layout`,
+  `settings`, `system`) and holistic daily briefings.
 
-All non-timer mutations (todo, calendar, alarm, memo) require explicit manager
-confirmation bound to a cryptographic preview digest (preview_sha256) and
-optimistic row versions.
+Every step is grounded into a canonical `WidgetRequest` (`protocol_version="1.0"`) and
+dispatched through `WidgetRegistry.execute(request, authority)`. All non-immediate
+mutations require explicit manager confirmation bound to both `request_digest(request)`
+and a cryptographic batch preview digest (`preview_sha256`) with optimistic row version locks.
 """
 from __future__ import annotations
 
 import asyncio
 from contextlib import closing, contextmanager
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 import hashlib
 import json
+from pathlib import Path
 import re
 import time
-from typing import Any, Literal
-from zoneinfo import ZoneInfo
+from typing import Any, Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .clock_service import aware, clock_context, resolve_day, resolve_range
+from .clock_service import clock_context, resolve_range
 from .entity_catalog import EntityCatalog
-from .fast_reads import execute_read, match_read
-from .life import AlarmCreate, AlarmUpdate, LifeService, NoteCreate, NoteUpdate, memo_snapshot, note_catalog_snapshot
+from .fast_reads import match_read
+from .life import AlarmCreate, LifeService, memo_snapshot, note_catalog_snapshot
 from .memo_grounding import parse_memo
-from .models import RepeatRule, TaskCompletion, TaskCreate, TaskPatch
+from .models import RepeatRule, TaskCreate, TaskPatch
 from .openai_budget import BudgetGovernor, BudgetPolicy
 from .openai_gateway import OpenAIGateway, OpenAIGatewayError
 from .semantic_parser import parse_semantic
 from .store import uid, utcnow
 from .timer_commands import exact_timer
-from .widget_protocol import ExecutionContext, WidgetRequest, request_digest
+from .widget_protocol import (
+    ExecutionContext,
+    TaskServices,
+    WidgetRegistry,
+    WidgetRequest,
+    build_full_registry,
+    request_digest,
+)
 
-AGENT_VERSION = 'personal-agent-1.0'
+AGENT_VERSION = 'personal-agent-2.0-gpt-6.1-sol-high'
 CONFIRM_TTL_SECONDS = 600
 
-READ_CTX = ExecutionContext(principal='personal-agent-reader', role='admin', permissions=frozenset({'read'}))
-TIMER_CTX = ExecutionContext(principal='personal-agent-timer', role='admin', permissions=frozenset({'read', 'control'}))
+READ_CTX = ExecutionContext(
+    principal='personal-agent-reader',
+    role='admin',
+    permissions=frozenset({'read'}),
+)
+TIMER_CTX = ExecutionContext(
+    principal='personal-agent-control',
+    role='admin',
+    permissions=frozenset({'read', 'control'}),
+)
+PREVIEW_CTX = ExecutionContext(
+    principal='personal-agent-preview',
+    role='admin',
+    permissions=frozenset({'read', 'write', 'control'}),
+)
+
+ALL_ADAPTER_DOMAINS = (
+    'todo',
+    'calendar',
+    'alarm',
+    'memo',
+    'timer',
+    'clock',
+    'weather',
+    'llm-response',
+    'layout',
+    'settings',
+    'system',
+)
 
 
 def _json_dump(value: Any) -> str:
@@ -63,13 +100,52 @@ AGENT_STEP_SCHEMA: dict[str, Any] = {
     'properties': {
         'domain': {
             'type': 'string',
-            'enum': ['todo', 'calendar', 'alarm', 'memo', 'timer', 'weather', 'time'],
+            'enum': [
+                'todo',
+                'calendar',
+                'alarm',
+                'memo',
+                'timer',
+                'clock',
+                'time',
+                'weather',
+                'llm-response',
+                'layout',
+                'settings',
+                'system',
+            ],
         },
         'action': {
             'type': 'string',
             'enum': [
-                'list', 'get', 'add', 'update', 'complete', 'reopen', 'delete',
-                'set', 'cancel', 'read', 'write', 'append', 'clear', 'start', 'stop',
+                'list',
+                'get',
+                'add',
+                'update',
+                'complete',
+                'reopen',
+                'delete',
+                'set',
+                'cancel',
+                'events',
+                'snooze',
+                'ack',
+                'read',
+                'write',
+                'append',
+                'clear',
+                'start',
+                'stop',
+                'resolve',
+                'refresh',
+                'update_widget',
+                'add_widget',
+                'remove_widget',
+                'get_data',
+                'set_data',
+                'status',
+                'devices',
+                'audit',
             ],
         },
         'target_id': {'type': ['string', 'null']},
@@ -184,31 +260,51 @@ def detect_schedule_conflicts(tasks: list[dict[str, Any]]) -> list[dict[str, Any
 
 
 class PersonalAgentService:
-    """Coordinates Tier 0 local rules, OpenAI Structured Planner, and confirmed execution."""
+    """Coordinates Tier 0 local rules, GPT-6.1 Sol High Planner, and WidgetProtocol 1.0 execution."""
 
     def __init__(
         self,
         store,
         life: LifeService,
         timers,
-        registry,
-        task_services,
+        registry: WidgetRegistry | None,
+        task_services: TaskServices,
         *,
         speech=None,
         governor: BudgetGovernor | None = None,
         gateway: OpenAIGateway | None = None,
         changed=None,
+        refresh_weather: Callable | None = None,
+        widget_root: Path | None = None,
     ):
         self.store = store
         self.life = life
         self.timers = timers
-        self.registry = registry
         self.task_services = task_services
         self.speech = speech
         self.governor = governor or BudgetGovernor(store)
         self.gateway = gateway or OpenAIGateway(self.governor)
         self.changed = changed
+        self.refresh_weather = refresh_weather
+        self.widget_root = widget_root
         self.confirm_lock = asyncio.Lock()
+
+        # Ensure the Personal Agent always has the full 11-adapter WidgetProtocol 1.0 registry
+        if registry is None or len(registry.list_widgets()) < len(ALL_ADAPTER_DOMAINS):
+            async def _noop_changed(event: str, detail: str = '') -> None:
+                store.bump(event, detail)
+
+            self.registry = build_full_registry(
+                store,
+                life,
+                changed or _noop_changed,
+                task_services,
+                timers=timers,
+                refresh_weather=refresh_weather,
+                widget_root=widget_root,
+            )
+        else:
+            self.registry = registry
 
         with self._db() as db:
             db.executescript('''
@@ -250,10 +346,53 @@ class PersonalAgentService:
         if self.changed:
             await self.changed(event, detail)
 
+    async def adapters_health(self) -> dict[str, Any]:
+        """Query health across all 11 registered WidgetProtocol 1.0 adapters."""
+        results: dict[str, Any] = {}
+        for name in self.registry.list_widgets():
+            adapter = self.registry.get(name)
+            if adapter is not None:
+                results[name] = await adapter.health(READ_CTX)
+        return {
+            'protocol_version': '1.0',
+            'adapter_count': len(results),
+            'adapters': results,
+        }
+
+    async def execute_adapter(
+        self,
+        raw_request: WidgetRequest | dict[str, Any],
+        *,
+        confirmed: bool = False,
+    ) -> dict[str, Any]:
+        """Execute a canonical WidgetRequest through the 11-adapter WidgetRegistry."""
+        req = (
+            raw_request
+            if isinstance(raw_request, WidgetRequest)
+            else WidgetRequest.model_validate(raw_request)
+        )
+        adapter = self.registry.get(req.widget)
+        spec = adapter.operations.get(req.action) if adapter else None
+        if spec is not None and spec.read_only:
+            ctx = READ_CTX
+        elif f'{req.widget}.{req.action}' in self.registry.immediate_actions():
+            ctx = TIMER_CTX
+        elif confirmed:
+            ctx = ExecutionContext(
+                principal='personal-agent-direct',
+                role='admin',
+                permissions=frozenset({'read', 'write', 'control'}),
+                confirmed_digest=request_digest(req),
+            )
+        else:
+            ctx = PREVIEW_CTX
+        res = await self.registry.execute(req, ctx)
+        return res.model_dump(mode='json')
+
     def build_workspace_snapshot(self, at_iso: str | None = None) -> dict[str, Any]:
         """Gather a deterministic, privacy-bounded snapshot of the user's workspace."""
         now_iso = at_iso or utcnow()
-        settings = self.store.get('settings') or {'timezone': 'Asia/Seoul', 'location_name': ''}
+        settings = self.store.get('settings') or {'timezone': 'Asia/Seoul', 'location_name': '', 'theme': 'light', 'title': 'My room'}
         tz_name = settings.get('timezone', 'Asia/Seoul')
         clock = clock_context(now_iso, tz_name)
         today_date = date.fromisoformat(clock['today'])
@@ -298,9 +437,25 @@ class PersonalAgentService:
                 'fetched_at': wx.get('fetched_at'),
             }
 
+        layout = self.store.get('layout') or {'columns': 8, 'rows': 6, 'version': 1, 'widgets': []}
+        layout_summary = {
+            'version': layout.get('version', 1),
+            'widgets': [
+                {'id': w['id'], 'type': w['type'], 'title': w.get('title', ''), 'x': w.get('x', 0), 'y': w.get('y', 0), 'w': w.get('w', 4), 'h': w.get('h', 2)}
+                for w in layout.get('widgets', [])
+            ],
+        }
+
         return {
             'as_of': now_iso,
             'clock': clock,
+            'settings': {
+                'title': settings.get('title', 'My room'),
+                'timezone': tz_name,
+                'location_name': settings.get('location_name', ''),
+                'theme': settings.get('theme', 'light'),
+            },
+            'layout': layout_summary,
             'weather': weather_summary,
             'today_tasks': today_tasks,
             'upcoming_pending_tasks': upcoming_tasks,
@@ -311,6 +466,7 @@ class PersonalAgentService:
             'running_timers': running_timers,
             'note_catalog': note_catalog['items'],
             'shared_or_pinned_notes': shared_note_summaries,
+            'registered_adapters': self.registry.list_widgets(),
         }
 
     def format_deterministic_briefing(self, snap: dict[str, Any]) -> str:
@@ -368,6 +524,9 @@ class PersonalAgentService:
                     r'일정|약속|회의|캘린더',
                     r'할\s*일|투두',
                     r'날씨',
+                    r'레이아웃|위젯|배치',
+                    r'설정|테마|다크\s*모드|라이트\s*모드',
+                    r'시스템|기기|감사\s*로그',
                 )
             )
             if domain_hits >= 2:
@@ -540,16 +699,31 @@ class PersonalAgentService:
             {'id': n['id'], 'title': n['title'], 'shared': n['shared']}
             for n in snap['note_catalog'][:40]
         ]
+        layout_widgets = snap.get('layout', {}).get('widgets', [])
+        settings_info = snap.get('settings', {})
         return (
-            '당신은 Room Hub의 개인 AI 비서 플래너입니다. 사용자의 한국어 요청을 분석해 '
-            '일정(calendar), 할 일(todo), 알람(alarm), 메모(memo), 타이머(timer), 날씨(weather), 시간(time) '
-            '작업 계획 JSON을 생성하세요.\n'
+            '당신은 Room Hub의 개인 AI 비서 플래너(GPT-6.1 Sol High)입니다. 사용자의 한국어 요청을 분석해 '
+            'Room Hub의 11개 위젯 및 시스템 어댑터(WidgetProtocol 1.0) 작업 계획 JSON을 생성하세요.\n'
+            '지원 도메인(domain) 및 주요 동작(action):\n'
+            '- todo (할 일 위젯): list, get, add, update, complete, reopen, delete\n'
+            '- calendar (캘린더 위젯): list, get, add, update, delete\n'
+            '- alarm (알람 위젯): list, events, set, update, cancel, snooze, ack\n'
+            '- memo (노트/메모 위젯): read, list, write, append, clear, delete\n'
+            '- timer (타이머 위젯): list, get, start(duration_seconds 1~600), stop\n'
+            '- clock (시계 위젯): read, resolve(title 또는 body에 날짜 표현 지정)\n'
+            '- weather (날씨 위젯): read, refresh\n'
+            '- llm-response (AI 응답 위젯): list, read\n'
+            '- layout (대시보드 레이아웃/위젯 배치): read, update_widget(target_id에 위젯 ID, title에 새 제목), add_widget, remove_widget, get_data, set_data\n'
+            '- settings (허브 설정): read, update(title에 허브 제목, category에 light/dark 테마, target_title에 지역명)\n'
+            '- system (시스템 상태/기기/감사로그): status, devices, audit\n'
             '규칙:\n'
-            '1. 복합 명령(예: 일정 추가 + 알람 설정 + 메모 작성)은 steps 배열에 순서대로 담으세요.\n'
+            '1. 복합 명령(예: 일정 추가 + 알람 설정 + 메모 작성 + 타이머 시작 + 날씨/시스템 조회 + 테마/위젯 변경)은 steps 배열에 순서대로 담으세요.\n'
             '2. 기존 항목을 완료/수정/삭제/취소할 때는 아래 카탈로그에서 일치하는 target_id 또는 정확한 target_title을 지정하세요.\n'
-            '3. 없는 날짜나 시간을 임의로 지어내지 말고, 필수 정보(예: 알람 시각, 할 일 제목)가 빠졌으면 intent_type="clarification"과 follow_up_question을 반환하세요.\n'
-            '4. 변경 작업(add, update, complete, reopen, delete, set, cancel, write, append, clear)은 서버가 관리자 확인 후 실행하므로, assistant_message에 이미 실행 완료했다고 단정하지 말고 "미리보기를 준비했습니다"라고 안내하세요.\n'
+            '3. 없는 날짜나 시간을 임의로 지어내지 말고, 필수 정보가 빠졌으면 intent_type="clarification"과 follow_up_question을 반환하세요.\n'
+            '4. 변경 작업은 서버가 관리자 확인 후 실행하므로, assistant_message에 "미리보기를 준비했습니다"라고 안내하세요.\n'
             f"현재 기준 시각: {clock['local_at']} ({clock['timezone']}), 오늘={clock['today']} ({clock['weekday']}), 내일={clock['tomorrow']}\n"
+            f'현재 허브 설정: {_json_dump(settings_info)}\n'
+            f'현재 대시보드 배치 위젯: {_json_dump(layout_widgets)}\n'
             f'현재 할 일/일정 메타데이터: {_json_dump(tasks_compact)}\n'
             f'현재 알람 목록: {_json_dump(alarms_compact)}\n'
             f'현재 메모 제목 목록(본문 비공개): {_json_dump(notes_compact)}'
@@ -633,13 +807,64 @@ class PersonalAgentService:
             raise ValueError('대상 메모를 찾을 수 없습니다.')
         return found
 
+    def _resolve_widget_instance(self, step: dict[str, Any]) -> dict[str, Any]:
+        layout = self.store.get('layout') or {'version': 1, 'widgets': []}
+        widgets = layout.get('widgets', [])
+        ref = (step.get('target_id') or step.get('target_title') or '').strip()
+        if not ref:
+            raise ValueError('대상 대시보드 위젯 ID 또는 이름을 지정해 주세요.')
+        for w in widgets:
+            if w['id'] == ref or w['type'] == ref or (w.get('title') and w['title'] == ref):
+                return w
+        for w in widgets:
+            if ref in w['id'] or ref in w['type'] or (w.get('title') and ref in w['title']):
+                return w
+        raise ValueError(f'대시보드에서 위젯({ref})을 찾지 못했습니다.')
+
+    async def _stage_via_protocol(
+        self,
+        *,
+        step_idx: int,
+        domain: str,
+        action: str,
+        req: WidgetRequest,
+        summary: str,
+        payload: dict[str, Any],
+        target_lock: dict[str, Any] | None = None,
+        conflicts: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Validate a mutation step through WidgetRegistry.execute(req, PREVIEW_CTX) and bind its digest."""
+        preview_res = await self.registry.execute(req, PREVIEW_CTX)
+        if preview_res.status != 'needs_confirmation':
+            err_msg = (
+                preview_res.error.message
+                if preview_res.error
+                else f'{domain}.{action} 요청 검증에 실패했습니다 ({preview_res.status}).'
+            )
+            raise ValueError(err_msg)
+        req_dump = req.model_dump(mode='json')
+        digest = preview_res.meta.request_digest or request_digest(req)
+        entry: dict[str, Any] = {
+            'step': step_idx,
+            'domain': domain,
+            'action': action,
+            'summary': summary,
+            'payload': payload,
+            'target_lock': target_lock,
+            'widget_request': req_dump,
+            'request_digest': digest,
+        }
+        if conflicts is not None:
+            entry['conflicts'] = conflicts
+        return entry
+
     async def _ground_and_stage_steps(
         self,
         run_id: str,
         steps: list[dict[str, Any]],
         snap: dict[str, Any],
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
-        """Execute read/timer steps immediately; stage mutations with version-locked previews."""
+        """Execute read/immediate steps via WidgetRegistry; stage mutations with WidgetProtocol 1.0 digests."""
         clock = snap['clock']
         tz_name = clock['timezone']
         at_iso = snap['as_of']
@@ -647,18 +872,26 @@ class PersonalAgentService:
         staged_mutations: list[dict[str, Any]] = []
         output_lines: list[str] = []
 
-        for idx, step in enumerate(steps[:8], 1):
-            domain = step['domain']
+        for idx, step in enumerate(steps[:12], 1):
+            raw_domain = step['domain']
+            domain = 'clock' if raw_domain == 'time' else raw_domain
             action = step['action']
             step_key = f'{run_id}:step:{idx}'
 
-            # 1. Read operations -> immediate execution
+            # --- 1. Read operations via WidgetRegistry.execute(req, READ_CTX) ---
             if domain in {'todo', 'calendar'} and action == 'list':
                 start = step.get('start_date') or step.get('date') or clock['today']
                 end = step.get('end_date') or step.get('date') or start
                 status_filter = step.get('status_filter') or ('pending' if domain == 'todo' else 'all')
                 period = step.get('period')
-                data = self.store.query_tasks(start, end, status_filter, limit=50, period=period)
+                args: dict[str, Any] = {'start': start, 'end': end, 'status': status_filter, 'limit': 50}
+                if period in {'morning', 'afternoon'}:
+                    args['period'] = period
+                req = WidgetRequest(request_id=step_key, widget=domain, action='list', args=args)
+                res = await self.registry.execute(req, READ_CTX)
+                if res.status != 'success':
+                    raise ValueError(res.error.message if res.error else '일정/할 일 목록을 조회하지 못했습니다.')
+                data = res.data
                 executed_reads.append({'step': idx, 'domain': domain, 'action': 'list', 'data': data})
                 label = '할 일' if domain == 'todo' else '일정'
                 output_lines.append(f"• {start}{('~' + end) if end != start else ''} {label}: {data['count']}개")
@@ -668,8 +901,17 @@ class PersonalAgentService:
 
             elif domain in {'todo', 'calendar'} and action == 'get':
                 target = self._resolve_task_target(step, tz_name, at_iso)
-                executed_reads.append({'step': idx, 'domain': domain, 'action': 'get', 'data': target})
-                output_lines.append(f"• 항목 확인: {target['date']} {target['time'] or '종일'} · {target['title']}")
+                req = WidgetRequest(
+                    request_id=step_key,
+                    widget=domain,
+                    action='get',
+                    target={'type': 'item_id', 'value': target['id']},
+                )
+                res = await self.registry.execute(req, READ_CTX)
+                if res.status != 'success':
+                    raise ValueError(res.error.message if res.error else '항목을 조회하지 못했습니다.')
+                executed_reads.append({'step': idx, 'domain': domain, 'action': 'get', 'data': res.data})
+                output_lines.append(f"• 항목 확인: {res.data['date']} {res.data['time'] or '종일'} · {res.data['title']}")
 
             elif domain == 'memo' and action == 'read':
                 ref = (step.get('target_title') or 'current').strip()
@@ -694,31 +936,152 @@ class PersonalAgentService:
                 executed_reads.append({'step': idx, 'domain': 'memo', 'action': 'read', 'data': res.data})
                 output_lines.append(f"• 메모 [{res.data['title']}]: {res.data['body'] or '(본문 없음)'}")
 
-            elif domain == 'alarm' and action == 'list':
-                alarms = self.life.alarms()
-                executed_reads.append({'step': idx, 'domain': 'alarm', 'action': 'list', 'data': {'items': alarms}})
-                output_lines.append(f'• 등록된 알람: {len(alarms)}개')
-                for a in alarms[:10]:
-                    output_lines.append(f"  - {a['time']} · {a['label']} ({'켜짐' if a['enabled'] else '꺼짐'})")
+            elif domain == 'memo' and action == 'list':
+                req = WidgetRequest(request_id=step_key, widget='memo', action='list', args={})
+                res = await self.registry.execute(req, READ_CTX)
+                if res.status != 'success':
+                    raise ValueError(res.error.message if res.error else '메모 목록을 조회하지 못했습니다.')
+                executed_reads.append({'step': idx, 'domain': 'memo', 'action': 'list', 'data': res.data})
+                output_lines.append(f"• 저장된 메모 목록: {res.data['count']}개")
+                for n in res.data['items'][:10]:
+                    output_lines.append(f"  - {n['title']} (v{n['version']})")
 
-            elif domain == 'timer' and action == 'list':
-                ts = self.timers.snapshot()
-                executed_reads.append({'step': idx, 'domain': 'timer', 'action': 'list', 'data': ts})
-                output_lines.append(f"• 활성 타이머: {ts['active_count']}개")
+            elif domain == 'alarm' and action in {'list', 'events'}:
+                req = WidgetRequest(request_id=step_key, widget='alarm', action=action, args={})
+                res = await self.registry.execute(req, READ_CTX)
+                if res.status != 'success':
+                    raise ValueError(res.error.message if res.error else '알람 정보를 조회하지 못했습니다.')
+                executed_reads.append({'step': idx, 'domain': 'alarm', 'action': action, 'data': res.data})
+                if action == 'list':
+                    alarms = res.data['items']
+                    output_lines.append(f'• 등록된 알람: {len(alarms)}개')
+                    for a in alarms[:10]:
+                        output_lines.append(f"  - {a['time']} · {a['label']} ({'켜짐' if a['enabled'] else '꺼짐'})")
+                else:
+                    evs = res.data['items']
+                    output_lines.append(f'• 최근 알람 이벤트: {len(evs)}건')
 
-            elif domain == 'weather':
-                wx = snap.get('weather')
-                executed_reads.append({'step': idx, 'domain': 'weather', 'action': 'read', 'data': wx or {}})
-                if wx:
-                    output_lines.append(f"• 현재 날씨 ({wx['location']}): {wx['temperature']}°C")
+            elif domain == 'timer' and action in {'list', 'get'}:
+                if action == 'list':
+                    req = WidgetRequest(request_id=step_key, widget='timer', action='list', args={})
+                else:
+                    ref_val = step.get('target_id') or step.get('target_title') or 'current'
+                    ttype = 'item_id' if step.get('target_id') else 'reference'
+                    req = WidgetRequest(
+                        request_id=step_key,
+                        widget='timer',
+                        action='get',
+                        target={'type': ttype, 'value': ref_val},
+                    )
+                res = await self.registry.execute(req, READ_CTX)
+                if res.status != 'success':
+                    raise ValueError(res.error.message if res.error else '타이머를 조회하지 못했습니다.')
+                executed_reads.append({'step': idx, 'domain': 'timer', 'action': action, 'data': res.data})
+                if action == 'list':
+                    output_lines.append(f"• 활성 타이머: {res.data['active_count']}개")
+                else:
+                    output_lines.append(f"• 타이머 [{res.data['label']}]: 남은 {res.data['remaining_seconds']}초")
+
+            elif domain == 'weather' and action in {'read', 'list', 'refresh'}:
+                w_action = 'refresh' if action == 'refresh' else 'read'
+                req = WidgetRequest(request_id=step_key, idempotency_key=step_key, widget='weather', action=w_action, args={})
+                ctx = TIMER_CTX if w_action == 'refresh' else READ_CTX
+                res = await self.registry.execute(req, ctx)
+                if res.status != 'success':
+                    raise ValueError(res.error.message if res.error else '날씨 정보를 조회하지 못했습니다.')
+                executed_reads.append({'step': idx, 'domain': 'weather', 'action': w_action, 'data': res.data})
+                if res.data.get('temperature') is not None:
+                    output_lines.append(f"• 현재 날씨 ({res.data.get('location_name') or '설정 지역'}): {res.data['temperature']}°C")
                 else:
                     output_lines.append('• 저장된 날씨 정보가 없습니다.')
 
-            elif domain == 'time':
-                executed_reads.append({'step': idx, 'domain': 'time', 'action': 'read', 'data': clock})
-                output_lines.append(f"• 현재 시각: {clock['local_at']} ({clock['timezone']})")
+            elif domain == 'clock' and action in {'read', 'list', 'resolve'}:
+                c_action = 'resolve' if action == 'resolve' else 'read'
+                if c_action == 'resolve':
+                    expr = (step.get('title') or step.get('target_title') or step.get('body') or '오늘').strip()
+                    req = WidgetRequest(request_id=step_key, widget='clock', action='resolve', args={'expression': expr})
+                else:
+                    req = WidgetRequest(request_id=step_key, widget='clock', action='read', args={})
+                res = await self.registry.execute(req, READ_CTX)
+                if res.status != 'success':
+                    raise ValueError(res.error.message if res.error else '시계 정보를 조회하지 못했습니다.')
+                executed_reads.append({'step': idx, 'domain': raw_domain, 'action': c_action, 'data': res.data})
+                if c_action == 'resolve':
+                    output_lines.append(f"• 날짜 해석 ({res.data['expression']}): {res.data['start']} ~ {res.data['end']}")
+                else:
+                    output_lines.append(f"• 현재 시각: {res.data['local_at']} ({res.data['timezone']})")
 
-            # 2. Immediate timer controls (Room Hub explicit exception: no confirmation needed)
+            elif domain == 'llm-response' and action in {'list', 'read'}:
+                if action == 'list':
+                    req = WidgetRequest(request_id=step_key, widget='llm-response', action='list', args={})
+                else:
+                    ref_val = step.get('target_id') or 'latest'
+                    ttype = 'item_id' if step.get('target_id') else 'reference'
+                    req = WidgetRequest(
+                        request_id=step_key,
+                        widget='llm-response',
+                        action='read',
+                        target={'type': ttype, 'value': ref_val},
+                    )
+                res = await self.registry.execute(req, READ_CTX)
+                if res.status != 'success':
+                    raise ValueError(res.error.message if res.error else 'AI 응답 위젯 기록을 조회하지 못했습니다.')
+                executed_reads.append({'step': idx, 'domain': 'llm-response', 'action': action, 'data': res.data})
+                if action == 'list':
+                    output_lines.append(f"• AI 응답 위젯 기록: 최근 에이전트 실행 {res.data['agent_run_count']}건")
+                else:
+                    output_lines.append(f"• 최근 AI 응답: {res.data['summary_text'][:120]}")
+
+            elif domain == 'layout' and action in {'read', 'list', 'get_data'}:
+                l_action = 'get_data' if action == 'get_data' else 'read'
+                if l_action == 'get_data':
+                    kind = (step.get('target_id') or step.get('target_title') or step.get('category') or 'note').strip()
+                    req = WidgetRequest(
+                        request_id=step_key,
+                        widget='layout',
+                        action='get_data',
+                        target={'type': 'widget_id', 'value': kind},
+                    )
+                else:
+                    req = WidgetRequest(request_id=step_key, widget='layout', action='read', args={})
+                res = await self.registry.execute(req, READ_CTX)
+                if res.status != 'success':
+                    raise ValueError(res.error.message if res.error else '대시보드 레이아웃을 조회하지 못했습니다.')
+                executed_reads.append({'step': idx, 'domain': 'layout', 'action': l_action, 'data': res.data})
+                if l_action == 'read':
+                    w_names = ', '.join(f"{w['id']}({w['type']})" for w in res.data['widgets'])
+                    output_lines.append(f"• 대시보드 배치 위젯 ({len(res.data['widgets'])}개): {w_names}")
+                else:
+                    output_lines.append(f"• 위젯 데이터 [{res.data['widget_type']}] 조회 완료")
+
+            elif domain == 'settings' and action in {'read', 'list'}:
+                req = WidgetRequest(request_id=step_key, widget='settings', action='read', args={})
+                res = await self.registry.execute(req, READ_CTX)
+                if res.status != 'success':
+                    raise ValueError(res.error.message if res.error else '허브 설정을 조회하지 못했습니다.')
+                executed_reads.append({'step': idx, 'domain': 'settings', 'action': 'read', 'data': res.data})
+                output_lines.append(
+                    f"• 허브 설정: 제목='{res.data['title']}', 테마={res.data['theme']}, 시간대={res.data['timezone']}, 위치='{res.data['location_name']}'"
+                )
+
+            elif domain == 'system' and action in {'status', 'read', 'list', 'devices', 'audit'}:
+                s_action = action if action in {'status', 'devices', 'audit'} else 'status'
+                s_args = {'limit': step.get('duration_seconds') or 20} if s_action == 'audit' else {}
+                req = WidgetRequest(request_id=step_key, widget='system', action=s_action, args=s_args)
+                res = await self.registry.execute(req, READ_CTX)
+                if res.status != 'success':
+                    raise ValueError(res.error.message if res.error else '시스템 정보를 조회하지 못했습니다.')
+                executed_reads.append({'step': idx, 'domain': 'system', 'action': s_action, 'data': res.data})
+                if s_action == 'status':
+                    output_lines.append(
+                        f"• 시스템 상태 (rev {res.data['revision']}): 작업 {res.data['task_count']}개, 메모 {res.data['note_count']}개, 알람 {res.data['alarm_count']}개, 위젯 {res.data['placed_widget_count']}개"
+                    )
+                elif s_action == 'devices':
+                    output_lines.append(f"• 등록된 디스플레이 기기: {res.data['count']}대")
+                else:
+                    output_lines.append(f"• 최근 감사 로그: {res.data['count']}건")
+
+            # --- 2. Immediate timer controls via WidgetRegistry.execute(req, TIMER_CTX) ---
             elif domain == 'timer' and action in {'start', 'stop'}:
                 if action == 'start':
                     dur = step.get('duration_seconds')
@@ -750,7 +1113,7 @@ class PersonalAgentService:
                     f"• 타이머 {'시작' if action == 'start' else '종료'} 완료: {res.data['label']} ({res.data['duration_seconds']}초)"
                 )
 
-            # 3. Confirmation-gated mutations (todo, calendar, alarm, memo)
+            # --- 3. Confirmation-gated mutations via WidgetRegistry.execute(req, PREVIEW_CTX) ---
             elif domain in {'todo', 'calendar'} and action == 'add':
                 title = (step.get('title') or step.get('target_title') or '').strip()
                 day = step.get('date') or step.get('start_date') or clock['today']
@@ -778,15 +1141,26 @@ class PersonalAgentService:
                 slot_conflicts = [
                     t['title'] for t in same_day if task_create.time and t.get('time') == task_create.time
                 ]
-                staged_mutations.append({
-                    'step': idx,
-                    'domain': domain,
-                    'action': 'add',
-                    'summary': f"{day} {task_create.time or '종일'} · {task_create.title} ({'일정' if domain == 'calendar' else '할 일'} 추가)",
-                    'payload': task_create.model_dump(mode='json'),
-                    'conflicts': slot_conflicts,
-                    'target_lock': None,
-                })
+                payload_dict = task_create.model_dump(mode='json')
+                req = WidgetRequest(
+                    request_id=step_key,
+                    idempotency_key=step_key,
+                    widget=domain,
+                    action='add',
+                    args=payload_dict,
+                )
+                staged_mutations.append(
+                    await self._stage_via_protocol(
+                        step_idx=idx,
+                        domain=domain,
+                        action='add',
+                        req=req,
+                        summary=f"{day} {task_create.time or '종일'} · {task_create.title} ({'일정' if domain == 'calendar' else '할 일'} 추가)",
+                        payload=payload_dict,
+                        target_lock=None,
+                        conflicts=slot_conflicts,
+                    )
+                )
 
             elif domain in {'todo', 'calendar'} and action in {'complete', 'reopen', 'delete', 'update'}:
                 target = self._resolve_task_target(step, tz_name, at_iso)
@@ -797,6 +1171,7 @@ class PersonalAgentService:
                     'title': target['title'],
                     'date': target['date'],
                 }
+                adapter_widget = 'todo' if action in {'complete', 'reopen'} else domain
                 if action == 'update':
                     patch_fields: dict[str, Any] = {'version': target['version']}
                     if step.get('title'):
@@ -814,24 +1189,48 @@ class PersonalAgentService:
                     if step.get('body') is not None:
                         patch_fields['notes'] = step['body']
                     patch = TaskPatch.model_validate(patch_fields)
-                    staged_mutations.append({
-                        'step': idx,
-                        'domain': domain,
-                        'action': 'update',
-                        'summary': f"일정/할 일 수정: {target['title']} (v{target['version']})",
-                        'payload': patch.model_dump(exclude_unset=True, mode='json'),
-                        'target_lock': lock,
-                    })
+                    payload_dict = patch.model_dump(exclude_unset=True, mode='json')
+                    req = WidgetRequest(
+                        request_id=step_key,
+                        idempotency_key=step_key,
+                        widget=adapter_widget,
+                        action='update',
+                        target={'type': 'item_id', 'value': target['id']},
+                        args=payload_dict,
+                    )
+                    staged_mutations.append(
+                        await self._stage_via_protocol(
+                            step_idx=idx,
+                            domain=domain,
+                            action='update',
+                            req=req,
+                            summary=f"일정/할 일 수정: {target['title']} (v{target['version']})",
+                            payload=payload_dict,
+                            target_lock=lock,
+                        )
+                    )
                 else:
                     verb_ko = {'complete': '완료', 'reopen': '완료 취소', 'delete': '삭제'}[action]
-                    staged_mutations.append({
-                        'step': idx,
-                        'domain': domain,
-                        'action': action,
-                        'summary': f"{target['date']} · {target['title']} ({verb_ko}, v{target['version']})",
-                        'payload': {'version': target['version']},
-                        'target_lock': lock,
-                    })
+                    payload_dict = {'version': target['version']}
+                    req = WidgetRequest(
+                        request_id=step_key,
+                        idempotency_key=step_key,
+                        widget=adapter_widget,
+                        action=action,
+                        target={'type': 'item_id', 'value': target['id']},
+                        args=payload_dict,
+                    )
+                    staged_mutations.append(
+                        await self._stage_via_protocol(
+                            step_idx=idx,
+                            domain=domain,
+                            action=action,
+                            req=req,
+                            summary=f"{target['date']} · {target['title']} ({verb_ko}, v{target['version']})",
+                            payload=payload_dict,
+                            target_lock=lock,
+                        )
+                    )
 
             elif domain == 'alarm' and action == 'set':
                 tm = step.get('time')
@@ -846,62 +1245,124 @@ class PersonalAgentService:
                 elif step.get('repeat_frequency') == 'daily' and not weekdays:
                     weekdays = [0, 1, 2, 3, 4, 5, 6]
                 alarm_date = None if repeat_mode == 'weekly' else (step.get('date') or clock['today'])
-                alarm_create = AlarmCreate(
-                    request_id=f'agent_alarm_{uid()[:16]}',
-                    label=(step.get('title') or step.get('target_title') or '알람').strip()[:120],
-                    time=tm,
-                    timezone=tz_name,
-                    repeat=repeat_mode,
-                    date=alarm_date,
-                    weekdays=weekdays if repeat_mode == 'weekly' else [],
-                    enabled=True,
+                alarm_args = {
+                    'label': (step.get('title') or step.get('target_title') or '알람').strip()[:120],
+                    'time': tm,
+                    'timezone': tz_name,
+                    'repeat': repeat_mode,
+                    'date': alarm_date,
+                    'weekdays': weekdays if repeat_mode == 'weekly' else [],
+                    'enabled': True,
+                }
+                req = WidgetRequest(
+                    request_id=step_key,
+                    idempotency_key=step_key,
+                    widget='alarm',
+                    action='set',
+                    args=alarm_args,
                 )
-                # Validate future time & DST via LifeService
-                self.life._validated_alarm(alarm_create)
-                staged_mutations.append({
-                    'step': idx,
-                    'domain': 'alarm',
-                    'action': 'set',
-                    'summary': f"알람 설정: {alarm_date or ('요일반복 ' + str(weekdays))} {tm} · {alarm_create.label}",
-                    'payload': alarm_create.model_dump(mode='json'),
-                    'target_lock': None,
-                })
+                staged_mutations.append(
+                    await self._stage_via_protocol(
+                        step_idx=idx,
+                        domain='alarm',
+                        action='set',
+                        req=req,
+                        summary=f"알람 설정: {alarm_date or ('요일반복 ' + str(weekdays))} {tm} · {alarm_args['label']}",
+                        payload=alarm_args,
+                        target_lock=None,
+                    )
+                )
 
-            elif domain == 'alarm' and action == 'cancel':
+            elif domain == 'alarm' and action in {'cancel', 'delete', 'update'}:
                 alarm = self._resolve_alarm_target(step)
-                staged_mutations.append({
-                    'step': idx,
-                    'domain': 'alarm',
-                    'action': 'cancel',
-                    'summary': f"알람 취소: {alarm['time']} · {alarm['label']} (v{alarm['version']})",
-                    'payload': {'version': alarm['version']},
-                    'target_lock': {
-                        'table': 'hub_alarms',
-                        'id': alarm['id'],
+                lock = {
+                    'table': 'hub_alarms',
+                    'id': alarm['id'],
+                    'version': alarm['version'],
+                    'title': alarm['label'],
+                }
+                if action == 'update':
+                    upd_args = {
+                        'label': (step.get('title') or alarm['label']).strip()[:120],
+                        'time': step.get('time') or alarm['time'],
+                        'timezone': alarm.get('timezone') or tz_name,
+                        'repeat': alarm['repeat'],
+                        'date': step.get('date') or alarm.get('date'),
+                        'weekdays': step.get('weekdays') if step.get('weekdays') is not None else alarm.get('weekdays', []),
+                        'enabled': True if step.get('pinned') is None else bool(step['pinned']),
                         'version': alarm['version'],
-                        'title': alarm['label'],
-                    },
-                })
+                    }
+                    req = WidgetRequest(
+                        request_id=step_key,
+                        idempotency_key=step_key,
+                        widget='alarm',
+                        action='update',
+                        target={'type': 'item_id', 'value': alarm['id']},
+                        args=upd_args,
+                    )
+                    staged_mutations.append(
+                        await self._stage_via_protocol(
+                            step_idx=idx,
+                            domain='alarm',
+                            action='update',
+                            req=req,
+                            summary=f"알람 수정: {upd_args['time']} · {upd_args['label']} (v{alarm['version']})",
+                            payload=upd_args,
+                            target_lock=lock,
+                        )
+                    )
+                else:
+                    payload_dict = {'version': alarm['version']}
+                    req = WidgetRequest(
+                        request_id=step_key,
+                        idempotency_key=step_key,
+                        widget='alarm',
+                        action='cancel',
+                        target={'type': 'item_id', 'value': alarm['id']},
+                        args=payload_dict,
+                    )
+                    staged_mutations.append(
+                        await self._stage_via_protocol(
+                            step_idx=idx,
+                            domain='alarm',
+                            action='cancel',
+                            req=req,
+                            summary=f"알람 취소: {alarm['time']} · {alarm['label']} (v{alarm['version']})",
+                            payload=payload_dict,
+                            target_lock=lock,
+                        )
+                    )
 
-            elif domain == 'memo' and action in {'write', 'append', 'clear'}:
+            elif domain == 'memo' and action in {'write', 'append', 'clear', 'delete'}:
                 if action == 'write' and not step.get('target_id') and not step.get('target_title'):
                     title = (step.get('title') or '').strip()
                     body = step.get('body') or ''
                     if not title:
                         raise ValueError('새 메모의 제목을 지정해 주세요.')
-                    staged_mutations.append({
-                        'step': idx,
-                        'domain': 'memo',
-                        'action': 'write_new',
-                        'summary': f'새 메모 작성: {title}',
-                        'payload': {
-                            'title': title,
-                            'body': body,
-                            'pinned': bool(step.get('pinned') or False),
-                            'shared': bool(step.get('shared') or False),
-                        },
-                        'target_lock': None,
-                    })
+                    payload_dict = {
+                        'title': title,
+                        'body': body,
+                        'pinned': bool(step.get('pinned') or False),
+                        'shared': bool(step.get('shared') or False),
+                    }
+                    req = WidgetRequest(
+                        request_id=step_key,
+                        idempotency_key=step_key,
+                        widget='memo',
+                        action='write',
+                        args=payload_dict,
+                    )
+                    staged_mutations.append(
+                        await self._stage_via_protocol(
+                            step_idx=idx,
+                            domain='memo',
+                            action='write_new',
+                            req=req,
+                            summary=f'새 메모 작성: {title}',
+                            payload=payload_dict,
+                            target_lock=None,
+                        )
+                    )
                 else:
                     note = self._resolve_memo_target(step, at_iso)
                     lock = {
@@ -910,39 +1371,252 @@ class PersonalAgentService:
                         'version': note['version'],
                         'title': note['title'],
                     }
-                    if action == 'clear':
-                        new_body = ''
+                    if action == 'delete':
+                        payload_dict = {'version': note['version']}
+                        req = WidgetRequest(
+                            request_id=step_key,
+                            idempotency_key=step_key,
+                            widget='memo',
+                            action='delete',
+                            target={'type': 'item_id', 'value': note['id']},
+                            args=payload_dict,
+                        )
+                        summary = f"메모 삭제: {note['title']} (v{note['version']})"
+                    elif action == 'clear':
+                        payload_dict = {'version': note['version']}
+                        req = WidgetRequest(
+                            request_id=step_key,
+                            idempotency_key=step_key,
+                            widget='memo',
+                            action='clear',
+                            target={'type': 'item_id', 'value': note['id']},
+                            args=payload_dict,
+                        )
                         summary = f"메모 본문 비우기: {note['title']} (v{note['version']})"
                     elif action == 'append':
                         add_text = step.get('body') or ''
                         if not add_text.strip():
                             raise ValueError('메모에 덧붙일 내용을 말씀해 주세요.')
-                        new_body = note['body'] + ('\n' if note['body'] else '') + add_text
+                        sep_text = ('\n' + add_text) if (note['body'] and not add_text.startswith('\n')) else add_text
+                        payload_dict = {'text': sep_text, 'version': note['version']}
+                        req = WidgetRequest(
+                            request_id=step_key,
+                            idempotency_key=step_key,
+                            widget='memo',
+                            action='append',
+                            target={'type': 'item_id', 'value': note['id']},
+                            args=payload_dict,
+                        )
                         summary = f"메모 내용 추가: {note['title']} (v{note['version']})"
                     else:
                         new_body = step.get('body') or ''
-                        summary = f"메모 본문 교체: {note['title']} (v{note['version']})"
-                    staged_mutations.append({
-                        'step': idx,
-                        'domain': 'memo',
-                        'action': action,
-                        'summary': summary,
-                        'payload': {
+                        payload_dict = {
                             'title': step.get('title') or note['title'],
                             'body': new_body,
                             'pinned': note['pinned'] if step.get('pinned') is None else bool(step['pinned']),
                             'shared': note['shared'] if step.get('shared') is None else bool(step['shared']),
                             'version': note['version'],
-                        },
-                        'target_lock': lock,
-                    })
+                        }
+                        req = WidgetRequest(
+                            request_id=step_key,
+                            idempotency_key=step_key,
+                            widget='memo',
+                            action='write',
+                            target={'type': 'item_id', 'value': note['id']},
+                            args=payload_dict,
+                        )
+                        summary = f"메모 본문 교체: {note['title']} (v{note['version']})"
+                    staged_mutations.append(
+                        await self._stage_via_protocol(
+                            step_idx=idx,
+                            domain='memo',
+                            action=action,
+                            req=req,
+                            summary=summary,
+                            payload=payload_dict,
+                            target_lock=lock,
+                        )
+                    )
+
+            elif domain == 'layout' and action in {'update_widget', 'update', 'add_widget', 'add', 'remove_widget', 'delete', 'set_data'}:
+                current_layout = self.store.get('layout') or {'version': 1, 'widgets': []}
+                layout_ver = current_layout.get('version', 1)
+                if action in {'update_widget', 'update'}:
+                    w_inst = self._resolve_widget_instance(step)
+                    w_args: dict[str, Any] = {'version': layout_ver}
+                    if step.get('title') is not None:
+                        w_args['title'] = step['title']
+                    if step.get('body'):
+                        try:
+                            extra = json.loads(step['body'])
+                            if isinstance(extra, dict):
+                                for k in ('x', 'y', 'w', 'h', 'config', 'title'):
+                                    if k in extra:
+                                        w_args[k] = extra[k]
+                        except ValueError:
+                            pass
+                    req = WidgetRequest(
+                        request_id=step_key,
+                        idempotency_key=step_key,
+                        widget='layout',
+                        action='update_widget',
+                        target={'type': 'widget_id', 'value': w_inst['id']},
+                        args=w_args,
+                    )
+                    staged_mutations.append(
+                        await self._stage_via_protocol(
+                            step_idx=idx,
+                            domain='layout',
+                            action='update_widget',
+                            req=req,
+                            summary=f"대시보드 위젯 수정: {w_inst['id']} (v{layout_ver})",
+                            payload=w_args,
+                            target_lock=None,
+                        )
+                    )
+                elif action in {'add_widget', 'add'}:
+                    w_type = (step.get('category') or step.get('target_title') or 'note').strip()
+                    w_id = (step.get('target_id') or f"{w_type}-{uid()[:6]}").strip()
+                    w_args = {
+                        'version': layout_ver,
+                        'id': w_id,
+                        'type': w_type,
+                        'title': step.get('title') or w_type,
+                        'x': 0,
+                        'y': 0,
+                        'w': 4,
+                        'h': 2,
+                    }
+                    if step.get('body'):
+                        try:
+                            extra = json.loads(step['body'])
+                            if isinstance(extra, dict):
+                                for k in ('x', 'y', 'w', 'h', 'config', 'title', 'id', 'type'):
+                                    if k in extra:
+                                        w_args[k] = extra[k]
+                        except ValueError:
+                            pass
+                    req = WidgetRequest(
+                        request_id=step_key,
+                        idempotency_key=step_key,
+                        widget='layout',
+                        action='add_widget',
+                        args=w_args,
+                    )
+                    staged_mutations.append(
+                        await self._stage_via_protocol(
+                            step_idx=idx,
+                            domain='layout',
+                            action='add_widget',
+                            req=req,
+                            summary=f"대시보드 위젯 추가: {w_args['id']} ({w_args['type']})",
+                            payload=w_args,
+                            target_lock=None,
+                        )
+                    )
+                elif action in {'remove_widget', 'delete'}:
+                    w_inst = self._resolve_widget_instance(step)
+                    w_args = {'version': layout_ver}
+                    req = WidgetRequest(
+                        request_id=step_key,
+                        idempotency_key=step_key,
+                        widget='layout',
+                        action='remove_widget',
+                        target={'type': 'widget_id', 'value': w_inst['id']},
+                        args=w_args,
+                    )
+                    staged_mutations.append(
+                        await self._stage_via_protocol(
+                            step_idx=idx,
+                            domain='layout',
+                            action='remove_widget',
+                            req=req,
+                            summary=f"대시보드 위젯 제거: {w_inst['id']} (v{layout_ver})",
+                            payload=w_args,
+                            target_lock=None,
+                        )
+                    )
+                else:
+                    kind = (step.get('target_id') or step.get('target_title') or step.get('category') or 'note').strip()
+                    custom_data: dict[str, Any] = {}
+                    if step.get('body'):
+                        try:
+                            parsed = json.loads(step['body'])
+                            if isinstance(parsed, dict):
+                                custom_data = parsed
+                            else:
+                                custom_data = {'value': parsed}
+                        except ValueError:
+                            custom_data = {'note': step['body']}
+                    req = WidgetRequest(
+                        request_id=step_key,
+                        idempotency_key=step_key,
+                        widget='layout',
+                        action='set_data',
+                        target={'type': 'widget_id', 'value': kind},
+                        args={'data': custom_data},
+                    )
+                    staged_mutations.append(
+                        await self._stage_via_protocol(
+                            step_idx=idx,
+                            domain='layout',
+                            action='set_data',
+                            req=req,
+                            summary=f'위젯 커스텀 데이터 저장: {kind}',
+                            payload={'data': custom_data},
+                            target_lock=None,
+                        )
+                    )
+
+            elif domain == 'settings' and action == 'update':
+                s_args: dict[str, Any] = {}
+                if step.get('title'):
+                    s_args['title'] = step['title'].strip()
+                if step.get('target_title'):
+                    s_args['location_name'] = step['target_title'].strip()
+                for candidate in (step.get('category'), step.get('body')):
+                    if not candidate:
+                        continue
+                    c_str = candidate.strip()
+                    if c_str in {'light', 'dark'}:
+                        s_args['theme'] = c_str
+                    elif '/' in c_str or c_str == 'UTC':
+                        s_args['timezone'] = c_str
+                    elif c_str.startswith('{'):
+                        try:
+                            extra = json.loads(c_str)
+                            if isinstance(extra, dict):
+                                s_args.update(extra)
+                        except ValueError:
+                            pass
+                if step.get('duration_seconds') and 5 <= step['duration_seconds'] <= 180:
+                    s_args['weather_interval_minutes'] = step['duration_seconds']
+                req = WidgetRequest(
+                    request_id=step_key,
+                    idempotency_key=step_key,
+                    widget='settings',
+                    action='update',
+                    args=s_args,
+                )
+                staged_mutations.append(
+                    await self._stage_via_protocol(
+                        step_idx=idx,
+                        domain='settings',
+                        action='update',
+                        req=req,
+                        summary=f"허브 설정 변경: {_json_dump(s_args)}",
+                        payload=s_args,
+                        target_lock=None,
+                    )
+                )
+
             else:
                 raise ValueError(f'지원하지 않는 도메인/동작 조합입니다: {domain}.{action}')
 
         return executed_reads, staged_mutations, output_lines
 
     async def submit_command(self, body: AgentCommandInput) -> dict[str, Any]:
-        """Process a natural-language command through the 4-tier Personal AI Agent."""
+        """Process a natural-language command through the Personal AI Agent."""
         with self._db() as db:
             existing = db.execute(
                 'SELECT id FROM hub_agent_runs WHERE request_key = ?',
@@ -999,7 +1673,6 @@ class PersonalAgentService:
                     model_used = llm_res['selected_model']
                     cost_micros = llm_res['cost_microdollars']
                 except OpenAIGatewayError as exc:
-                    # Graceful fallback to Tier 0 or safe clarification if budget exceeded or offline
                     tier_used = 'tier0_fallback'
                     model_used = 'local/fallback'
                     fallback_plan = self._try_tier0_plan(body.text, now_iso, tz_name)
@@ -1096,25 +1769,28 @@ class PersonalAgentService:
         snap: dict[str, Any],
         started: float,
     ) -> dict[str, Any]:
-        """Generate a holistic daily briefing (OpenAI synthesized when budget permits, deterministic fallback)."""
+        """Generate a holistic daily briefing (GPT-6.1 Sol High synthesized when budget permits, deterministic fallback)."""
         now_iso = snap['as_of']
         det_text = self.format_deterministic_briefing(snap)
         tier_used = 'tier0_deterministic_briefing'
         model_used = 'local/deterministic'
         cost_micros = 0
-        plan_data: dict[str, Any] = {'deterministic_briefing': det_text, 'snapshot_summary': {
-            'today_task_count': len(snap['today_tasks']),
-            'overdue_count': len(snap['overdue_tasks']),
-            'conflict_count': len(snap['schedule_conflicts']),
-            'active_alarm_count': len(snap['active_alarms']),
-            'memo_count': len(snap['note_catalog']),
-        }}
+        plan_data: dict[str, Any] = {
+            'deterministic_briefing': det_text,
+            'snapshot_summary': {
+                'today_task_count': len(snap['today_tasks']),
+                'overdue_count': len(snap['overdue_tasks']),
+                'conflict_count': len(snap['schedule_conflicts']),
+                'active_alarm_count': len(snap['active_alarms']),
+                'memo_count': len(snap['note_catalog']),
+            },
+        }
         summary_text = det_text
 
         if body.mode != 'local_only' and self.gateway.key_configured():
             try:
                 sys_prompt = (
-                    '당신은 사용자의 일정, 할 일, 알람, 메모, 날씨를 종합 브리핑하는 개인 AI 비서입니다. '
+                    '당신은 사용자의 일정, 할 일, 알람, 메모, 날씨를 종합 브리핑하는 개인 AI 비서(GPT-6.1 Sol High)입니다. '
                     '제공된 서버 스냅샷 데이터만 근거로 브리핑과 우선순위 추천을 작성하세요. '
                     '스냅샷에 없는 일정이나 사실을 절대 지어내지 마세요.'
                 )
@@ -1179,7 +1855,7 @@ class PersonalAgentService:
         return self.get_run(run_id) | {'duplicate': False}
 
     async def confirm_run(self, run_id: str, preview_sha256: str) -> dict[str, Any]:
-        """Atomically verify preview digest, expiry, and target versions, then execute mutations."""
+        """Atomically verify preview digest, expiry, and target versions, then execute via WidgetRegistry."""
         from fastapi import HTTPException
         async with self.confirm_lock:
             run = self.get_run(run_id)
@@ -1220,51 +1896,29 @@ class PersonalAgentService:
 
             results: list[dict[str, Any]] = []
             for m in preview.get('mutations', []):
-                domain = m['domain']
-                action = m['action']
-                payload = m['payload']
-                lock = m.get('target_lock')
-
-                if domain in {'todo', 'calendar'} and action == 'add':
-                    res = await self.task_services.add(TaskCreate.model_validate(payload))
-                    results.append({'step': m['step'], 'domain': domain, 'action': 'add', 'result': res})
-                elif domain in {'todo', 'calendar'} and action == 'update':
-                    res = await self.task_services.update(lock['id'], TaskPatch.model_validate(payload))
-                    results.append({'step': m['step'], 'domain': domain, 'action': 'update', 'result': res})
-                elif domain in {'todo', 'calendar'} and action in {'complete', 'reopen'}:
-                    res = await self.task_services.complete(
-                        lock['id'],
-                        TaskCompletion(version=payload['version'], completed=(action == 'complete')),
-                        session={'role': 'admin', 'device_id': None},
-                    )
-                    results.append({'step': m['step'], 'domain': domain, 'action': action, 'result': res})
-                elif domain in {'todo', 'calendar'} and action == 'delete':
-                    res = await self.task_services.delete(lock['id'], scope='one', version=payload['version'])
-                    results.append({'step': m['step'], 'domain': domain, 'action': 'delete', 'result': res})
-                elif domain == 'alarm' and action == 'set':
-                    res = await asyncio.to_thread(self.life.create_alarm, AlarmCreate.model_validate(payload))
-                    await self._notify('alarm.created', res['id'])
-                    results.append({'step': m['step'], 'domain': 'alarm', 'action': 'set', 'result': res})
-                elif domain == 'alarm' and action == 'cancel':
-                    res = await asyncio.to_thread(self.life.delete_alarm, lock['id'], payload['version'])
-                    await self._notify('alarm.deleted', lock['id'])
-                    results.append({'step': m['step'], 'domain': 'alarm', 'action': 'cancel', 'result': res})
-                elif domain == 'memo' and action == 'write_new':
-                    note_create = NoteCreate(
-                        request_id=f'agent_note_{run_id[:16]}_{m["step"]}',
-                        title=payload['title'],
-                        body=payload['body'],
-                        pinned=payload['pinned'],
-                        shared=payload['shared'],
-                    )
-                    res = await asyncio.to_thread(self.life.create_note, note_create)
-                    await self._notify('note.created', res['id'])
-                    results.append({'step': m['step'], 'domain': 'memo', 'action': 'write_new', 'result': res})
-                elif domain == 'memo' and action in {'write', 'append', 'clear'}:
-                    note_update = NoteUpdate.model_validate(payload)
-                    res = await asyncio.to_thread(self.life.update_note, lock['id'], note_update)
-                    await self._notify('note.updated', lock['id'])
-                    results.append({'step': m['step'], 'domain': 'memo', 'action': action, 'result': res})
+                req = WidgetRequest.model_validate(m['widget_request'])
+                expected_digest = m['request_digest']
+                if request_digest(req) != expected_digest:
+                    raise HTTPException(409, '개별 위젯 요청 다이제스트가 손상되었습니다.')
+                confirm_ctx = ExecutionContext(
+                    principal=f'personal-agent-confirm:{run_id}',
+                    role='admin',
+                    permissions=frozenset({'read', 'write', 'control'}),
+                    confirmed_digest=expected_digest,
+                )
+                res = await self.registry.execute(req, confirm_ctx)
+                if res.status != 'success':
+                    code = 409 if res.status == 'conflict' else 400
+                    msg = res.error.message if res.error else '위젯 어댑터 실행 중 오류가 발생했습니다.'
+                    raise HTTPException(code, msg)
+                results.append({
+                    'step': m['step'],
+                    'domain': m['domain'],
+                    'action': m['action'],
+                    'adapter': res.meta.adapter,
+                    'source_of_truth': res.meta.source_of_truth,
+                    'result': res.data,
+                })
 
             stamp = utcnow()
             receipt = {
@@ -1334,16 +1988,18 @@ class PersonalAgentService:
         }
 
     def status(self) -> dict[str, Any]:
+        pol = self.governor.policy()
         return {
             'agent_version': AGENT_VERSION,
             'openai': self.gateway.readiness(),
             'budget': self.governor.summary(),
-            'domains': ['todo', 'calendar', 'alarm', 'memo', 'timer', 'weather', 'time', 'briefing'],
+            'domains': list(ALL_ADAPTER_DOMAINS) + ['briefing'],
+            'adapters': self.registry.list_widgets(),
             'tiers': {
                 'tier0': 'Local deterministic rules ($0, <5ms)',
-                'tier1_stt': self.governor.policy().stt_model,
-                'tier2_fast': self.governor.policy().fast_model,
-                'tier3_deep': self.governor.policy().deep_model,
+                'tier1_stt': pol.stt_model,
+                'tier2_fast': f'{pol.fast_model} (reasoning_effort={pol.reasoning_effort})',
+                'tier3_deep': f'{pol.deep_model} (reasoning_effort={pol.reasoning_effort})',
             },
         }
 
@@ -1385,11 +2041,24 @@ class PersonalAgentService:
 
 
 def register_agent_routes(app, service: PersonalAgentService, admin):
-    from fastapi import Depends, File, Form, HTTPException, UploadFile
+    from fastapi import Depends, File, Form, HTTPException, Request, UploadFile
 
     @app.get('/api/agent/status')
     async def agent_status(_=Depends(admin)):
         return service.status()
+
+    @app.get('/api/agent/adapters')
+    async def agent_adapters(_=Depends(admin)):
+        return service.registry.manifest()
+
+    @app.get('/api/agent/adapters/health')
+    async def agent_adapters_health(_=Depends(admin)):
+        return await service.adapters_health()
+
+    @app.post('/api/agent/adapters/execute')
+    async def agent_adapters_execute(request: Request, _=Depends(admin)):
+        body = await request.json()
+        return await service.execute_adapter(body, confirmed=False)
 
     @app.get('/api/agent/budget')
     async def agent_budget(month: str | None = None, _=Depends(admin)):
@@ -1459,4 +2128,3 @@ def register_agent_routes(app, service: PersonalAgentService, admin):
     @app.post('/api/agent/runs/{run_id}/cancel')
     async def agent_run_cancel(run_id: str, _=Depends(admin)):
         return await service.cancel_run(run_id)
-

@@ -328,7 +328,7 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
  app.state.widget_protocol=protocol
  llm.set_widget_registry(protocol)
  widget_protocol.register_routes(app,protocol,admin)
- personal_agent=PersonalAgentService(store,life,timers,protocol,task_services,speech=speech,gateway=agent_gateway,changed=changed)
+ personal_agent=PersonalAgentService(store,life,timers,None,task_services,speech=speech,gateway=agent_gateway,changed=changed,refresh_weather=refresh_weather,widget_root=widget_root)
  app.state.personal_agent=personal_agent
  register_agent_routes(app,personal_agent,admin)
  @app.get('/api/admin/export')

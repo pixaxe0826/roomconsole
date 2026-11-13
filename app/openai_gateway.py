@@ -13,12 +13,20 @@ import math
 import os
 import time
 from typing import Any
+import urllib.error
 from urllib.parse import urlsplit
+import urllib.request
+import uuid
 
 from .openai_budget import BudgetGovernor, UsageCategory, calculate_cost_microdollars
 
 MAX_RESPONSE_BYTES = 512 * 1024
 OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1'
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, msg, headers, fp)
 
 
 class OpenAIGatewayError(Exception):
@@ -66,10 +74,17 @@ def extract_usage(body: dict[str, Any]) -> dict[str, int]:
     completion_tokens = usage.get('completion_tokens')
     details = usage.get('prompt_tokens_details') if isinstance(usage.get('prompt_tokens_details'), dict) else {}
     cached_tokens = details.get('cached_tokens')
+    comp_details = (
+        usage.get('completion_tokens_details')
+        if isinstance(usage.get('completion_tokens_details'), dict)
+        else {}
+    )
+    reasoning_tokens = comp_details.get('reasoning_tokens')
     return {
         'prompt_tokens': prompt_tokens if type(prompt_tokens) is int and prompt_tokens >= 0 else 0,
         'cached_tokens': cached_tokens if type(cached_tokens) is int and cached_tokens >= 0 else 0,
         'completion_tokens': completion_tokens if type(completion_tokens) is int and completion_tokens >= 0 else 0,
+        'reasoning_tokens': reasoning_tokens if type(reasoning_tokens) is int and reasoning_tokens >= 0 else 0,
     }
 
 
@@ -108,7 +123,7 @@ class OpenAIGateway:
             'monthly_cap_usd': budget['monthly_cap_usd'],
         }
 
-    async def _post_json(self, path: str, payload: dict[str, Any], timeout: float = 30.0) -> tuple[dict[str, Any], str]:
+    async def _post_json(self, path: str, payload: dict[str, Any], timeout: float = 60.0) -> tuple[dict[str, Any], str]:
         key = self._api_key()
         if not key and self.base_url.startswith('https://'):
             raise OpenAIGatewayError(
@@ -130,6 +145,51 @@ class OpenAIGateway:
             raw = json.dumps(body, ensure_ascii=False)
             return body, raw
 
+        labels = {
+            400: 'OpenAI 요청 형식이나 스키마를 확인하세요.',
+            401: 'OpenAI API 키 인증에 실패했습니다.',
+            403: 'OpenAI 프로젝트/모델 접근 권한을 확인하세요.',
+            404: '요청한 OpenAI 모델 ID를 확인하세요.',
+            429: 'OpenAI 요청 한도(Rate Limit/Quota)에 도달했습니다.',
+            500: 'OpenAI 서버 내부 오류입니다.',
+            503: 'OpenAI 서버가 일시적으로 응답하지 않습니다.',
+        }
+
+        if self.transport is None:
+            def _urllib_post() -> tuple[dict[str, Any], str]:
+                opener = urllib.request.build_opener(
+                    urllib.request.ProxyHandler({}),
+                    _NoRedirectHandler(),
+                )
+                req = urllib.request.Request(url, data=encoded, headers=headers, method='POST')
+                try:
+                    with opener.open(req, timeout=timeout) as resp:
+                        raw_bytes = resp.read(MAX_RESPONSE_BYTES + 1)
+                except urllib.error.HTTPError as exc:
+                    msg = labels.get(exc.code, 'OpenAI API 응답 오류입니다.')
+                    raise OpenAIGatewayError(f'OpenAI HTTP {exc.code}: {msg}', 'http_error', exc.code) from None
+                except urllib.error.URLError as exc:
+                    if isinstance(getattr(exc, 'reason', None), TimeoutError):
+                        raise OpenAIGatewayError('OpenAI 응답 제한 시간을 초과했습니다.', 'timeout') from None
+                    raise OpenAIGatewayError('OpenAI API 서버에 연결할 수 없습니다.', 'connection_failed') from None
+                except TimeoutError:
+                    raise OpenAIGatewayError('OpenAI 응답 제한 시간을 초과했습니다.', 'timeout') from None
+                if len(raw_bytes) > MAX_RESPONSE_BYTES:
+                    raise OpenAIGatewayError('OpenAI 응답이 512KiB 제한을 초과했습니다.', 'response_too_large')
+                try:
+                    raw_str = raw_bytes.decode('utf-8')
+                    parsed_obj = json.loads(
+                        raw_str,
+                        parse_constant=lambda _x: (_ for _ in ()).throw(ValueError('nonfinite')),
+                    )
+                    if not isinstance(parsed_obj, dict):
+                        raise ValueError('Expected JSON object')
+                    return parsed_obj, raw_str
+                except (UnicodeError, ValueError) as exc:
+                    raise OpenAIGatewayError('OpenAI가 유효한 JSON 응답을 반환하지 않았습니다.', 'invalid_response') from exc
+
+            return await asyncio.to_thread(_urllib_post)
+
         import httpx
         try:
             async with httpx.AsyncClient(
@@ -140,15 +200,6 @@ class OpenAIGateway:
             ) as client:
                 async with client.stream('POST', url, headers=headers, content=encoded) as res:
                     if res.status_code != 200:
-                        labels = {
-                            400: 'OpenAI 요청 형식이나 스키마를 확인하세요.',
-                            401: 'OpenAI API 키 인증에 실패했습니다.',
-                            403: 'OpenAI 프로젝트/모델 접근 권한을 확인하세요.',
-                            404: '요청한 OpenAI 모델 ID를 확인하세요.',
-                            429: 'OpenAI 요청 한도(Rate Limit/Quota)에 도달했습니다.',
-                            500: 'OpenAI 서버 내부 오류입니다.',
-                            503: 'OpenAI 서버가 일시적으로 응답하지 않습니다.',
-                        }
                         msg = labels.get(res.status_code, 'OpenAI API 응답 오류입니다.')
                         raise OpenAIGatewayError(f'OpenAI HTTP {res.status_code}: {msg}', 'http_error', res.status_code)
                     chunks: list[bytes] = []
@@ -165,7 +216,7 @@ class OpenAIGateway:
             return parsed, raw
         except OpenAIGatewayError:
             raise
-        except ( asyncio.TimeoutError, Exception ) as exc:
+        except (asyncio.TimeoutError, Exception) as exc:
             if exc.__class__.__name__.endswith('TimeoutException') or isinstance(exc, asyncio.TimeoutError):
                 raise OpenAIGatewayError('OpenAI 응답 제한 시간을 초과했습니다.', 'timeout') from None
             if exc.__class__.__name__.endswith('RequestError'):
@@ -184,9 +235,9 @@ class OpenAIGateway:
         schema_name: str,
         schema: dict[str, Any],
         requested_model: str | None = None,
-        max_output_tokens: int = 512,
+        max_output_tokens: int = 4096,
         temperature: float = 0.0,
-        timeout: float = 30.0,
+        timeout: float = 60.0,
         force_model: bool = False,
         at_iso: str | None = None,
     ) -> dict[str, Any]:
@@ -202,11 +253,12 @@ class OpenAIGateway:
         )
         if not decision.allowed_cloud:
             raise OpenAIGatewayError(
-                '월간 OpenAI API 예산 한도($100)에 도달하여 클라우드 호출을 차단했습니다. 로컬 규칙 모드로 전환합니다.',
+                '월간 OpenAI API 예산 한도에 도달하여 클라우드 호출을 차단했습니다. 로컬 규칙 모드로 전환합니다.',
                 'budget_exceeded',
                 402,
             )
 
+        is_reasoning_model = decision.selected_model.startswith(('gpt-6', 'gpt-5', 'o'))
         payload: dict[str, Any] = {
             'model': decision.selected_model,
             'messages': [
@@ -214,8 +266,6 @@ class OpenAIGateway:
                 {'role': 'user', 'content': user_text},
             ],
             'stream': False,
-            'max_tokens': decision.max_output_tokens,
-            'temperature': temperature,
             'response_format': {
                 'type': 'json_schema',
                 'json_schema': {
@@ -225,6 +275,12 @@ class OpenAIGateway:
                 },
             },
         }
+        if is_reasoning_model:
+            payload['reasoning_effort'] = decision.reasoning_effort
+            payload['max_completion_tokens'] = decision.max_output_tokens
+        else:
+            payload['max_tokens'] = decision.max_output_tokens
+            payload['temperature'] = temperature
         start = time.perf_counter()
         body, raw = await asyncio.wait_for(
             self._post_json('/chat/completions', payload, timeout=timeout),
@@ -323,6 +379,45 @@ class OpenAIGateway:
         start = time.perf_counter()
         if callable(self.transport) and not hasattr(self.transport, 'handle_async_request'):
             body = await self.transport('POST', self.base_url + '/audio/transcriptions', headers, audio_bytes)
+        elif self.transport is None:
+            def _urllib_stt() -> dict[str, Any]:
+                boundary = f'----RoomHubBoundary{uuid.uuid4().hex}'
+                parts: list[bytes] = []
+                for field_name, field_val in data.items():
+                    parts.append(
+                        f'--{boundary}\r\n'
+                        f'Content-Disposition: form-data; name="{field_name}"\r\n\r\n'
+                        f'{field_val}\r\n'.encode('utf-8')
+                    )
+                parts.append(
+                    f'--{boundary}\r\n'
+                    f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+                    f'Content-Type: {mime_type}\r\n\r\n'.encode('utf-8')
+                    + audio_bytes
+                    + f'\r\n--{boundary}--\r\n'.encode('utf-8')
+                )
+                multipart_body = b''.join(parts)
+                req_headers = {**headers, 'Content-Type': f'multipart/form-data; boundary={boundary}'}
+                opener = urllib.request.build_opener(
+                    urllib.request.ProxyHandler({}),
+                    _NoRedirectHandler(),
+                )
+                req = urllib.request.Request(
+                    self.base_url + '/audio/transcriptions',
+                    data=multipart_body,
+                    headers=req_headers,
+                    method='POST',
+                )
+                try:
+                    with opener.open(req, timeout=timeout) as resp:
+                        raw_bytes = resp.read(MAX_RESPONSE_BYTES + 1)
+                except urllib.error.HTTPError as exc:
+                    raise OpenAIGatewayError(f'OpenAI Audio HTTP {exc.code}', 'stt_http_error', exc.code) from None
+                except Exception as exc:
+                    raise OpenAIGatewayError('OpenAI 음성 전사 요청에 실패했습니다.', 'stt_failed') from exc
+                return json.loads(raw_bytes.decode('utf-8'))
+
+            body = await asyncio.to_thread(_urllib_stt)
         else:
             import httpx
             try:

@@ -30,6 +30,36 @@ MICRODOLLARS_PER_USD = 1_000_000
 #   Wait: $0.15 per 1M tokens = 0.15 microdollars per token = 150,000 microdollars per 1M tokens.
 # - Audio rates are microdollars per minute.
 PRICING_CATALOG: dict[str, dict[str, int]] = {
+    'gpt-6.1-sol': {
+        'input_per_1m_micros': 2_500_000,     # $2.50 / 1M input tokens
+        'cached_per_1m_micros': 1_250_000,    # $1.25 / 1M cached input tokens
+        'output_per_1m_micros': 10_000_000,   # $10.00 / 1M output (incl. reasoning) tokens
+        'audio_per_min_micros': 0,
+    },
+    'gpt-6.1-terra': {
+        'input_per_1m_micros': 5_000_000,     # $5.00 / 1M input tokens
+        'cached_per_1m_micros': 2_500_000,    # $2.50 / 1M cached input tokens
+        'output_per_1m_micros': 15_000_000,   # $15.00 / 1M output tokens
+        'audio_per_min_micros': 0,
+    },
+    'gpt-6-sol': {
+        'input_per_1m_micros': 2_500_000,
+        'cached_per_1m_micros': 1_250_000,
+        'output_per_1m_micros': 10_000_000,
+        'audio_per_min_micros': 0,
+    },
+    'gpt-5.6-sol': {
+        'input_per_1m_micros': 2_000_000,
+        'cached_per_1m_micros': 1_000_000,
+        'output_per_1m_micros': 8_000_000,
+        'audio_per_min_micros': 0,
+    },
+    'o3': {
+        'input_per_1m_micros': 2_000_000,
+        'cached_per_1m_micros': 500_000,
+        'output_per_1m_micros': 8_000_000,
+        'audio_per_min_micros': 0,
+    },
     'gpt-4o-mini': {
         'input_per_1m_micros': 150_000,       # $0.15 / 1M input tokens
         'cached_per_1m_micros': 75_000,       # $0.075 / 1M cached input tokens
@@ -80,7 +110,16 @@ PRICING_CATALOG: dict[str, dict[str, int]] = {
     },
 }
 
-ALLOWED_CHAT_MODELS = ('gpt-4o-mini', 'gpt-4o', 'o3-mini')
+ALLOWED_CHAT_MODELS = (
+    'gpt-6.1-sol',
+    'gpt-6.1-terra',
+    'gpt-6-sol',
+    'gpt-5.6-sol',
+    'o3',
+    'gpt-4o-mini',
+    'gpt-4o',
+    'o3-mini',
+)
 ALLOWED_STT_MODELS = ('gpt-4o-mini-transcribe', 'gpt-4o-transcribe', 'whisper-1')
 BudgetState = Literal['NORMAL', 'SOFT_CAP', 'CONSERVATION', 'HARD_CAP_REACHED']
 UsageCategory = Literal['stt', 'agent_fast', 'agent_deep', 'briefing', 'chat', 'local_fallback']
@@ -92,8 +131,9 @@ class BudgetPolicy(BaseModel):
     soft_cap_ratio: float = Field(default=0.70, ge=0.10, le=0.95)
     conservation_ratio: float = Field(default=0.90, ge=0.20, le=0.99)
     hard_cap_ratio: float = Field(default=1.00, ge=0.50, le=1.00)
-    fast_model: Literal['gpt-4o-mini', 'gpt-4o'] = 'gpt-4o-mini'
-    deep_model: Literal['gpt-4o', 'o3-mini', 'gpt-4o-mini'] = 'gpt-4o'
+    fast_model: Literal['gpt-6.1-sol', 'gpt-4o-mini', 'gpt-4o', 'o3-mini'] = 'gpt-6.1-sol'
+    deep_model: Literal['gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-4o', 'o3', 'o3-mini', 'gpt-4o-mini'] = 'gpt-6.1-sol'
+    reasoning_effort: Literal['low', 'medium', 'high'] = 'high'
     stt_model: Literal['gpt-4o-mini-transcribe', 'gpt-4o-transcribe', 'whisper-1'] = 'gpt-4o-mini-transcribe'
     auto_downgrade: bool = True
     fallback_to_local: bool = True
@@ -115,6 +155,7 @@ class BudgetDecision:
     estimated_call_microdollars: int
     remaining_microdollars: int
     max_output_tokens: int
+    reasoning_effort: str = 'high'
 
     def data(self) -> dict:
         d = asdict(self)
@@ -273,10 +314,15 @@ class BudgetGovernor:
         selected = req_model
         downgraded = False
         max_tokens = max_output_tokens
+        reasoning = p.reasoning_effort
         reason = 'within_normal_budget'
 
         if state == 'SOFT_CAP' and p.auto_downgrade and not force_model:
-            if category != 'stt' and selected in {'gpt-4o', 'o3-mini'}:
+            if category != 'stt' and selected in {'gpt-4o', 'o3-mini', 'gpt-6.1-terra', 'o3'}:
+                selected = 'gpt-4o-mini'
+                downgraded = True
+                reason = 'soft_cap_auto_downgrade_to_gpt_4o_mini'
+            elif category != 'stt' and selected == 'gpt-6.1-sol' and p.fast_model == 'gpt-4o-mini':
                 selected = 'gpt-4o-mini'
                 downgraded = True
                 reason = 'soft_cap_auto_downgrade_to_gpt_4o_mini'
@@ -285,14 +331,20 @@ class BudgetGovernor:
                 downgraded = True
                 reason = 'soft_cap_auto_downgrade_to_mini_transcribe'
         elif state == 'CONSERVATION' and p.auto_downgrade:
-            if category != 'stt' and selected != 'gpt-4o-mini':
+            if category != 'stt' and selected in {'gpt-4o', 'o3-mini', 'o3', 'gpt-6.1-terra'}:
+                selected = 'gpt-4o-mini'
+                downgraded = True
+            elif category != 'stt' and selected == 'gpt-6.1-sol' and not force_model and p.fast_model == 'gpt-4o-mini':
                 selected = 'gpt-4o-mini'
                 downgraded = True
             if category == 'stt' and selected != 'gpt-4o-mini-transcribe':
                 selected = 'gpt-4o-mini-transcribe'
                 downgraded = True
-            max_tokens = min(max_output_tokens, 384)
+            max_tokens = min(max_output_tokens, 384) if not selected.startswith(('gpt-6', 'gpt-5', 'o')) else max(max_output_tokens, 2048)
             reason = 'conservation_mode_compact_mini'
+
+        if category != 'stt' and selected.startswith(('gpt-6', 'gpt-5', 'o')) and state in {'NORMAL', 'SOFT_CAP'}:
+            max_tokens = max(max_tokens, 4096)
 
         estimated = calculate_cost_microdollars(
             selected,
@@ -317,6 +369,7 @@ class BudgetGovernor:
                 estimated_call_microdollars=estimated,
                 remaining_microdollars=remaining,
                 max_output_tokens=max_tokens,
+                reasoning_effort=reasoning,
             )
 
         remaining = max(0, hard_limit - spent)
@@ -334,6 +387,7 @@ class BudgetGovernor:
             estimated_call_microdollars=estimated,
             remaining_microdollars=remaining,
             max_output_tokens=max_tokens,
+            reasoning_effort=reasoning,
         )
 
     def record_usage(

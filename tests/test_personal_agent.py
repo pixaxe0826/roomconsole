@@ -76,9 +76,10 @@ from app.life import LifeService, NoteCreate
 from app.models import RepeatRule, TaskCompletion, TaskCreate, TaskPatch
 from app.openai_budget import (
     BudgetGovernor,
+    BudgetPolicy,
     calculate_cost_microdollars,
 )
-from app.openai_gateway import OpenAIGateway, validate_openai_base_url
+from app.openai_gateway import OpenAIGateway, resolve_openai_api_key, validate_openai_base_url
 from app.personal_agent import (
     AgentCommandInput,
     PersonalAgentService,
@@ -622,6 +623,242 @@ class TestPersonalAgentEndToEnd(unittest.TestCase):
             self.assertEqual(res['transcription']['cost_microdollars'], 300)  # 6s @ 50 microdollars/sec
             self.assertEqual(res['agent_run']['status'], 'succeeded')
             self.assertEqual(res['agent_run']['preview']['reads_executed'][0]['domain'], 'timer')
+
+
+class TestAllElevenWidgetAdapters(unittest.TestCase):
+    """Verify full WidgetProtocol 1.0 compliance across all 11 widgets and systems."""
+
+    def test_all_11_adapters_registered_healthy_and_executable(self):
+        run_async(self._test_all_11_adapters())
+
+    async def _test_all_11_adapters(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store, life, timers, _base_protocol, agent, _ = build_test_harness(Path(tmp))
+            expected_adapters = [
+                'memo',
+                'todo',
+                'calendar',
+                'alarm',
+                'timer',
+                'clock',
+                'weather',
+                'llm-response',
+                'layout',
+                'settings',
+                'system',
+            ]
+            self.assertEqual(agent.registry.list_widgets(), expected_adapters)
+
+            # 1. Health check across all 11 adapters
+            health = await agent.adapters_health()
+            self.assertEqual(health['adapter_count'], 11)
+            for name in expected_adapters:
+                self.assertTrue(health['adapters'][name]['available'], f'{name} adapter should be healthy')
+
+            # 2. Clock adapter: read & resolve
+            clock_read = await agent.execute_adapter({'request_id': 'w-clock-1', 'widget': 'clock', 'action': 'read'})
+            self.assertEqual(clock_read['status'], 'success')
+            clock_res = await agent.execute_adapter(
+                {'request_id': 'w-clock-2', 'widget': 'clock', 'action': 'resolve', 'args': {'expression': '내일'}}
+            )
+            self.assertEqual(clock_res['status'], 'success')
+            self.assertEqual(clock_res['data']['start'], clock_read['data']['tomorrow'])
+
+            # 3. Weather adapter: read & immediate refresh
+            wx_read = await agent.execute_adapter({'request_id': 'w-wx-1', 'widget': 'weather', 'action': 'read'})
+            self.assertEqual(wx_read['status'], 'success')
+            wx_ref = await agent.execute_adapter({'request_id': 'w-wx-2', 'widget': 'weather', 'action': 'refresh'})
+            self.assertEqual(wx_ref['status'], 'success')
+
+            # 4. Settings adapter: read, unconfirmed preview -> needs_confirmation, confirmed update -> success
+            set_read = await agent.execute_adapter({'request_id': 'w-set-1', 'widget': 'settings', 'action': 'read'})
+            self.assertEqual(set_read['status'], 'success')
+            set_unconf = await agent.execute_adapter(
+                {
+                    'request_id': 'w-set-2',
+                    'widget': 'settings',
+                    'action': 'update',
+                    'args': {'title': '스마트 룸 콘솔', 'theme': 'dark'},
+                },
+                confirmed=False,
+            )
+            self.assertEqual(set_unconf['status'], 'needs_confirmation')
+            set_conf = await agent.execute_adapter(
+                {
+                    'request_id': 'w-set-3',
+                    'widget': 'settings',
+                    'action': 'update',
+                    'args': {'title': '스마트 룸 콘솔', 'theme': 'dark'},
+                },
+                confirmed=True,
+            )
+            self.assertEqual(set_conf['status'], 'success')
+            self.assertEqual(set_conf['data']['theme'], 'dark')
+            self.assertEqual(set_conf['data']['title'], '스마트 룸 콘솔')
+
+            # 5. Layout adapter: read, update_widget, add_widget, remove_widget, set_data, get_data
+            lay_read = await agent.execute_adapter({'request_id': 'w-lay-1', 'widget': 'layout', 'action': 'read'})
+            self.assertEqual(lay_read['status'], 'success')
+            self.assertIn('all-todos', lay_read['data']['available_widget_types'])
+            ver = lay_read['data']['version']
+
+            lay_add = await agent.execute_adapter(
+                {
+                    'request_id': 'w-lay-2',
+                    'widget': 'layout',
+                    'action': 'add_widget',
+                    'args': {'version': ver, 'id': 'all-todos-1', 'type': 'all-todos', 'title': '전체 할 일', 'x': 0, 'y': 0, 'w': 4, 'h': 2},
+                },
+                confirmed=True,
+            )
+            self.assertEqual(lay_add['status'], 'success')
+            ver = lay_add['data']['version']
+
+            lay_upd = await agent.execute_adapter(
+                {
+                    'request_id': 'w-lay-3',
+                    'widget': 'layout',
+                    'action': 'update_widget',
+                    'target': {'type': 'widget_id', 'value': 'all-todos-1'},
+                    'args': {'version': ver, 'title': '마스터 할 일 보드'},
+                },
+                confirmed=True,
+            )
+            self.assertEqual(lay_upd['status'], 'success')
+            ver = lay_upd['data']['version']
+
+            lay_rem = await agent.execute_adapter(
+                {
+                    'request_id': 'w-lay-4',
+                    'widget': 'layout',
+                    'action': 'remove_widget',
+                    'target': {'type': 'widget_id', 'value': 'all-todos-1'},
+                    'args': {'version': ver},
+                },
+                confirmed=True,
+            )
+            self.assertEqual(lay_rem['status'], 'success')
+
+            lay_data_set = await agent.execute_adapter(
+                {
+                    'request_id': 'w-lay-5',
+                    'widget': 'layout',
+                    'action': 'set_data',
+                    'target': {'type': 'widget_id', 'value': 'note'},
+                    'args': {'data': {'Draft': '위젯 프로토콜 테스트'}},
+                },
+                confirmed=True,
+            )
+            self.assertEqual(lay_data_set['status'], 'success')
+            lay_data_get = await agent.execute_adapter(
+                {
+                    'request_id': 'w-lay-6',
+                    'widget': 'layout',
+                    'action': 'get_data',
+                    'target': {'type': 'widget_id', 'value': 'note'},
+                }
+            )
+            self.assertEqual(lay_data_get['data']['data']['Draft'], '위젯 프로토콜 테스트')
+
+            # 6. System adapter: status, devices, audit
+            sys_st = await agent.execute_adapter({'request_id': 'w-sys-1', 'widget': 'system', 'action': 'status'})
+            self.assertEqual(sys_st['status'], 'success')
+            sys_dev = await agent.execute_adapter({'request_id': 'w-sys-2', 'widget': 'system', 'action': 'devices'})
+            self.assertEqual(sys_dev['status'], 'success')
+            sys_aud = await agent.execute_adapter(
+                {'request_id': 'w-sys-3', 'widget': 'system', 'action': 'audit', 'args': {'limit': 5}}
+            )
+            self.assertEqual(sys_aud['status'], 'success')
+            self.assertGreaterEqual(sys_aud['data']['count'], 1)
+
+            # 7. LLM-Response adapter: list
+            llm_list = await agent.execute_adapter({'request_id': 'w-llm-1', 'widget': 'llm-response', 'action': 'list'})
+            self.assertEqual(llm_list['status'], 'success')
+
+
+class TestLiveGPT61SolHigh(unittest.TestCase):
+    """Live OpenAI API integration test using GPT-6.1 Sol High under a strict $5.00 budget cap."""
+
+    def test_live_gpt_6_1_sol_high_multi_widget_plan_and_briefing_under_5_usd(self):
+        if not resolve_openai_api_key():
+            self.skipTest('OPENAI_API_KEY not present in environment')
+        run_async(self._run_live_gpt_6_1_sol_high())
+
+    async def _run_live_gpt_6_1_sol_high(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            store, life, timers, _protocol, agent, _ = build_test_harness(Path(tmp))
+            # Enforce the user's explicit $5.00 test budget cap and GPT-6.1 Sol High
+            policy = agent.governor.set_policy(
+                BudgetPolicy(
+                    monthly_cap_usd=5.0,
+                    fast_model='gpt-6.1-sol',
+                    deep_model='gpt-6.1-sol',
+                    reasoning_effort='high',
+                )
+            )
+            self.assertEqual(policy.monthly_cap_usd, 5.0)
+            self.assertEqual(policy.fast_model, 'gpt-6.1-sol')
+            self.assertEqual(policy.deep_model, 'gpt-6.1-sol')
+            self.assertEqual(policy.reasoning_effort, 'high')
+
+            # Seed an existing note and task for realistic workspace context
+            life.create_note(
+                NoteCreate(
+                    request_id='live-seed-note-1',
+                    title='업무 체크리스트',
+                    body='서버 배포 점검',
+                    pinned=True,
+                    shared=True,
+                )
+            )
+
+            # 1. Live multi-widget command on GPT-6.1 Sol High
+            run = await agent.submit_command(
+                AgentCommandInput(
+                    request_id='live-gpt61-sol-high-001',
+                    text=(
+                        '타이머 90초 시작하고, 내일 오전 10시 30분에 아키텍처 리뷰 회의 일정 추가하고, '
+                        '내일 오전 8시 기상 알람 맞추고, 제목이 준비물인 새 메모에 발표 슬라이드 챙기기라고 적고, '
+                        '현재 시스템 상태도 함께 조회해줘.'
+                    ),
+                    mode='fast',
+                )
+            )
+            self.assertEqual(run['model_used'], 'gpt-6.1-sol')
+            self.assertEqual(run['status'], 'awaiting_confirmation', msg=run['summary_text'])
+            self.assertGreater(run['cost_microdollars'], 0)
+
+            preview = run['preview']
+            self.assertIsNotNone(preview)
+            self.assertGreaterEqual(len(preview['mutations']), 3)
+            # Verify every staged mutation carries a canonical WidgetProtocol 1.0 request & digest
+            for m in preview['mutations']:
+                self.assertIn('widget_request', m)
+                self.assertIn('request_digest', m)
+                self.assertEqual(m['widget_request']['protocol_version'], '1.0')
+
+            # Confirm the staged mutations through WidgetRegistry
+            confirmed = await agent.confirm_run(run['id'], run['preview_sha256'])
+            self.assertEqual(confirmed['status'], 'succeeded')
+            self.assertGreaterEqual(confirmed['execution']['mutation_count'], 3)
+
+            # 2. Live daily briefing synthesis on GPT-6.1 Sol High
+            briefing = await agent.submit_command(
+                AgentCommandInput(
+                    request_id='live-gpt61-sol-high-briefing-001',
+                    text='오늘과 내일 전체 브리핑 및 우선순위를 정리해줘',
+                    mode='briefing',
+                )
+            )
+            self.assertEqual(briefing['status'], 'succeeded')
+            self.assertEqual(briefing['model_used'], 'gpt-6.1-sol')
+            self.assertIn('synthesis', briefing['plan'])
+
+            # 3. Verify total test spend is strictly under the $5.00 test budget cap
+            budget_summary = agent.governor.summary()
+            self.assertEqual(budget_summary['monthly_cap_usd'], 5.0)
+            self.assertGreater(budget_summary['spent_usd'], 0.0)
+            self.assertLess(budget_summary['spent_usd'], 5.0)
 
 
 if __name__ == '__main__':
