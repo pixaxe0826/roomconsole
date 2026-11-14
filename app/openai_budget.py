@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import calendar
 from contextlib import closing, contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
+from decimal import Decimal, ROUND_CEILING
+import hashlib
 import json
 import math
 import os
@@ -23,32 +25,45 @@ from .store import uid, utcnow
 
 MICRODOLLARS_PER_USD = 1_000_000
 
-# Official OpenAI API pricing in microdollars:
+# Standard API pricing checked on 2026-11-14, not a provider invoice.
 # - Token rates are microdollars per 1,000,000 tokens.
-# - Audio rates are microdollars per minute.
+# - Token-model minute rates are estimates ONLY; do not settle them as usage.
+PRICING_CATALOG_METADATA = {
+    'checked_on': '2026-11-14',
+    'service_tier': 'default',
+    'currency': 'USD',
+    'sources': [
+        'https://developers.openai.com/api/docs/pricing',
+        'https://developers.openai.com/api/docs/models/gpt-6.1-sol',
+        'https://developers.openai.com/api/docs/models/gpt-6.1-terra',
+        'https://developers.openai.com/api/docs/models/gpt-4o-mini-transcribe',
+        'https://developers.openai.com/api/docs/models/gpt-4o-transcribe',
+        'https://developers.openai.com/api/docs/models/whisper-1',
+        'https://developers.openai.com/api/docs/models/gpt-4o-mini',
+        'https://developers.openai.com/api/docs/models/gpt-4o',
+        'https://developers.openai.com/api/docs/models/o3',
+        'https://developers.openai.com/api/docs/models/o3-mini',
+        'https://developers.openai.com/api/docs/guides/prompt-caching',
+    ],
+    'scope': 'Standard text / transcription only; excludes tools, regional and premium tiers.',
+    'token_stt_minute_rates': 'estimates, never provider_usage',
+    'unavailable_models': ['o3-mini'],
+}
 PRICING_CATALOG: dict[str, dict[str, int]] = {
     'gpt-6.1-sol': {
-        'input_per_1m_micros': 2_500_000,     # $2.50 / 1M input tokens
-        'cached_per_1m_micros': 1_250_000,    # $1.25 / 1M cached input tokens
+        'input_per_1m_micros': 2_000_000,
+        'cached_per_1m_micros': 100_000,
+        'cache_write_30m_per_1m_micros': 2_500_000,
+        'cache_write_12h_per_1m_micros': 5_000_000,
         'output_per_1m_micros': 10_000_000,   # $10.00 / 1M output (incl. reasoning) tokens
         'audio_per_min_micros': 0,
     },
     'gpt-6.1-terra': {
-        'input_per_1m_micros': 5_000_000,     # $5.00 / 1M input tokens
-        'cached_per_1m_micros': 2_500_000,    # $2.50 / 1M cached input tokens
-        'output_per_1m_micros': 15_000_000,   # $15.00 / 1M output tokens
-        'audio_per_min_micros': 0,
-    },
-    'gpt-6-sol': {
-        'input_per_1m_micros': 2_500_000,
-        'cached_per_1m_micros': 1_250_000,
-        'output_per_1m_micros': 10_000_000,
-        'audio_per_min_micros': 0,
-    },
-    'gpt-5.6-sol': {
-        'input_per_1m_micros': 2_000_000,
-        'cached_per_1m_micros': 1_000_000,
-        'output_per_1m_micros': 8_000_000,
+        'input_per_1m_micros': 1_000_000,
+        'cached_per_1m_micros': 50_000,
+        'cache_write_30m_per_1m_micros': 1_250_000,
+        'cache_write_12h_per_1m_micros': 2_500_000,
+        'output_per_1m_micros': 5_000_000,
         'audio_per_min_micros': 0,
     },
     'o3': {
@@ -76,28 +91,22 @@ PRICING_CATALOG: dict[str, dict[str, int]] = {
         'audio_per_min_micros': 0,
     },
     'gpt-4o-mini-transcribe': {
-        'input_per_1m_micros': 2_500_000,
-        'cached_per_1m_micros': 1_250_000,
-        'output_per_1m_micros': 10_000_000,
-        'audio_per_min_micros': 3_000,        # $0.003 / minute
+        'input_per_1m_micros': 1_250_000,
+        'cached_per_1m_micros': 0,
+        'output_per_1m_micros': 5_000_000,
+        'audio_per_min_micros': 3_000,        # Estimated $0.003 / minute
     },
     'gpt-4o-transcribe': {
         'input_per_1m_micros': 2_500_000,
-        'cached_per_1m_micros': 1_250_000,
+        'cached_per_1m_micros': 0,
         'output_per_1m_micros': 10_000_000,
-        'audio_per_min_micros': 6_000,        # $0.006 / minute
+        'audio_per_min_micros': 6_000,        # Estimated $0.006 / minute
     },
     'whisper-1': {
         'input_per_1m_micros': 0,
         'cached_per_1m_micros': 0,
         'output_per_1m_micros': 0,
         'audio_per_min_micros': 6_000,        # $0.006 / minute
-    },
-    'gpt-4o-mini-tts': {
-        'input_per_1m_micros': 0,
-        'cached_per_1m_micros': 0,
-        'output_per_1m_micros': 0,
-        'audio_per_min_micros': 15_000,       # $0.015 / minute
     },
     'local': {
         'input_per_1m_micros': 0,
@@ -110,8 +119,6 @@ PRICING_CATALOG: dict[str, dict[str, int]] = {
 ALLOWED_CHAT_MODELS = (
     'gpt-6.1-sol',
     'gpt-6.1-terra',
-    'gpt-6-sol',
-    'gpt-5.6-sol',
     'o3',
     'gpt-4o-mini',
     'gpt-4o',
@@ -213,6 +220,7 @@ class BudgetDecision:
     reasoning_effort: str = 'high'
     reserved_microdollars: int = 0
     unknown_microdollars: int = 0
+    reservation_acquired: bool = False
 
     def data(self) -> dict[str, Any]:
         d = asdict(self)
@@ -230,9 +238,11 @@ def calculate_cost_microdollars(
     cached_tokens: int = 0,
     completion_tokens: int = 0,
     reasoning_tokens: int = 0,
+    cache_write_30m_tokens: int = 0,
+    cache_write_12h_tokens: int = 0,
     audio_seconds: float = 0.0,
 ) -> int:
-    """Compute exact integer microdollar cost (ceil to nearest microdollar).
+    """Compute catalog cost (ceil to microdollars), never a provider invoice.
 
     Note: In the OpenAI Chat Completions / Responses API usage object,
     `completion_tokens_details.reasoning_tokens` is a subset of `completion_tokens`
@@ -245,24 +255,36 @@ def calculate_cost_microdollars(
     rates = PRICING_CATALOG.get(model)
     if rates is None:
         raise ValueError(f'가격 카탈로그에 등록되지 않은 모델입니다: {model}')
-    if isinstance(audio_seconds, (int, float)) and (
-        math.isnan(float(audio_seconds)) or math.isinf(float(audio_seconds)) or float(audio_seconds) < 0.0
-    ):
+    if type(audio_seconds) not in (int, float) or audio_seconds < 0 or not Decimal(str(audio_seconds)).is_finite():
         raise ValueError('유효하지 않은 오디오 길이(audio_seconds)입니다.')
+    for value in (prompt_tokens, cached_tokens, completion_tokens, reasoning_tokens,
+                  cache_write_30m_tokens, cache_write_12h_tokens):
+        if type(value) is not int or value < 0:
+            raise ValueError('사용량 토큰은 음이 아닌 정수여야 합니다.')
+    if cached_tokens + cache_write_30m_tokens + cache_write_12h_tokens > prompt_tokens:
+        raise ValueError('입력 토큰의 캐시 상세 합계가 입력 토큰 수를 초과합니다.')
+    if reasoning_tokens > completion_tokens:
+        raise ValueError('추론 토큰이 전체 출력 토큰 수를 초과합니다.')
     _ = reasoning_tokens  # Subset of completion_tokens; never double-billed.
-    uncached_prompt = max(0, int(prompt_tokens) - max(0, int(cached_tokens)))
-    cached = max(0, min(int(prompt_tokens), int(cached_tokens)))
-    completion = max(0, int(completion_tokens))
-    seconds = max(0.0, float(audio_seconds))
-
-    token_micros = (
+    uncached_prompt = prompt_tokens - cached_tokens - cache_write_30m_tokens - cache_write_12h_tokens
+    cached = cached_tokens
+    completion = completion_tokens
+    seconds = Decimal(str(audio_seconds))
+    if (cache_write_30m_tokens or cache_write_12h_tokens) and 'cache_write_30m_per_1m_micros' not in rates:
+        raise ValueError('이 모델의 캐시 쓰기 가격은 확인되지 않았습니다.')
+    input_multiplier = 2 if model in {'gpt-6.1-sol', 'gpt-6.1-terra'} and prompt_tokens > 272_000 else 1
+    output_multiplier = Decimal('1.5') if input_multiplier == 2 else Decimal(1)
+    input_micros = (
         uncached_prompt * rates['input_per_1m_micros']
         + cached * rates['cached_per_1m_micros']
-        + completion * rates['output_per_1m_micros']
-    ) / 1_000_000.0
-    audio_micros = (seconds / 60.0) * rates['audio_per_min_micros']
+        + cache_write_30m_tokens * rates.get('cache_write_30m_per_1m_micros', 0)
+        + cache_write_12h_tokens * rates.get('cache_write_12h_per_1m_micros', 0)
+    ) * input_multiplier
+    token_micros = (Decimal(input_micros) + completion * rates['output_per_1m_micros'] * output_multiplier) / MICRODOLLARS_PER_USD
+    # Token-billed STT cannot be billed a second time for the same audio duration.
+    audio_micros = Decimal(0) if prompt_tokens or completion_tokens else seconds * rates['audio_per_min_micros'] / 60
     total = token_micros + audio_micros
-    return int(math.ceil(total)) if total > 0 else 0
+    return int(total.to_integral_value(rounding=ROUND_CEILING)) if total > 0 else 0
 
 
 class BudgetGovernor:
@@ -292,6 +314,8 @@ class BudgetGovernor:
                 cached_tokens INTEGER NOT NULL DEFAULT 0,
                 completion_tokens INTEGER NOT NULL DEFAULT 0,
                 reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_write_30m_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_write_12h_tokens INTEGER NOT NULL DEFAULT 0,
                 audio_seconds REAL NOT NULL DEFAULT 0.0,
                 cost_microdollars INTEGER NOT NULL DEFAULT 0,
                 cost_source TEXT NOT NULL DEFAULT 'provider_usage',
@@ -305,6 +329,7 @@ class BudgetGovernor:
                 billing_month TEXT NOT NULL,
                 category TEXT NOT NULL,
                 model TEXT NOT NULL,
+                request_sha256 TEXT,
                 reserved_microdollars INTEGER NOT NULL,
                 status TEXT NOT NULL CHECK(status IN ('active', 'settled', 'released', 'unknown')),
                 actual_microdollars INTEGER,
@@ -324,6 +349,12 @@ class BudgetGovernor:
             db.execute(
                 "ALTER TABLE hub_ai_usage_ledger ADD COLUMN cost_source TEXT NOT NULL DEFAULT 'provider_usage'"
             )
+        for name in ('cache_write_30m_tokens', 'cache_write_12h_tokens'):
+            if name not in cols:
+                db.execute(f'ALTER TABLE hub_ai_usage_ledger ADD COLUMN {name} INTEGER NOT NULL DEFAULT 0')
+        reservation_cols = {r['name'] for r in db.execute('PRAGMA table_info(hub_ai_budget_reservations)').fetchall()}
+        if 'request_sha256' not in reservation_cols:
+            db.execute('ALTER TABLE hub_ai_budget_reservations ADD COLUMN request_sha256 TEXT')
         row = db.execute('SELECT 1 FROM hub_ai_budget_policy WHERE id = 1').fetchone()
         if not row:
             initial_policy = self._initial_policy.model_dump()
@@ -492,12 +523,18 @@ class BudgetGovernor:
         if category != 'stt' and selected.startswith(('gpt-6', 'gpt-5', 'o')) and state in {'NORMAL', 'SOFT_CAP'}:
             max_tokens = max(max_tokens, 4096)
 
-        estimated = calculate_cost_microdollars(
-            selected,
-            prompt_tokens=estimated_input_tokens,
-            completion_tokens=max_tokens if category != 'stt' else 0,
-            audio_seconds=audio_seconds if category == 'stt' else 0.0,
-        )
+        if category == 'stt' and selected != 'whisper-1':
+            # $.003/min is only an average, NOT a maximum. Token-billed
+            # transcription uses the model's full 16K input / 2K output envelope.
+            estimated = calculate_cost_microdollars(selected, prompt_tokens=16_000, completion_tokens=2_000)
+        else:
+            estimated = calculate_cost_microdollars(
+                selected,
+                prompt_tokens=estimated_input_tokens,
+                cache_write_30m_tokens=estimated_input_tokens if selected in {'gpt-6.1-sol', 'gpt-6.1-terra'} else 0,
+                completion_tokens=max_tokens if category != 'stt' else 0,
+                audio_seconds=audio_seconds if category == 'stt' else 0.0,
+            )
 
         if state == 'HARD_CAP_REACHED' or (effective_spent + estimated > hard_limit):
             remaining = max(0, hard_limit - effective_spent)
@@ -581,11 +618,18 @@ class BudgetGovernor:
         force_model: bool = False,
         note: str = '',
         at_iso: str | None = None,
+        request_fingerprint: str | None = None,
     ) -> BudgetDecision:
         """Atomically evaluate budget with `BEGIN IMMEDIATE` and create an active reservation if allowed."""
         p = self.policy()
         stamp = at_iso or utcnow()
         month = self.current_billing_month(stamp)
+        fingerprint = hashlib.sha256(json.dumps({
+            'category': category, 'requested_model': requested_model,
+            'input_bound': estimated_input_tokens, 'output_bound': max_output_tokens,
+            'audio_seconds': audio_seconds, 'force_model': force_model,
+            'payload': request_fingerprint,
+        }, sort_keys=True, separators=(',', ':'), allow_nan=False).encode('utf-8')).hexdigest()
         with self._db() as db:
             db.execute('BEGIN IMMEDIATE')
             spent, active_res, unknown_res = self._month_totals_in_tx(db, month)
@@ -602,34 +646,39 @@ class BudgetGovernor:
                 audio_seconds=audio_seconds,
                 force_model=force_model,
             )
-            if not decision.allowed_cloud:
-                return decision
-
             existing = db.execute(
-                'SELECT status, reserved_microdollars FROM hub_ai_budget_reservations WHERE request_id = ?',
+                'SELECT * FROM hub_ai_budget_reservations WHERE request_id = ?',
                 (request_id,),
             ).fetchone()
             if existing:
-                if existing['status'] in {'active', 'settled'}:
-                    return decision
+                if existing['request_sha256'] and existing['request_sha256'] != fingerprint:
+                    raise ValueError('동일한 과금 요청 ID에 다른 요청을 사용할 수 없습니다.')
+                return replace(decision, allowed_cloud=False, fallback_local=False,
+                               reason='request_already_reserved')
+            if db.execute('SELECT 1 FROM hub_ai_usage_ledger WHERE request_id = ?', (request_id,)).fetchone():
+                return replace(decision, allowed_cloud=False, fallback_local=False,
+                               reason='request_already_reserved')
+            if not decision.allowed_cloud:
+                return decision
             db.execute(
-                '''INSERT OR REPLACE INTO hub_ai_budget_reservations(
-                    request_id, billing_month, category, model,
+                '''INSERT INTO hub_ai_budget_reservations(
+                    request_id, billing_month, category, model, request_sha256,
                     reserved_microdollars, status, actual_microdollars,
                     cost_source, note, created_at, updated_at
-                ) VALUES(?, ?, ?, ?, ?, 'active', NULL, 'reservation', ?, ?, ?)''',
+                ) VALUES(?, ?, ?, ?, ?, ?, 'active', NULL, 'reservation', ?, ?, ?)''',
                 (
                     request_id,
                     month,
                     category,
                     decision.selected_model,
+                    fingerprint,
                     max(1, decision.estimated_call_microdollars),
                     note[:240],
                     stamp,
                     stamp,
                 ),
             )
-        return decision
+        return replace(decision, reservation_acquired=True)
 
     def release_reservation(self, request_id: str, note: str = '') -> None:
         """Release a pre-call reservation when the call failed before reaching the network."""
@@ -665,6 +714,8 @@ class BudgetGovernor:
         cached_tokens: int = 0,
         completion_tokens: int = 0,
         reasoning_tokens: int = 0,
+        cache_write_30m_tokens: int = 0,
+        cache_write_12h_tokens: int = 0,
         audio_seconds: float = 0.0,
         cost_source: str = 'provider_usage',
         note: str = '',
@@ -672,16 +723,25 @@ class BudgetGovernor:
     ) -> dict[str, Any]:
         stamp = at_iso or utcnow()
         month = self.current_billing_month(stamp)
+        if (model in {'gpt-4o-mini-transcribe', 'gpt-4o-transcribe'}
+                and cost_source.startswith('provider_usage')
+                and prompt_tokens == 0 and completion_tokens == 0):
+            raise ValueError('토큰 기반 전사의 분당 추정값은 실제 공급자 사용량으로 정산할 수 없습니다.')
         cost = calculate_cost_microdollars(
             model,
             prompt_tokens=prompt_tokens,
             cached_tokens=cached_tokens,
             completion_tokens=completion_tokens,
             reasoning_tokens=reasoning_tokens,
+            cache_write_30m_tokens=cache_write_30m_tokens,
+            cache_write_12h_tokens=cache_write_12h_tokens,
             audio_seconds=audio_seconds,
         )
         with self._db() as db:
             db.execute('BEGIN IMMEDIATE')
+            reservation = db.execute('SELECT billing_month FROM hub_ai_budget_reservations WHERE request_id=?', (request_id,)).fetchone()
+            if reservation:
+                month = reservation['billing_month']
             existing = db.execute(
                 'SELECT * FROM hub_ai_usage_ledger WHERE request_id = ?',
                 (request_id,),
@@ -702,8 +762,9 @@ class BudgetGovernor:
                 '''INSERT INTO hub_ai_usage_ledger(
                     id, request_id, billing_month, category, model,
                     prompt_tokens, cached_tokens, completion_tokens, reasoning_tokens,
+                    cache_write_30m_tokens, cache_write_12h_tokens,
                     audio_seconds, cost_microdollars, cost_source, note, created_at
-                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                 (
                     entry_id,
                     request_id,
@@ -714,6 +775,8 @@ class BudgetGovernor:
                     max(0, int(cached_tokens)),
                     max(0, int(completion_tokens)),
                     max(0, int(reasoning_tokens)),
+                    cache_write_30m_tokens,
+                    cache_write_12h_tokens,
                     max(0.0, float(audio_seconds)),
                     cost,
                     cost_source[:64],
@@ -874,6 +937,7 @@ class BudgetGovernor:
             'by_model': by_model,
             'recent': recent,
             'pricing_catalog': PRICING_CATALOG,
+            'pricing_catalog_metadata': PRICING_CATALOG_METADATA,
         }
 
     def monthly_summary(self, billing_month: str | None = None, *, at_iso: str | None = None) -> dict[str, Any]:

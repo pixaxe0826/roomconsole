@@ -233,6 +233,11 @@ SQLite FD 수명/벤치마크 factory를 통합하고, 기존 local CLI를 보�
 
 ## OpenAI Personal Agent (Opt-In Hybrid Architecture · GPT-6.1 Sol High)
 
-기본값은 비활성화(`HUB_PERSONAL_AGENT_ENABLED=false`, `HUB_OPENAI_ENABLED=false`)되어 기존 로컬 음성·LLM·위젯 흐름을 그대로 유지하며, 관리자가 명시적으로 활성화할 때만 Tier 0 결정론적 빠른 경로(`fast_reads`, `timer_commands`, `memo_grounding`, `semantic_parser`)와 월 예산 거버너(`BudgetGovernor`, 예약·정산 원장) 하에 **GPT-6.1 Sol High (`model="gpt-6.1-sol"`, `reasoning_effort="high"`)** Structured Outputs 및 선택적 OpenAI Audio STT를 결합한 하이브리드 개인 비서 계층(`/api/agent/*`)을 제공합니다.
+기본 비활성화된 선택적 비서 계층(`/api/agent/*`)입니다. 기존 결정론적 빠른 경로를 재사용하고, 허용된 요청에 한해 월 예산 거버너 하에서 클라우드 계획을 사용합니다. 기본 설정 모델은 `gpt-6.1-sol`, 추론 강도는 `high`이며 실제 계정의 모델 접근 가능 여부나 성능을 보장하지 않습니다.
+
+- OpenAI 음성 전사는 **에이전트·클라우드·음성 전송 세 정책 스위치**, 전용 키, 사용 가능한 예산, 로컬 FFmpeg 검증이 필요합니다. 기본값은 모두 비활성입니다. 기존 로컬/원격 Whisper 설정을 자동 교체하지 않습니다.
+- 환경변수는 정책 최초 생성 시의 초기값입니다. 이후에는 관리자 패널/API에 저장된 DB 정책을 사용합니다. 정식 변수는 `HUB_OPENAI_MONTHLY_CAP_USD`, `HUB_OPENAI_ALLOW_SHARED_NOTES`입니다.
+- iPad의 기존 음성 화면은 전사 이후 개인 비서 상태까지 조회합니다. 재연결은 같은 작업을 GET으로 읽으며 유료 요청을 자동 재전송하지 않습니다. 조회·제한된 타이머 외 변경은 관리자 승인이 필요합니다.
+- 비용을 확인하지 못한 요청은 `$0`으로 표시하지 않고 미정 상태와 예약액을 유지합니다. 공유 응답은 현재 메모 공개 여부·버전을 다시 확인하여 비공개 내용을 가립니다.
 - Room Hub의 위젯 및 실내 센서·시스템 어댑터(`memo`, `todo`, `calendar`, `alarm`, `timer`, `clock`, `weather`, `indoor`, `llm-response`, `layout`, `settings`, `system`)를 `WidgetProtocol 1.0` 규격으로 제어합니다.
-- 아키텍처·예산 예약/정산·어댑터 규격·API 명세: [OpenAI Personal Agent 설계 문서](docs/OPENAI_PERSONAL_AGENT.md).
+- [설치·적용 절차](docs/SETUP.md) · [동작·권한·예산·미검증 범위](docs/OPENAI_PERSONAL_AGENT.md). 합성 데이터 회귀와 실제 유료 호출·iPad/Safari·운영 배포 검증은 서로 다릅니다.

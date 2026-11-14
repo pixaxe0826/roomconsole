@@ -22,17 +22,19 @@ from __future__ import annotations
 import asyncio
 from contextlib import closing, contextmanager
 import copy
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import hashlib
 import json
 from pathlib import Path
 import re
+import tempfile
 import time
 from typing import Any, Callable, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .clock_service import clock_context, resolve_range
+from .agent_audio import AudioIngress
 from .entity_catalog import EntityCatalog
 from .fast_reads import match_read
 from .life import LifeService, memo_snapshot, note_catalog_snapshot
@@ -282,7 +284,7 @@ def detect_schedule_conflicts(tasks: list[dict[str, Any]]) -> list[dict[str, Any
 def _has_utterance_evidence(source_text: str, *candidates: str | None) -> bool:
     """Verify that the user's raw utterance provides evidence for the target entity."""
     if not source_text or not source_text.strip():
-        return True
+        return False
     norm_source = re.sub(r'\s+', '', source_text.lower())
     for cand in candidates:
         if not cand or not isinstance(cand, str):
@@ -336,6 +338,7 @@ class PersonalAgentService:
         self._inflight_runs: dict[str, asyncio.Future] = {}
         self._registry = registry
         self._schema_ready = False
+        self.audio_ingress = AudioIngress(store)
 
     @property
     def registry(self) -> WidgetRegistry:
@@ -408,6 +411,7 @@ class PersonalAgentService:
             ('request_sha256', "TEXT NOT NULL DEFAULT ''"),
             ('local_only', 'INTEGER NOT NULL DEFAULT 0'),
             ('timestamps_json', 'TEXT'),
+            ('cost_known', 'INTEGER NOT NULL DEFAULT 1'),
         ):
             if col_name not in cols:
                 db.execute(f'ALTER TABLE hub_agent_runs ADD COLUMN {col_name} {col_def}')
@@ -746,8 +750,7 @@ class PersonalAgentService:
             )
             lines.append(f"• 실행 중인 타이머: {timer_str}")
 
-        if not snap.get('for_cloud'):
-            lines.append(f"• 저장된 메모: 총 {len(snap['note_catalog'])}개")
+        # A briefing is displayable. Even the count of private notes is private.
         return '\n'.join(lines)
 
     @staticmethod
@@ -1006,7 +1009,7 @@ class PersonalAgentService:
             '- memo (노트/메모 위젯): read, list, write, append, clear, delete\n'
             '- timer (타이머 위젯): list, get, start(duration_seconds 1~600), stop\n'
             '- clock (시계 위젯): read, resolve(title 또는 body에 날짜 표현 지정)\n'
-            '- weather (날씨 위젯): read, refresh\n'
+            '- weather (날씨 위젯): read (저장된 snapshot만 조회; 외부 refresh는 지원하지 않음)\n'
             '- indoor (실내 온도·습도·공기질 센서): read, air, devices\n'
             '- llm-response (AI 응답 위젯): list, read\n'
             '- layout (대시보드 레이아웃/위젯 배치): read, update_widget, add_widget, remove_widget, get_data, set_data\n'
@@ -1025,6 +1028,67 @@ class PersonalAgentService:
             f'외부 공유 허용 메모 제목 목록(데이터 전용): {_json_dump(notes_compact)}'
         )
 
+    @staticmethod
+    def _source_literal_pattern(value: str) -> re.Pattern:
+        """A complete source phrase, not an arbitrary matching title token."""
+        from .entity_resolver import normalize_title
+
+        literal = re.escape(normalize_title(value)).replace(r'\ ', r'\s+')
+        # Korean particles may follow a name; a prefix of another name may not.
+        end = r'(?=$|[^\w]|(?:을|를|은|는|이|가|의|도|만|에|과|와)(?=$|[^\w]))'
+        return re.compile(r'(?<!\w)' + literal + end, re.IGNORECASE)
+
+    @classmethod
+    def _source_named_rows(
+        cls,
+        rows: list[dict[str, Any]],
+        source_text: str,
+        *,
+        source_reference: str | None = None,
+        proposed_reference: str | None = None,
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        """Resolve literal source spans against canonical titles before IDs.
+
+        A deterministic parser's source span takes precedence. A model reference
+        is usable only as a complete literal source span, then follows existing
+        exact/unique-substring catalog semantics. Dates and model IDs cannot
+        create candidate membership.
+        """
+        from .entity_resolver import normalize_title
+
+        if not isinstance(source_text, str) or not source_text.strip():
+            raise ValueError('사용자 발화에서 대상 제목 근거를 확인할 수 없습니다.')
+        source = normalize_title(source_text)
+        reference = source_reference or proposed_reference
+        generic = {'할 일', '일정', '항목', '메모', '노트', 'todo', 'calendar', 'memo', 'note'}
+        if reference:
+            reference = normalize_title(reference)
+            if not reference or reference.casefold() in generic or not cls._source_literal_pattern(reference).search(source):
+                raise ValueError('제안한 대상 제목이 사용자 원문의 명확한 제목 구절과 일치하지 않습니다.')
+            needle = reference.casefold()
+            exact = [r for r in rows if normalize_title(r['title']).casefold() == needle]
+            if exact:
+                return exact, reference
+            if len(re.sub(r'\s+', '', reference)) < 2:
+                raise ValueError('한 글자 부분 제목으로 대상을 추측하지 않습니다.')
+            return [r for r in rows if needle in normalize_title(r['title']).casefold()], reference
+        return [r for r in rows
+                if normalize_title(r['title']).casefold() not in generic
+                and normalize_title(r['title'])
+                and cls._source_literal_pattern(r['title']).search(source)], None
+
+    @staticmethod
+    def _memo_source_selector(source_text: str) -> str | None:
+        """Current/latest is a source instruction, never a model default."""
+        current = re.search(r'(?<!\w)(?:현재|지금|기본)\s*(?:메모|노트)(?=$|[^\w]|[을를에의는이가도만])', source_text)
+        latest = re.search(
+            r'(?<!\w)(?:최근(?:에)?|마지막(?:으로)?|방금|아까)\s*'
+            r'(?:(?:적은|쓴|작성한|수정한|수정된|저장한)\s*)?'
+            r'(?:메모|노트)(?=$|[^\w]|[을를에의는이가도만])', source_text)
+        if current and latest:
+            raise ValueError('현재 메모와 최근 메모가 함께 언급되었습니다. 대상을 하나로 지정해 주세요.')
+        return 'current' if current else 'last_modified' if latest else None
+
     def _resolve_task_target(
         self,
         step: dict[str, Any],
@@ -1034,56 +1098,52 @@ class PersonalAgentService:
         source_text: str = '',
         allowed_ids: set[str] | None = None,
     ) -> dict[str, Any]:
-        tid = step.get('target_id')
-        all_tasks = self.store.query_tasks('0001-01-01', '9999-12-31', 'all', limit=10000)['items']
-        if tid:
-            if allowed_ids is not None and tid not in allowed_ids:
-                raise ValueError('허용된 후보 카탈로그 밖의 할 일/일정 ID가 지정되었습니다. 날짜와 제목을 다시 확인해 주세요.')
-            found = next((t for t in all_tasks if t['id'] == tid), None)
-            if not found:
-                raise ValueError('지정된 ID의 할 일/일정을 찾을 수 없습니다.')
-            if not _has_utterance_evidence(
-                source_text,
-                found['title'],
-                step.get('target_title'),
-                found.get('date'),
-                found.get('time'),
-            ):
-                raise ValueError('사용자 발화에서 해당 할 일/일정 대상을 특정할 근거를 찾을 수 없습니다.')
-            same_title = [
-                t
-                for t in all_tasks
-                if t['title'] == found['title']
-                and (not step.get('date') or t['date'] == step.get('date'))
-                and (not step.get('time') or t.get('time') == step.get('time'))
-            ]
-            if len(same_title) > 1 and not (
-                found.get('date') and found['date'] in source_text
-            ) and not (
-                found.get('time') and found['time'] in source_text
-            ):
-                raise ValueError('동일한 제목의 할 일/일정이 여러 개 있습니다. 정확한 날짜와 시각을 함께 말씀해 주세요.')
-            return found
+        from .entity_resolver import normalize_title
+        from .semantic_temporal import extract_temporal
 
-        target_title = (step.get('target_title') or step.get('title') or '').strip()
-        if not target_title:
-            raise ValueError('대상 할 일/일정의 제목이나 ID를 확인할 수 없습니다.')
-        if not _has_utterance_evidence(source_text, target_title):
-            raise ValueError('사용자 발화에서 대상 할 일/일정 제목 근거를 확인할 수 없습니다.')
-        day_filter = step.get('date')
-        candidates = [t for t in all_tasks if (not day_filter or t['date'] == day_filter)]
-        catalog = EntityCatalog.from_rows(
-            'todo',
-            candidates,
-            source='room_hub_sqlite.tasks',
-            as_of=at_iso,
-            truncated=False,
-            scope={'date': day_filter, 'completion_filter': 'all'},
-        )
-        res = catalog.resolve(target_title)
-        if res.status != 'resolved':
+        snapshot = self.store.query_tasks('0001-01-01', '9999-12-31', 'all', limit=10000)
+        if snapshot.get('truncated'):
+            raise ValueError('전체 대상 카탈로그를 확인할 수 없어 대상을 추측하지 않습니다.')
+        all_tasks = snapshot['items']
+        frame = parse_semantic(source_text, at_iso, tz_name, raw=source_text)
+        source_ref = (frame.target_text if frame and frame.confidence == 'EXACT'
+                      and frame.widget in {'todo', 'calendar'} else None)
+        proposed_ref = step.get('target_title') or (step.get('title') if step.get('action') != 'update' else None)
+        candidates, reference = self._source_named_rows(
+            all_tasks, source_text, source_reference=source_ref, proposed_reference=proposed_ref)
+
+        if step.get('action') == 'update':
+            # A rename can mention another existing title as the NEW value.
+            # A model reference may not silently promote that value to target.
+            canonical_names, _ = self._source_named_rows(all_tasks, source_text)
+            if canonical_names and (len(canonical_names) != 1 or len(candidates) != 1
+                                    or canonical_names[0]['id'] != candidates[0]['id']):
+                raise ValueError('수정할 기존 제목과 새 값을 구분할 수 없거나 같은 제목이 여러 개입니다. 한 대상을 명확히 지정해 주세요.')
+        else:
+            # Only source-derived dates/times may reduce ambiguity. Mask title
+            # spans first so dates inside a literal title are not hidden filters.
+            temporal_source = normalize_title(source_text)
+            for title in {r['title'] for r in candidates} | ({reference} if reference else set()):
+                temporal_source = self._source_literal_pattern(title).sub(
+                    lambda m: ' ' * len(m.group()), temporal_source)
+            fact, _ = extract_temporal(temporal_source, at_iso, tz_name)
+            if fact.period or fact.relation or fact.relative_minutes is not None or (
+                fact.start is not None and fact.start != fact.end
+            ):
+                raise ValueError('대상 선택에는 정확한 한 날짜와 시각을 지정해 주세요.')
+            if fact.start:
+                candidates = [t for t in candidates if t['date'] == fact.start]
+            if fact.time:
+                candidates = [t for t in candidates if t.get('time') == fact.time]
+        # An update's date/time may be NEW values rather than target selectors.
+        # Never use them to guess between equal titles.
+        if len(candidates) != 1:
             raise ValueError('일치하는 할 일/일정이 없거나 여러 개입니다. 날짜와 정확한 제목을 지정해 주세요.')
-        return res.matches[0]
+        found = candidates[0]
+        tid = step.get('target_id')
+        if tid and (tid != found['id'] or allowed_ids is not None and tid not in allowed_ids):
+            raise ValueError('모델이 제안한 할 일/일정 ID가 원문에서 확인한 대상과 다릅니다.')
+        return found
 
     def _resolve_alarm_target(
         self,
@@ -1093,39 +1153,46 @@ class PersonalAgentService:
         allowed_ids: set[str] | None = None,
         allow_single_active: bool = False,
     ) -> dict[str, Any]:
+        # Resolve from the original utterance first. A model ID (or its proposed
+        # target_title) cannot itself supply source evidence. In particular the
+        # generic word "알람" never identifies a particular schedule.
         alarms = self.life.alarms()
+        compact = re.sub(r'\s+', '', source_text.casefold())
+        named = [a for a in alarms if a['label'].strip() not in {'', '알람', 'alarm'}
+                 and re.sub(r'\s+', '', a['label'].casefold()) in compact]
+        if not named:
+            ref = (step.get('target_title') or '').strip()
+            if ref and ref not in {'알람', 'alarm'} and re.sub(r'\s+', '', ref.casefold()) in compact:
+                # Alarm is not an EntityCatalog source. A literal spoken
+                # fragment may select only one canonical label, never an ID
+                # supplied by the model or fuzzy token evidence.
+                spoken = re.sub(r'\s+', '', ref.casefold())
+                named = [a for a in alarms if spoken in re.sub(r'\s+', '', a['label'].casefold())]
+        times = set(re.findall(r'(?<!\d)([01]?\d|2[0-3]):([0-5]\d)(?!\d)', source_text))
+        grounded_times = {f'{int(h):02d}:{m}' for h, m in times}
+        for period, hour, minute in re.findall(r'(오전|오후|아침|저녁|밤)\s*(\d{1,2})\s*시(?:\s*(\d{1,2})\s*분)?', source_text):
+            h, m = int(hour), int(minute or 0)
+            if 1 <= h <= 12 and m <= 59:
+                h = h % 12 + (12 if period in {'오후', '저녁', '밤'} else 0)
+                grounded_times.add(f'{h:02d}:{m:02d}')
+        matches = named or [a for a in alarms if a['time'] in grounded_times]
+        if len(matches) > 1 and grounded_times:
+            matches = [a for a in matches if a['time'] in grounded_times]
+        if not matches and allow_single_active and re.fullmatch(
+            r'(?:(?:현재|지금|울리는|울리고있는|이)\s*)?알람(?:을)?\s*(?:5\s*분\s*)?'
+            r'(?:미뤄\s*줘|스누즈|5분\s*뒤|확인(?:\s*해제해줘)?|끄기|꺼\s*줘|해제|종료)[.!?。？！]*',
+            source_text.strip(),
+        ):
+            active_ids = {e['alarm_id'] for e in self.life.events()
+                          if e['state'] in {'ringing', 'snoozed', 'missed'}}
+            matches = [a for a in alarms if a['id'] in active_ids]
+        if len(matches) != 1:
+            raise ValueError('원문에서 알람 대상을 하나로 확인할 수 없습니다. 정확한 이름과 시각을 지정해 주세요.')
+        found = matches[0]
         tid = step.get('target_id')
-        if tid:
-            if allowed_ids is not None and tid not in allowed_ids:
-                raise ValueError('허용된 후보 카탈로그 밖의 알람 ID가 지정되었습니다.')
-            found = next((a for a in alarms if a['id'] == tid), None)
-            if not found:
-                raise ValueError('일치하는 알람을 찾지 못했습니다.')
-            if not _has_utterance_evidence(source_text, found['label'], found['time'], step.get('target_title'), '알람'):
-                raise ValueError('사용자 발화에서 해당 알람 대상을 확인할 수 없습니다.')
-            same_label = [a for a in alarms if a['label'] == found['label'] and (not step.get('time') or a['time'] == step.get('time'))]
-            if len(same_label) > 1 and found['time'] not in source_text:
-                raise ValueError('동일한 이름의 알람이 여러 개입니다. 정확한 알람 시각을 함께 지정해 주세요.')
-            return found
-
-        label = (step.get('target_title') or step.get('title') or '').strip()
-        tm = step.get('time')
-        if not label and not tm and allow_single_active:
-            enabled = [a for a in alarms if a.get('enabled')]
-            if len(enabled) == 1:
-                return enabled[0]
-            if len(alarms) == 1:
-                return alarms[0]
-        matches = [
-            a
-            for a in alarms
-            if (tm and a['time'] == tm) or (label and (a['label'] == label or label in a['label']))
-        ]
-        if len(matches) == 1:
-            return matches[0]
-        if not matches:
-            raise ValueError('일치하는 알람을 찾지 못했습니다. 알람 시각이나 이름을 확인해 주세요.')
-        raise ValueError('일치하는 알람이 여러 개입니다. 정확한 알람 시각과 이름을 함께 말씀해 주세요.')
+        if tid and (tid != found['id'] or allowed_ids is not None and tid not in allowed_ids):
+            raise ValueError('모델이 제안한 알람 ID가 원문에서 확인한 대상과 다릅니다.')
+        return found
 
     def _resolve_memo_target(
         self,
@@ -1134,44 +1201,38 @@ class PersonalAgentService:
         *,
         source_text: str = '',
     ) -> dict[str, Any]:
-        notes = self.life.notes()
-        tid = step.get('target_id')
-        ref = (step.get('target_title') or '').strip()
-        if tid:
-            found = next((n for n in notes if n['id'] == tid), None)
-            if not found:
-                raise ValueError('지정된 ID의 메모를 찾을 수 없습니다.')
-            if not _has_utterance_evidence(source_text, found['title'], ref, '현재 메모', '최근 메모', '마지막 메모'):
-                raise ValueError('사용자 발화에서 대상 메모 제목 근거를 확인할 수 없습니다.')
-            same_title = [n for n in notes if n['title'] == found['title']]
-            if len(same_title) > 1:
-                raise ValueError('동일한 제목의 메모가 여러 개입니다.')
-            return found
-
-        if ref in {'current', 'last', 'last_modified'}:
-            snap = memo_snapshot(self.store, 'last_modified' if ref in {'last', 'last_modified'} else 'current')
-            if snap.get('note_id'):
-                found = next((n for n in notes if n['id'] == snap['note_id']), None)
-                if found:
-                    return found
-        if not ref:
-            raise ValueError('대상 메모의 제목을 지정해 주세요.')
-        if not _has_utterance_evidence(source_text, ref):
+        if not isinstance(source_text, str) or not source_text.strip():
             raise ValueError('사용자 발화에서 대상 메모 제목 근거를 확인할 수 없습니다.')
         snap_cat = note_catalog_snapshot(self.store)
-        catalog = EntityCatalog.from_rows(
-            'memo',
-            snap_cat['items'],
-            source=snap_cat['source'],
-            as_of=at_iso,
-            truncated=snap_cat['truncated'],
-            scope={'selection': 'named_title'},
-        )
-        res = catalog.resolve(ref)
-        if res.status != 'resolved':
+        if snap_cat['truncated']:
+            raise ValueError('전체 메모 카탈로그를 확인할 수 없어 대상을 추측하지 않습니다.')
+        tid = step.get('target_id')
+        ref = (step.get('target_title') or '').strip()
+        source_selector = self._memo_source_selector(source_text)
+        proposed_selector = {'current': 'current', 'last': 'last_modified', 'last_modified': 'last_modified'}.get(ref)
+        if proposed_selector and proposed_selector != source_selector:
+            raise ValueError('현재/최근 메모 선택은 사용자 원문에서 명시해야 합니다.')
+        if source_selector:
+            snap = memo_snapshot(self.store, source_selector)
+            note_id = snap.get('note_id')
+            if not note_id:
+                # Legacy fixed text has no note-table ID. Only an explicit
+                # source-grounded current READ may use its existing reference.
+                if not tid and step.get('action') == 'read' and source_selector == 'current' and snap.get('count'):
+                    return snap | {'id': None, '_grounded_reference': 'current'}
+                raise ValueError('명시한 현재/최근 메모의 저장 항목을 찾을 수 없습니다.')
+            candidates = [n for n in snap_cat['items'] if n['id'] == note_id]
+        else:
+            source_plan = parse_memo(source_text)
+            source_ref = source_plan.target_text if source_plan and not source_plan.issue else None
+            candidates, _ = self._source_named_rows(
+                snap_cat['items'], source_text, source_reference=source_ref, proposed_reference=ref)
+        if len(candidates) != 1:
             raise ValueError('일치하는 메모가 없거나 같은 제목이 여러 개입니다.')
-        item = res.matches[0]
-        found = next((n for n in notes if n['id'] == item['id']), None)
+        item = candidates[0]
+        if tid and tid != item['id']:
+            raise ValueError('모델이 제안한 메모 ID가 원문에서 확인한 대상과 다릅니다.')
+        found = next((n for n in self.life.notes() if n['id'] == item['id']), None)
         if not found:
             raise ValueError('대상 메모를 찾을 수 없습니다.')
         return found
@@ -1242,6 +1303,7 @@ class PersonalAgentService:
         *,
         source_text: str = '',
         caller_auth: ExecutionContext | None = None,
+        reauthorize: Callable[[], Any] | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[dict[str, Any]]]:
         """Validate all steps first, execute reads, stage confirmation-gated mutations, and run immediate controls."""
         if len(steps) > MAX_PLAN_STEPS:
@@ -1269,6 +1331,8 @@ class PersonalAgentService:
         )
 
         for idx, step in enumerate(steps, 1):
+            if reauthorize is not None:
+                reauthorize()
             raw_domain = step['domain']
             domain = 'clock' if raw_domain == 'time' else raw_domain
             action = step['action']
@@ -1315,18 +1379,17 @@ class PersonalAgentService:
                 output_lines.append(f"• 항목 확인: {res.data['date']} {res.data['time'] or '종일'} · {res.data['title']}")
 
             elif domain == 'memo' and action == 'read':
-                ref = (step.get('target_title') or 'current').strip()
-                if ref in {'current', 'last', 'last_modified'} and not step.get('target_id'):
+                note = self._resolve_memo_target(step, at_iso, source_text=source_text)
+                if auth.role != 'admin' and not note.get('shared'):
+                    raise ValueError('표시 기기에서는 비공개 메모를 조회할 수 없습니다.')
+                if note.get('_grounded_reference'):
                     req = WidgetRequest(
                         request_id=step_key,
                         widget='memo',
                         action='read',
-                        target={'type': 'reference', 'value': 'last' if ref in {'last', 'last_modified'} else 'current'},
+                        target={'type': 'reference', 'value': note['_grounded_reference']},
                     )
                 else:
-                    note = self._resolve_memo_target(step, at_iso, source_text=source_text)
-                    if auth.role != 'admin' and not note.get('shared'):
-                        raise ValueError('표시 기기에서는 비공개 메모를 조회할 수 없습니다.')
                     req = WidgetRequest(
                         request_id=step_key,
                         widget='memo',
@@ -1390,10 +1453,11 @@ class PersonalAgentService:
                     output_lines.append(f"• 타이머 [{res.data['label']}]: 남은 {res.data['remaining_seconds']}초")
 
             elif domain == 'weather' and action in {'read', 'list', 'refresh'}:
-                w_action = 'refresh' if action == 'refresh' else 'read'
+                if action == 'refresh':
+                    raise ValueError('에이전트의 외부 날씨 갱신은 지원하지 않습니다. 기존 관리자 날씨 갱신을 사용하세요.')
+                w_action = 'read'
                 req = WidgetRequest(request_id=step_key, idempotency_key=step_key, widget='weather', action=w_action, args={})
-                ctx = TIMER_CTX if w_action == 'refresh' else READ_CTX
-                res = await self.registry.execute(req, ctx)
+                res = await self.registry.execute(req, READ_CTX)
                 if res.status != 'success':
                     raise ValueError(res.error.message if res.error else '날씨 정보를 조회하지 못했습니다.')
                 executed_reads.append({'step': idx, 'domain': 'weather', 'action': w_action, 'data': res.data})
@@ -1515,27 +1579,24 @@ class PersonalAgentService:
 
             # --- 2. Immediate timer controls (validated first; executed only after all steps pass validation) ---
             elif domain == 'timer' and action in {'start', 'stop'}:
+                from .agent_timer_control import ground_timer_step
+                proof = ground_timer_step(source_text, step, len(deferred_immediate))
                 if action == 'start':
-                    dur = step.get('duration_seconds')
-                    if not isinstance(dur, int) or isinstance(dur, bool) or not 1 <= dur <= 600:
-                        raise ValueError('타이머 시간은 1초에서 600초(10분) 사이로 지정해 주세요.')
                     req = WidgetRequest(
                         request_id=step_key,
                         idempotency_key=step_key,
                         widget='timer',
                         action='start',
-                        args={'duration_seconds': dur, 'label': (step.get('title') or '타이머').strip()[:80]},
+                        args={**proof['args'], 'label': (step.get('title') or '타이머').strip()[:80]},
                     )
                 else:
-                    ref_val = step.get('target_id') or step.get('target_title') or 'current'
-                    target_type = 'item_id' if step.get('target_id') else 'reference'
                     req = WidgetRequest(
                         request_id=step_key,
                         idempotency_key=step_key,
                         widget='timer',
                         action='stop',
-                        target={'type': target_type, 'value': ref_val},
-                        args={},
+                        target=proof['target'],
+                        args=proof['args'],
                     )
                 deferred_immediate.append((idx, 'timer', action, req, TIMER_CTX))
 
@@ -1750,13 +1811,23 @@ class PersonalAgentService:
                         )
                     )
                 elif action in {'snooze', 'ack'}:
-                    ev_args = {'version': None, 'request_id': step_key}
+                    events = [e for e in self.life.events() if e['alarm_id'] == alarm['id']
+                              and e['state'] in ({'ringing'} if action == 'snooze' else {'ringing', 'snoozed', 'missed'})]
+                    if action == 'snooze':
+                        events = [e for e in events if e.get('ring_until') is not None
+                                  and datetime.fromisoformat(e['ring_until'].replace('Z', '+00:00')).timestamp() > self.life.clock()]
+                    if len(events) != 1:
+                        raise ValueError('지금 처리할 기존 알람 회차가 없거나 여러 개입니다. 예약 시각 변경은 알람 수정으로 요청해 주세요.')
+                    event = events[0]
+                    lock = {'table': 'hub_alarm_events', 'id': event['id'],
+                            'version': event['version'], 'title': alarm['label']}
+                    ev_args = {'version': event['version'], 'request_id': step_key}
                     req = WidgetRequest(
                         request_id=step_key,
                         idempotency_key=step_key,
                         widget='alarm',
                         action=action,
-                        target={'type': 'item_id', 'value': alarm['id']},
+                        target={'type': 'item_id', 'value': event['id']},
                         args=ev_args,
                     )
                     verb_ko = '5분 미루기(snooze)' if action == 'snooze' else '확인/종료(ack)'
@@ -2114,8 +2185,11 @@ class PersonalAgentService:
                     s_args['theme'] = step['category']
                 if step.get('target_title'):
                     s_args['location_name'] = step['target_title']
-                if step.get('duration_seconds') and 5 <= step['duration_seconds'] <= 180:
-                    s_args['weather_interval_minutes'] = step['duration_seconds']
+                if step.get('duration_seconds') is not None:
+                    interval = step['duration_seconds']
+                    if not isinstance(interval, int) or isinstance(interval, bool) or not 5 <= interval <= 120:
+                        raise ValueError('날씨 갱신 주기는 5~120분 사이의 정수여야 합니다.')
+                    s_args['weather_interval_minutes'] = interval
                 if step.get('body'):
                     try:
                         extra_s = json.loads(step['body'])
@@ -2152,7 +2226,20 @@ class PersonalAgentService:
 
         # Execute deferred immediate controls ONLY after all steps in the plan have been validated
         immediate_controls: list[dict[str, Any]] = []
+        if deferred_immediate:
+            from .agent_timer_control import verify_timer_requests
+            timer_requests = [entry[3] for entry in deferred_immediate]
+            verify_timer_requests(source_text, timer_requests)
+
+            def authorize_timer_control():
+                if reauthorize is not None:
+                    reauthorize()
+                verify_timer_requests(source_text, timer_requests)
+
         for idx, dom, act, req, ctx in deferred_immediate:
+            authorize_timer_control()
+            ctx = ExecutionContext(principal=auth.principal, role=ctx.role,
+                                   permissions=ctx.permissions, reauthorize=authorize_timer_control)
             res = await self.registry.execute(req, ctx)
             if res.status != 'success':
                 raise ValueError(res.error.message if res.error else '타이머 제어를 실행하지 못했습니다.')
@@ -2220,6 +2307,15 @@ class PersonalAgentService:
                     now_iso,
                 ),
             )
+            # Link the voice while the run is still pending, before any model
+            # await. Speech polling can follow this durable ID after reconnect.
+            if timestamps.get('speech_job_id') and timestamps.get('voice_id'):
+                voice = db.execute('SELECT metadata FROM voice WHERE id=?', (timestamps['voice_id'],)).fetchone()
+                if voice:
+                    metadata = json.loads(voice['metadata'] or '{}')
+                    metadata['agent_run'] = {'id': run_id}
+                    db.execute('UPDATE voice SET metadata=? WHERE id=?',
+                               (_json_dump(metadata), timestamps['voice_id']))
         return run_id, None
 
     async def submit_command(
@@ -2247,6 +2343,7 @@ class PersonalAgentService:
             inflight = self._inflight_runs.get(run_id)
             if inflight is not None and not inflight.done():
                 await asyncio.shield(inflight)
+            self.authority_for_session(session)
             return self.get_run(run_id) | {'duplicate': True}
 
         loop_fut: asyncio.Future | None = None
@@ -2265,6 +2362,7 @@ class PersonalAgentService:
 
             if body.mode == 'briefing':
                 res = await self._run_briefing(run_id, body, snap, started, timestamps=ts)
+                self.authority_for_session(session)
                 if loop_fut and not loop_fut.done():
                     loop_fut.set_result(True)
                 return res
@@ -2336,8 +2434,11 @@ class PersonalAgentService:
                                 'steps': [],
                             }
 
+            # A display can be revoked while the remote planner is awaited.
+            auth = self.authority_for_session(session)
             if plan.get('intent_type') == 'briefing' and not plan.get('steps'):
                 res = await self._run_briefing(run_id, body, snap, started, timestamps=ts)
+                self.authority_for_session(session)
                 if loop_fut and not loop_fut.done():
                     loop_fut.set_result(True)
                 return res
@@ -2355,7 +2456,9 @@ class PersonalAgentService:
                     snap,
                     source_text=body.text,
                     caller_auth=auth,
+                    reauthorize=lambda: self.authority_for_session(session),
                 )
+                self.authority_for_session(session)
                 if read_lines:
                     summary_parts.extend(read_lines)
                 if mutations:
@@ -2406,7 +2509,7 @@ class PersonalAgentService:
                     '''UPDATE hub_agent_runs
                        SET tier_used = ?, model_used = ?, status = ?, summary_text = ?,
                            plan_json = ?, preview_json = ?, preview_sha256 = ?,
-                           timestamps_json = ?, cost_microdollars = ?, latency_ms = ?, updated_at = ?
+                           timestamps_json = ?, cost_microdollars = ?, cost_known = ?, latency_ms = ?, updated_at = ?
                        WHERE id = ?''',
                     (
                         tier_used,
@@ -2417,7 +2520,8 @@ class PersonalAgentService:
                         _json_dump(preview_obj) if preview_obj is not None else None,
                         preview_hash,
                         _json_dump(ts),
-                        cost_micros,
+                        cost_micros or 0,
+                        int(cost_micros is not None),
                         latency_ms,
                         updated_now,
                         run_id,
@@ -2429,10 +2533,14 @@ class PersonalAgentService:
                 pass
             if loop_fut and not loop_fut.done():
                 loop_fut.set_result(True)
+            self.authority_for_session(session)
             return self.get_run(run_id) | {'duplicate': False}
-        except Exception as exc:
+        except BaseException:
+            with self._db() as db:
+                db.execute("UPDATE hub_agent_runs SET status='interrupted',summary_text=?,updated_at=? WHERE id=? AND status='running'",
+                           ('요청 처리가 중단되었습니다. 기존 기록을 확인하세요. 자동으로 재실행하지 않습니다.', utcnow(), run_id))
             if loop_fut and not loop_fut.done():
-                loop_fut.set_exception(exc)
+                loop_fut.set_result(False)
             raise
         finally:
             self._inflight_runs.pop(run_id, None)
@@ -2535,8 +2643,8 @@ class PersonalAgentService:
                 '''UPDATE hub_agent_runs
                    SET mode = 'briefing', local_only = ?, tier_used = ?, model_used = ?,
                        status = 'succeeded', summary_text = ?, plan_json = ?,
-                       preview_json = NULL, preview_sha256 = NULL, timestamps_json = ?,
-                       cost_microdollars = ?, latency_ms = ?, updated_at = ?
+                       preview_json = '{"reads_executed":[],"mutations":[]}', preview_sha256 = NULL, timestamps_json = ?,
+                       cost_microdollars = ?, cost_known = ?, latency_ms = ?, updated_at = ?
                    WHERE id = ?''',
                 (
                     int(effective_local),
@@ -2545,7 +2653,8 @@ class PersonalAgentService:
                     summary_text,
                     _json_dump(plan_data),
                     _json_dump(ts),
-                    cost_micros,
+                    cost_micros or 0,
+                    int(cost_micros is not None),
                     latency_ms,
                     utcnow(),
                     run_id,
@@ -2613,7 +2722,7 @@ class PersonalAgentService:
                         if not lock:
                             continue
                         table = lock['table']
-                        if table not in {'tasks', 'hub_notes', 'hub_alarms'}:
+                        if table not in {'tasks', 'hub_notes', 'hub_alarms', 'hub_alarm_events'}:
                             raise HTTPException(400, '알 수 없는 대상 테이블입니다.')
                         row = db.execute(f'SELECT version FROM {table} WHERE id = ?', (lock['id'],)).fetchone()
                         if not row or row['version'] != lock['version']:
@@ -2735,7 +2844,24 @@ class PersonalAgentService:
         ts_raw = d.pop('timestamps_json', None)
         d['timestamps'] = json.loads(ts_raw) if ts_raw else {'received_at': d['created_at']}
         d['receipt'] = json.loads(receipt['receipt_json']) if receipt else None
-        d['cost_usd'] = round(d['cost_microdollars'] / 1_000_000.0, 6)
+        d['cost_known'] = bool(d.get('cost_known', 1))
+        # Errors can still consume tokens; audio is a separate billed call.
+        # Reconcile display costs from the ledger, not only a success return.
+        usage_keys = [f'agent:{run_id}', f'briefing:{run_id}']
+        if d['timestamps'].get('stt_request_id'):
+            usage_keys.extend([d['timestamps']['stt_request_id'], d['timestamps']['stt_request_id'] + ':local'])
+        with self._db() as db:
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name='hub_ai_budget_reservations'").fetchone():
+                marks = ','.join('?' for _ in usage_keys)
+                pending = db.execute(f"SELECT 1 FROM hub_ai_budget_reservations WHERE request_id IN ({marks}) AND status IN ('active','unknown')", usage_keys).fetchone()
+                rows = db.execute(f'SELECT cost_microdollars FROM hub_ai_usage_ledger WHERE request_id IN ({marks})', usage_keys).fetchall()
+                if pending:
+                    d['cost_known'] = False
+                if rows:
+                    d['cost_microdollars'] = sum(r['cost_microdollars'] for r in rows)
+        if not d['cost_known']:
+            d['cost_microdollars'] = None
+        d['cost_usd'] = round(d['cost_microdollars'] / 1_000_000.0, 6) if d['cost_known'] else None
         return d
 
     def get_run_for_viewer(self, run_id: str, session: dict[str, Any] | None) -> dict[str, Any]:
@@ -2749,6 +2875,8 @@ class PersonalAgentService:
         device_id = session.get('device_id') if isinstance(session, dict) else None
         if run.get('device_id') != device_id:
             raise HTTPException(403, '다른 기기의 개인 비서 실행 기록에는 접근할 수 없습니다.')
+        from .llm_display import project_agent_run
+        projected = project_agent_run(self.store, run)
         return {
             'id': run['id'],
             'run_id': run['id'],
@@ -2758,8 +2886,9 @@ class PersonalAgentService:
             'local_only': run['local_only'],
             'status': run['status'],
             'awaiting_admin_confirmation': run['status'] == 'awaiting_confirmation',
-            'source_text': run['source_text'],
-            'summary_text': run['summary_text'],
+            'source_text': projected['input'],
+            'summary_text': projected['output'],
+            'redacted': projected['redacted'],
             'tier_used': run['tier_used'],
             'model_used': run['model_used'],
             'timestamps': run['timestamps'],
@@ -2787,9 +2916,11 @@ class PersonalAgentService:
         local_stt_ready = False
         if self.speech is not None:
             try:
-                local_stt_ready = bool(self.speech.status().get('ready')) or callable(
-                    getattr(self.speech, 'transcribe_bytes', None)
-                )
+                # SpeechHub.status() can report the separately enabled cloud
+                # engine; it is not evidence that local Whisper is installed.
+                local_stt_ready = callable(getattr(self.speech, 'transcribe_bytes', None))
+                if not local_stt_ready and callable(getattr(self.speech, 'config', None)):
+                    local_stt_ready = bool(self.speech.config().readiness()[0])
             except Exception:
                 local_stt_ready = False
         if not pol.agent_enabled:
@@ -2818,11 +2949,19 @@ class PersonalAgentService:
             'adapters': self.registry.list_widgets(),
             'tiers': {
                 'tier0': 'Local deterministic rules ($0)',
-                'tier1_stt': pol.stt_model if (pol.cloud_enabled and pol.audio_cloud_enabled) else 'local/whisper',
+                'tier1_stt': pol.stt_model if (pol.agent_enabled and pol.cloud_enabled and pol.audio_cloud_enabled) else 'local/whisper',
                 'tier2_fast': f'{pol.fast_model} (reasoning_effort={pol.reasoning_effort})',
                 'tier3_deep': f'{pol.deep_model} (reasoning_effort={pol.reasoning_effort})',
             },
         }
+
+    def speech_options(self) -> dict[str, Any]:
+        """Read-only effective routing; never probes or invokes a provider."""
+        if not self.is_enabled():
+            return {'agent_enabled': False, 'cloud_stt_available': False}
+        allowed, reason = self.should_use_cloud('auto', category='stt')
+        return {'agent_enabled': True, 'cloud_stt_available': allowed,
+                'stt_model': self.governor.policy().stt_model, 'reason': reason}
 
     async def _transcribe_via_local_speech(
         self,
@@ -2833,6 +2972,7 @@ class PersonalAgentService:
         mime_type: str,
         verified_duration: float,
         language: str,
+        cancel: asyncio.Event | None = None,
     ) -> dict[str, Any]:
         """Fallback/local-only transcription using Room Hub's configured local/LAN SpeechHub."""
         from fastapi import HTTPException
@@ -2874,7 +3014,7 @@ class PersonalAgentService:
                     if cfg.backend == 'remote_http' and not getattr(self.speech, 'runner_override', False)
                     else self.speech.runner
                 )
-                text, dur = await runner.transcribe(tmp_file, cfg, asyncio.Event(), tmp_dir)
+                text, dur = await runner.transcribe(tmp_file, cfg, cancel or asyncio.Event(), tmp_dir)
             except Exception as exc:
                 raise HTTPException(503, f'로컬 음성 전사에 실패했습니다: {exc}') from None
             finally:
@@ -2904,7 +3044,73 @@ class PersonalAgentService:
             'local_fallback': True,
         }
 
+    async def transcribe_audio(
+        self, *, request_id: str, audio_bytes: bytes, filename: str = 'voice.wav',
+        mime_type: str = 'audio/wav', duration_seconds: float | None = None,
+        language: str = 'ko', mode: str = 'auto', local_only: bool = False,
+        session: dict[str, Any] | None = None, cancel: asyncio.Event | None = None,
+    ) -> dict[str, Any]:
+        """Authenticate and reserve audio before *any* transcription or upload."""
+        from fastapi import HTTPException
+
+        # Apply the same request-id/mode contract before the potentially paid STT.
+        try:
+            AgentCommandInput(request_id=request_id, text='audio', mode=mode, local_only=local_only)
+        except ValidationError:
+            raise HTTPException(422, '요청 ID 또는 음성 처리 모드가 올바르지 않습니다.') from None
+        if language not in {'ko', 'en', 'ja', 'auto'}:
+            raise HTTPException(422, '지원하지 않는 음성 언어입니다.')
+        if not audio_bytes or len(audio_bytes) > 10 * 1024 * 1024:
+            raise HTTPException(413, '녹음은 10MB 이하여야 합니다.')
+        auth = self.authority_for_session(session)
+        effective_local = bool(local_only or mode == 'local_only')
+        clean_mime = mime_type.split(';')[0].strip().lower()
+
+        def authorize():
+            self.authority_for_session(session)  # recheck revocation after awaits
+            if cancel is not None and cancel.is_set():
+                raise asyncio.CancelledError
+
+        async def perform(stt_id):
+            result = await self._transcribe_audio_unreserved(
+                request_id=stt_id, audio_bytes=audio_bytes, filename=filename,
+                mime_type=clean_mime, duration_seconds=duration_seconds,
+                language=language, mode=mode, local_only=effective_local,
+                session=session, cancel=cancel,
+            )
+            return result | {'stt_request_id': stt_id}
+
+        result, duplicate = await self.audio_ingress.transcribe_once(
+            principal=auth.principal, request_id=request_id, audio_bytes=audio_bytes,
+            options={'mime': clean_mime, 'filename': filename, 'language': language,
+                     'mode': mode, 'local_only': effective_local},
+            transcribe=perform, authorize=authorize,
+        )
+        return result | {'duplicate': duplicate}
+
     async def transcribe_and_submit(
+        self, *, request_id: str, audio_bytes: bytes, filename: str = 'voice.wav',
+        mime_type: str = 'audio/wav', duration_seconds: float | None = None,
+        language: str = 'ko', mode: str = 'auto', local_only: bool = False,
+        session: dict[str, Any] | None = None, timestamps: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        ts = dict(timestamps or {})
+        ts.setdefault('upload_completed_at', utcnow())
+        stt = await self.transcribe_audio(
+            request_id=request_id, audio_bytes=audio_bytes, filename=filename,
+            mime_type=mime_type, duration_seconds=duration_seconds, language=language,
+            mode=mode, local_only=local_only, session=session,
+        )
+        # Do not turn an oversized transcript into a truncated action.
+        if len(stt['text']) > 2000:
+            from fastapi import HTTPException
+            raise HTTPException(422, '전사문이 명령 길이 제한을 초과했습니다. 더 짧게 녹음해 주세요.')
+        ts.update(transcribed_at=utcnow(), stt_request_id=stt['stt_request_id'])
+        body = AgentCommandInput(request_id=request_id, text=stt['text'], mode=mode, local_only=local_only)
+        run = await self.submit_command(body, session=session, timestamps=ts)
+        return {'transcription': stt, 'agent_run': run}
+
+    async def _transcribe_audio_unreserved(
         self,
         *,
         request_id: str,
@@ -2917,6 +3123,7 @@ class PersonalAgentService:
         local_only: bool = False,
         session: dict[str, Any] | None = None,
         timestamps: dict[str, Any] | None = None,
+        cancel: asyncio.Event | None = None,
     ) -> dict[str, Any]:
         """Verify audio, enforce local_only & budget policy BEFORE any cloud upload, transcribe, and submit."""
         from fastapi import HTTPException
@@ -2935,8 +3142,6 @@ class PersonalAgentService:
             raise HTTPException(422, str(exc)) from None
         validate_audio(audio_bytes, clean_mime)
 
-        ts = dict(timestamps or {})
-        ts.setdefault('upload_completed_at', utcnow())
         verified_dur = verified['verified_duration_seconds']
         effective_local = bool(local_only or mode == 'local_only')
 
@@ -2953,19 +3158,40 @@ class PersonalAgentService:
 
         if not allow_cloud_stt:
             stt = await self._transcribe_via_local_speech(
-                request_id=f'stt:{request_id}',
+                request_id=request_id,
                 audio_bytes=audio_bytes,
                 filename=filename,
                 mime_type=clean_mime,
                 verified_duration=verified_dur,
                 language=language,
+                cancel=cancel,
             )
         else:
+            # Browsers produce compressed containers. Decode locally with the
+            # existing bounded FFmpeg pipeline; a bitrate estimate is not proof
+            # of duration and must never authorize an external audio upload.
+            if verified.get('format') != 'wav' and not (audio_bytes[:4] == b'RIFF' and audio_bytes[8:12] == b'WAVE'):
+                from .speech import SpeechConfig, TranscriptionError, prepare_wav
+                cfg = self.speech.config() if self.speech is not None else SpeechConfig()
+                temp_root = self.store.path.parent / 'speech-tmp'
+                temp_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+                with tempfile.TemporaryDirectory(prefix='agent-convert-', dir=temp_root) as folder:
+                    source, wav = Path(folder) / 'source.bin', Path(folder) / 'input.wav'
+                    source.write_bytes(audio_bytes)
+                    try:
+                        verified_dur = await prepare_wav(source, cfg, cancel or asyncio.Event(), wav)
+                    except (OSError, ValueError, TranscriptionError) as exc:
+                        raise HTTPException(422, '외부 전송 전에 녹음 형식과 길이를 검증할 수 없습니다.') from exc
+                    audio_bytes = wav.read_bytes()
+                filename, clean_mime, duration_seconds = 'input.wav', 'audio/wav', verified_dur
+            self.authority_for_session(session)
+            if cancel is not None and cancel.is_set():
+                raise asyncio.CancelledError
             # Vocabulary hint uses ONLY task titles (never private or shared note titles/bodies)
             hint_info = task_hint(self.store, AccuracyConfig(profile='careful', include_task_titles=True))
             try:
                 stt = await self.gateway.transcribe_audio(
-                    request_id=f'stt:{request_id}',
+                    request_id=request_id,
                     audio_bytes=audio_bytes,
                     filename=filename,
                     mime_type=clean_mime,
@@ -2974,48 +3200,72 @@ class PersonalAgentService:
                     prompt_hint=sanitize_untrusted_label(hint_info.get('text', ''), max_len=400),
                 )
             except OpenAIGatewayError as exc:
+                if exc.code in {'request_already_dispatched', 'request_conflict'}:
+                    raise HTTPException(409, '이미 처리한 음성 호출은 재전송하지 않습니다.') from None
                 if self.governor.policy().fallback_to_local and self.speech is not None:
                     stt = await self._transcribe_via_local_speech(
-                        request_id=f'stt:{request_id}:local',
+                        request_id=f'{request_id}:local',
                         audio_bytes=audio_bytes,
                         filename=filename,
                         mime_type=clean_mime,
                         verified_duration=verified_dur,
                         language=language,
+                        cancel=cancel,
                     )
                 else:
                     raise HTTPException(503, str(exc)) from None
 
-        ts['transcribed_at'] = utcnow()
-        cmd = AgentCommandInput(
-            request_id=request_id,
-            text=stt['text'],
-            mode=mode,
-            local_only=effective_local,
-        )
-        run = await self.submit_command(cmd, session=session, timestamps=ts)
-        return {
-            'transcription': stt,
-            'agent_run': run,
-        }
+        return stt
+
+    def _speech_identity(self, job_id: str, voice_id: str, *, completed=True):
+        """Only a stored SpeechHub job can supply a trusted speech identity."""
+        from fastapi import HTTPException
+        with self.store.connect() as db:
+            row = db.execute('SELECT j.*,v.text,v.metadata FROM speech_jobs j JOIN voice v ON v.id=j.voice_id WHERE j.id=? AND j.voice_id=?',
+                             (job_id, voice_id)).fetchone()
+        if not row or row['status'] != ('succeeded' if completed else 'running'):
+            raise HTTPException(409, '유효한 음성 작업과 완료 상태를 확인할 수 없습니다.')
+        owner = row['owner']
+        if owner == 'admin':
+            session = {'role': 'admin', 'session_id': 'speech'}
+        elif isinstance(owner, str) and owner.startswith('device:') and owner[7:]:
+            session = {'role': 'display', 'device_id': owner[7:]}
+        else:
+            raise HTTPException(403, '음성 요청자의 권한을 확인할 수 없습니다.')
+        self.authority_for_session(session)
+        return dict(row), session
+
+    async def transcribe_speech_job(self, job_id, voice_id, source, cfg, cancel):
+        job, session = self._speech_identity(job_id, voice_id, completed=False)
+        with self.store.connect() as db:
+            media = db.execute('SELECT media_type FROM voice WHERE id=?', (voice_id,)).fetchone()
+        result = await self.transcribe_audio(request_id=f'speech-job:{job_id}',
+            audio_bytes=source.read_bytes(), filename='recording' + {
+                'audio/wav': '.wav', 'audio/x-wav': '.wav', 'audio/mp4': '.m4a',
+                'audio/x-m4a': '.m4a', 'audio/webm': '.webm', 'audio/ogg': '.ogg',
+                'audio/mpeg': '.mp3', 'audio/flac': '.flac', 'audio/aac': '.aac',
+            }.get(media['media_type'], '.wav'), mime_type=media['media_type'],
+            language=cfg.language, session=session, cancel=cancel)
+        self._speech_identity(job_id, voice_id, completed=False)
+        with self.store.connect() as db:
+            metadata = json.loads(job['metadata'] or '{}')
+            metadata['agent_stt_request_id'] = result['stt_request_id']
+            db.execute('UPDATE voice SET metadata=? WHERE id=?', (_json_dump(metadata), voice_id))
+        return result['text'], result['duration_seconds']
 
     async def submit_from_speech_job(self, job_id: str, voice_id: str, text: str) -> dict[str, Any]:
         """Connect existing iPad/manager SpeechHub transcription jobs directly to PersonalAgentService."""
-        with self._db() as db:
-            job_row = db.execute(
-                'SELECT owner, request_id, created_at, updated_at FROM speech_jobs WHERE id = ?',
-                (job_id,),
-            ).fetchone()
-        owner = job_row['owner'] if job_row else 'admin'
-        session: dict[str, Any] | None = None
-        if isinstance(owner, str) and owner.startswith('display:'):
-            dev_id = owner.split(':', 1)[1]
-            session = {'role': 'display', 'device_id': dev_id}
+        from fastapi import HTTPException
+        job_row, session = self._speech_identity(job_id, voice_id)
+        if text != job_row['text']:
+            raise HTTPException(409, '전달된 전사문이 저장된 음성 작업과 다릅니다.')
+        metadata = json.loads(job_row['metadata'] or '{}')
         ts = {
             'upload_completed_at': job_row['created_at'] if job_row else utcnow(),
             'transcribed_at': job_row['updated_at'] if job_row else utcnow(),
             'speech_job_id': job_id,
             'voice_id': voice_id,
+            'stt_request_id': metadata.get('agent_stt_request_id'),
         }
         cmd = AgentCommandInput(
             request_id=f'speech-job:{job_id}',
@@ -3061,6 +3311,10 @@ def register_agent_routes(app, service: PersonalAgentService, admin, viewer=None
         except Exception as exc:
             raise HTTPException(422, str(exc)) from None
         await service._notify('agent.budget_policy_updated')
+        if callable(getattr(service.speech, 'start', None)):
+            # This explicit manager action can enable the existing single
+            # consumer. Previously queued jobs retain their chosen backend.
+            await service.speech.start()
         return {'policy': updated.model_dump(), 'budget': service.governor.summary()}
 
     @app.get('/api/agent/snapshot')

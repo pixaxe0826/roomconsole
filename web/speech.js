@@ -1,11 +1,15 @@
-/* Room Hub 0.1.3: explicit foreground recording, same-origin upload, no cloud STT.
+/* Explicit foreground recording and same-origin upload. The server selects the
+   configured local/LAN backend or explicitly enabled OpenAI transcription.
    Kept outside widget re-rendering so live updates cannot destroy a recording. */
 (() => {
 'use strict';
 const $=s=>document.querySelector(s),E=Room.esc,demo=!!window.ROOM_DEMO;
 let modal=null,stream=null,recorder=null,chunks=[],recordTimer=null,pollTimer=null,blob=null,blobURL=null;
-let phase='idle',job=null,cfg=null,requestID='',opened=false,epoch=0,startedAt=0,returnFocus=null,discard=false,busy=false;
-const labels={queued:'V35 전사 대기 중',running:'V35에서 전사하고 있어요',succeeded:'전사가 완료되었어요',failed:'전사하지 못했어요',cancelled:'전사를 취소했어요'};
+let phase='idle',job=null,cfg=null,requestID='',opened=false,epoch=0,pollVersion=0,startedAt=0,returnFocus=null,discard=false,busy=false;
+const labels={queued:'전사 대기 중',running:'전사하고 있어요',succeeded:'전사가 완료되었어요',failed:'전사하지 못했어요',cancelled:'전사를 취소했어요'};
+const agentLabels={pending:'개인 비서 요청을 준비하고 있어요',running:'개인 비서가 요청을 처리하고 있어요',awaiting_confirmation:'관리자 확인을 기다리고 있어요',succeeded:'개인 비서 처리가 완료되었어요',completed:'개인 비서 처리가 완료되었어요',needs_clarification:'추가 확인이 필요해요',failed:'개인 비서 요청을 처리하지 못했어요',interrupted:'개인 비서 처리가 중단되었어요',cancelled:'개인 비서 요청이 취소되었어요'};
+function backendLabel(){return cfg?.backend==='openai'?'OpenAI 클라우드':cfg?.backend==='remote_http'?'설정된 원격 Whisper':cfg?.backend==='local_cli'?'서버 로컬 Whisper':'서버'}
+function refreshPrivacy(){const el=$('#speechPrivacy');if(el)el.textContent='버튼을 누를 때만 녹음 · '+backendLabel()+' 전사 · '+(cfg?.agent_enabled?'조회·타이머는 즉시 처리, 다른 변경은 관리자 확인':'전사 후 기존 비서 정책 적용')}
 function clearTimer(){clearInterval(recordTimer);recordTimer=null;clearTimeout(pollTimer);pollTimer=null}
 function tracksOff(){if(stream)stream.getTracks().forEach(t=>t.stop());stream=null}
 function releaseBlob(){if(blobURL)URL.revokeObjectURL(blobURL);blobURL=null;blob=null;chunks=[]}
@@ -26,7 +30,7 @@ function message(text){const el=$('#speechMessage');if(el)el.textContent=text}
 function shell(){
  if(modal)return;
  modal=document.createElement('section');modal.className='speech-overlay hidden';modal.id='speechPanel';modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-labelledby','speechTitle');
- modal.innerHTML=`<div class="speech-card"><header class="speech-head"><div><small>VOICE TO YOUR ROOM</small><h2 id="speechTitle">말로 남기는 메모</h2></div><button class="btn" id="speechClose" aria-label="음성 화면 닫기">← 뒤로</button></header><div class="speech-body" id="speechBody"></div><p id="speechMessage" class="speech-message" role="status" aria-live="polite"></p><footer class="speech-privacy">버튼을 누를 때만 녹음 · V35 내부 전사 · 명령 자동 실행 없음</footer></div>`;
+ modal.innerHTML=`<div class="speech-card"><header class="speech-head"><div><small>VOICE TO YOUR ROOM</small><h2 id="speechTitle">말로 요청하기</h2></div><button class="btn" id="speechClose" aria-label="음성 화면 닫기">← 뒤로</button></header><div class="speech-body" id="speechBody"></div><p id="speechMessage" class="speech-message" role="status" aria-live="polite"></p><footer class="speech-privacy" id="speechPrivacy">버튼을 누를 때만 녹음 · 서버 전사 설정 확인 중</footer></div>`;
  document.body.append(modal);$('#speechClose').onclick=close;
  modal.addEventListener('keydown',e=>{
   if(e.key==='Escape'){e.preventDefault();close()}
@@ -41,21 +45,21 @@ function shell(){
 function body(html){$('#speechBody').innerHTML=html;message('')}
 function supported(){
  if(self!==top)return '관리자 안의 축소 미리보기에서는 녹음하지 않습니다. iPad의 클라이언트 페이지를 직접 여세요.';
- if(!isSecureContext)return '마이크에는 신뢰된 HTTPS가 필요합니다. 인증서를 설치·신뢰한 뒤 https://192.168.0.14:8443/client 로 접속하세요.';
+ if(!isSecureContext)return '마이크에는 신뢰된 HTTPS가 필요합니다. 운영 서버의 인증서를 설치·신뢰한 뒤 해당 서버의 HTTPS 클라이언트 주소로 접속하세요.';
  if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder)return '이 브라우저에서는 녹음 API를 사용할 수 없습니다. iPadOS/Safari를 업데이트하고 직접 페이지를 여세요.';
  return '';
 }
 function showReady(note=''){
- phase='idle';body(`<div class="speech-hero">${Room.icon('mic',44)}<h3>무엇을 남겨 볼까요?</h3><p>“내일 택배 보내기”처럼 짧게 말해 보세요.<br>녹음을 마친 뒤 직접 전송합니다.</p></div><div class="speech-chips"><span>${E(cfg?.model||'Whisper · 로컬')}</span><span>최대 ${cfg?.max_seconds||30}초</span><span>한국어</span></div><button class="btn primary speech-primary" id="speechStart">${Room.icon('mic',18)} 녹음 시작</button><button class="btn speech-secondary" id="speechPrevious">최근 전사 확인</button>`);
+ phase='idle';body(`<div class="speech-hero">${Room.icon('mic',44)}<h3>무엇을 남겨 볼까요?</h3><p>“내일 택배 보내기”처럼 짧게 말해 보세요.<br>녹음을 마친 뒤 직접 전송합니다.</p></div><div class="speech-chips"><span>${E(cfg?.model||'Whisper')}</span><span>${E(backendLabel())}</span><span>최대 ${cfg?.max_seconds||30}초</span><span>한국어</span></div><button class="btn primary speech-primary" id="speechStart">${Room.icon('mic',18)} 녹음 시작</button><button class="btn speech-secondary" id="speechPrevious">최근 전사·처리 결과 확인</button>`);
  $('#speechStart').onclick=record;$('#speechPrevious').onclick=recent;
  if(note)message(note);
 }
 function showBlocked(text){phase='blocked';body(`<div class="speech-hero">${Room.icon('mic',44)}<h3>녹음 준비를 확인해 주세요</h3><p>${E(text)}</p></div><button class="btn speech-primary" id="speechCheck">준비 상태 다시 확인</button>`);$('#speechCheck').onclick=load}
 async function load(){
- const current=++epoch;phase='checking';body('<div class="speech-hero"><h3>V35의 전사 준비 상태를 확인하고 있어요</h3></div>');
- if(demo){cfg={model:'tiny · 예시',max_seconds:30};showBlocked('독립 HTML은 화면 확인용입니다. 실제 녹음은 V35 HTTPS 클라이언트에서 사용하세요.');return}
+ const current=++epoch;phase='checking';body('<div class="speech-hero"><h3>서버의 전사 준비 상태를 확인하고 있어요</h3></div>');
+ if(demo){cfg={model:'tiny · 예시',max_seconds:30};showBlocked('독립 HTML은 화면 확인용입니다. 실제 녹음은 운영 서버의 HTTPS 클라이언트에서 사용하세요.');return}
  try{
-  cfg=await api('/api/speech/status');if(!opened||current!==epoch)return;
+  cfg=await api('/api/speech/status');if(!opened||current!==epoch)return;refreshPrivacy();
   const previous=remembered();
   if(previous){try{job=await api('/api/speech/jobs/'+encodeURIComponent(previous));if(!opened||current!==epoch)return;showJob();return}catch(e){if(e.status===404)persist(null)}}
   const reason=supported()||(!cfg.ready&&cfg.reason);if(reason)showBlocked(reason);else showReady();
@@ -114,11 +118,11 @@ function stopRecord(){
  tracksOff();
 }
 function showRecorded(note=''){
- body(`<div class="speech-hero">${Room.icon('check',40)}<h3>녹음을 확인해 주세요</h3><p>전사하기를 누르면 이 녹음만 V35에 전송합니다.</p></div><audio class="speech-audio" controls playsinline src="${blobURL}"></audio><button class="btn primary speech-primary" id="speechSend">V35에서 전사하기</button><button class="btn speech-secondary" id="speechAgain">녹음 다시 하기</button>`);
+ body(`<div class="speech-hero">${Room.icon('check',40)}<h3>녹음을 확인해 주세요</h3><p>이 녹음을 서버에 보내 ${E(backendLabel())}로 전사합니다.${cfg?.backend==='openai'?'<br>관리자가 활성화한 OpenAI API로 음성이 전송됩니다.':''}</p></div><audio class="speech-audio" controls playsinline src="${blobURL}"></audio><button class="btn primary speech-primary" id="speechSend">${E(backendLabel())}로 전사하기</button><button class="btn speech-secondary" id="speechAgain">녹음 다시 하기</button>`);
  $('#speechSend').onclick=upload;$('#speechAgain').onclick=()=>{releaseBlob();showReady()};if(note)message(note);
 }
 async function upload(){
- if(busy||!blob)return;busy=true;phase='uploading';$('#speechSend').disabled=true;message('V35에 녹음을 전송하고 있습니다…');
+ if(busy||!blob)return;busy=true;phase='uploading';$('#speechSend').disabled=true;message('서버에 녹음을 전송하고 있습니다…');
  const form=new FormData();form.append('request_id',requestID);form.append('file',blob,blob.type.includes('mp4')?'recording.m4a':'recording.webm');
  try{job=await api('/api/speech/jobs',{method:'POST',body:form,timeout:45000});persist(job.id);releaseBlob();showJob()}
  catch(e){phase='recorded';showRecorded(e.status===401?'기기 연결 권한이 만료되었습니다. 관리자에서 다시 연결하세요.':e.message+' 녹음은 이 탭에 남아 있습니다. 재전송은 같은 요청 ID를 사용합니다.')}
@@ -126,16 +130,19 @@ async function upload(){
 }
 function showJob(){
  if(!opened||!job)return;phase='job';clearTimeout(pollTimer);
- const active=['queued','running'].includes(job.status);
- body(`<div class="speech-hero"><div class="speech-orb ${active?'busy':''}">${Room.icon(active?'mic':'check',36)}</div><h3>${E(labels[job.status]||job.status)}</h3><p>${active?'화면을 닫아도 V35에서 계속 처리합니다. 다른 위젯은 사용할 수 있어요.':'전사 결과는 관리자의 음성 수신함에도 보관됩니다.'}</p></div>${job.text?`<div class="speech-transcript" id="speechTranscript">${E(job.text)}</div>`:''}${job.error?`<p class="speech-error">${E(job.error)}</p>`:''}${job.elapsed!=null?`<p class="speech-meta">서버 처리 ${Number(job.elapsed).toFixed(1)}초${job.duration!=null?' · 녹음 '+Number(job.duration).toFixed(1)+'초':''}</p>`:''}<p class="speech-disclaimer">전사는 틀릴 수 있습니다. 할 일 추가·메일 발송 등은 자동 실행하지 않습니다.</p>${active?'<button class="btn speech-primary" id="speechCancelJob">전사 취소</button>':`${['failed','cancelled'].includes(job.status)?'<button class="btn speech-primary" id="speechRetryJob">같은 녹음 전사 재시도</button>':''}<button class="btn primary speech-primary" id="speechNew">새로 녹음하기</button>`}`);
+ const transcribing=['queued','running'].includes(job.status),agent=job.agent_run;
+ const agentActive=!!agent&&['pending','running','awaiting_confirmation'].includes(agent.status),active=transcribing||agentActive;
+ const title=agent&&!transcribing?(agentLabels[agent.status]||'개인 비서 상태 확인'):labels[job.status]||job.status;
+ const agentResult=agent?`<section class="speech-agent-result" id="speechAgentResult"><h4>개인 비서 처리 결과</h4>${agent.summary_text?`<p>${E(agent.summary_text)}</p>`:''}${agent.redacted?'<p>공유되지 않은 내용은 관리자 화면에서 확인하세요.</p>':''}${agent.awaiting_admin_confirmation||agent.status==='awaiting_confirmation'?'<p>관리자 화면의 변경 미리보기를 확인해야 반영됩니다. 이 화면에서는 승인하지 않습니다.</p>':''}${['failed','interrupted'].includes(agent.status)?'<p>자동 재실행하지 않습니다. 관리자 기록에서 처리 여부를 확인하세요.</p>':''}</section>`:'';
+ body(`<div class="speech-hero"><div class="speech-orb ${active?'busy':''}">${Room.icon(active?'mic':'check',36)}</div><h3>${E(title)}</h3><p>${active?'서버의 처리 상태를 확인하고 있어요. 화면을 닫았다 다시 열어도 같은 작업을 조회합니다.':'전사 결과는 관리자의 음성 수신함에도 보관됩니다.'}</p></div>${job.text?`<div class="speech-transcript" id="speechTranscript">${E(job.text)}</div>`:''}${agentResult}${job.error?`<p class="speech-error">${E(job.error)}</p>`:''}${job.elapsed!=null?`<p class="speech-meta">서버 처리 ${Number(job.elapsed).toFixed(1)}초${job.duration!=null?' · 녹음 '+Number(job.duration).toFixed(1)+'초':''}</p>`:''}<p class="speech-disclaimer">전사는 틀릴 수 있습니다. 조회·타이머는 즉시 처리될 수 있고, 그 밖의 변경은 관리자 확인이 필요합니다.</p>${transcribing?'<button class="btn speech-primary" id="speechCancelJob">전사 취소</button>':`${['failed','cancelled'].includes(job.status)?'<button class="btn speech-primary" id="speechRetryJob">같은 녹음 전사 재시도</button>':''}<button class="btn primary speech-primary" id="speechNew">새로 녹음하기</button>`}`);
  $('#speechCancelJob')?.addEventListener('click',()=>action('cancel'));$('#speechRetryJob')?.addEventListener('click',()=>action('retry'));
  $('#speechNew')?.addEventListener('click',()=>{job=null;persist(null);load()});
  if(active)pollTimer=setTimeout(poll,1500);
 }
 async function poll(){
- if(!opened||!job)return;const id=job.id,current=epoch;
- try{const next=await api('/api/speech/jobs/'+encodeURIComponent(id));if(opened&&epoch===current&&job?.id===id){job=next;showJob()}}
- catch(e){if(!opened||epoch!==current)return;message(e.status===401?'연결 권한이 만료되었습니다. 새 기기 연결이 필요합니다.':'연결을 기다리고 있어요. Wi-Fi가 돌아오면 전사 상태를 다시 확인합니다.');if(e.status!==401&&e.status!==404)pollTimer=setTimeout(poll,4000)}
+ if(!opened||!job)return;const id=job.id,current=epoch,version=++pollVersion;
+ try{const next=await api('/api/speech/jobs/'+encodeURIComponent(id));if(opened&&epoch===current&&job?.id===id&&version===pollVersion){job=next;showJob()}}
+ catch(e){if(!opened||epoch!==current||job?.id!==id||version!==pollVersion)return;message(e.status===401?'연결 권한이 만료되었습니다. 새 기기 연결이 필요합니다.':'연결을 기다리고 있어요. Wi-Fi가 돌아오면 전사 상태를 다시 확인합니다.');if(e.status!==401&&e.status!==404)pollTimer=setTimeout(poll,4000)}
 }
 async function action(name){if(busy||!job)return;busy=true;try{job=await api('/api/speech/jobs/'+job.id+'/'+name,{method:'POST'});showJob()}catch(e){message(e.message)}finally{busy=false}}
 async function recent(){try{const data=await api('/api/speech/jobs');if(data.jobs.length){job=data.jobs[0];persist(job.id);showJob()}else message('아직 이 기기에서 보낸 녹음이 없습니다.')}catch(e){message(e.message)}}

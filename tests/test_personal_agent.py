@@ -16,27 +16,8 @@ from unittest.mock import patch
 
 
 def run_async(coro):
-    """Deterministic coroutine runner that does not require Windows loopback socketpair."""
-    orig_to_thread = asyncio.to_thread
-    orig_wait_for = asyncio.wait_for
-
-    async def _sync_to_thread(func, /, *args, **kwargs):
-        return func(*args, **kwargs)
-
-    async def _sync_wait_for(fut, timeout):
-        return await fut
-
-    asyncio.to_thread = _sync_to_thread  # type: ignore[assignment]
-    asyncio.wait_for = _sync_wait_for  # type: ignore[assignment]
-    try:
-        while True:
-            try:
-                coro.send(None)
-            except StopIteration as exc:
-                return exc.value
-    finally:
-        asyncio.to_thread = orig_to_thread  # type: ignore[assignment]
-        asyncio.wait_for = orig_wait_for  # type: ignore[assignment]
+    """Exercise the real event loop, executor and timeout semantics."""
+    return asyncio.run(coro)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -99,6 +80,7 @@ from app.personal_agent import (
 from app.recurrence import occurrences
 from app.store import Store, uid, utcnow
 from app.timers import TimerService
+from app.speech import SpeechHub
 
 
 def make_wav_bytes(duration_sec: float = 1.0, sample_rate: int = 16000) -> bytes:
@@ -125,7 +107,7 @@ def make_wav_bytes(duration_sec: float = 1.0, sample_rate: int = 16000) -> bytes
 def build_test_harness(
     tmp_dir: Path,
     transport: Any = None,
-    api_key: str | None = None,
+    api_key: str | None = '',
     *,
     enable_agent: bool = True,
     enable_cloud: bool = True,
@@ -1061,7 +1043,7 @@ class TestPersonalAgentEndToEnd(unittest.TestCase):
                     ],
                 }
                 return {
-                    'model': 'gpt-4o-mini-2024-07-18',
+                    'model': 'gpt-6.1-sol',
                     'choices': [
                         {
                             'message': {'content': json.dumps(plan_payload, ensure_ascii=False)},
@@ -1256,7 +1238,10 @@ class TestPersonalAgentEndToEnd(unittest.TestCase):
                 language='ko',
             )
             self.assertEqual(res['transcription']['text'], '타이머 1분 시작')
-            self.assertEqual(res['transcription']['cost_microdollars'], 300)  # 6.0s verified WAV duration @ 50 microdollars/sec
+            # Missing provider usage is unknown, not a made-up duration bill.
+            self.assertIsNone(res['transcription']['cost_microdollars'])
+            self.assertFalse(res['agent_run']['cost_known'])
+            self.assertGreater(agent.governor.summary()['unknown_microdollars'], 0)
             self.assertEqual(res['agent_run']['status'], 'succeeded')
             self.assertEqual(res['agent_run']['preview']['reads_executed'][0]['domain'], 'timer')
 
@@ -1301,11 +1286,13 @@ class TestAllElevenWidgetAdapters(unittest.TestCase):
             self.assertEqual(clock_res['status'], 'success')
             self.assertEqual(clock_res['data']['start'], clock_read['data']['tomorrow'])
 
-            # 3. Weather adapter: read & immediate refresh
+            # 3. Weather snapshot read works; Agent refresh cannot participate
+            # in an atomic SQLite batch, so the manual UI is the supported path.
             wx_read = await agent.execute_adapter({'request_id': 'w-wx-1', 'widget': 'weather', 'action': 'read'})
             self.assertEqual(wx_read['status'], 'success')
             wx_ref = await agent.execute_adapter({'request_id': 'w-wx-2', 'widget': 'weather', 'action': 'refresh'})
-            self.assertEqual(wx_ref['status'], 'success')
+            self.assertEqual(wx_ref['status'], 'unavailable')
+            self.assertEqual(wx_ref['error']['code'], 'CAPABILITY_UNAVAILABLE')
 
             # 4. Settings adapter: read, unconfirmed preview -> needs_confirmation, confirmed update -> success
             set_read = await agent.execute_adapter({'request_id': 'w-set-1', 'widget': 'settings', 'action': 'read'})
@@ -1469,7 +1456,17 @@ class TestAllElevenWidgetAdapters(unittest.TestCase):
                 )
             )
 
-            # 1. Natural language alarm snooze & ack stage and confirm cleanly
+            # Future schedules cannot be snoozed into a fabricated occurrence.
+            future = await agent.submit_command(
+                AgentCommandInput(request_id='alm-future-1', text='기상 알람 5분 미뤄줘', mode='local_only'))
+            self.assertEqual(future['status'], 'needs_clarification')
+            self.assertEqual(life.events(), [])
+            alarm_row = next(a for a in life.alarms() if a['id'] == alarm['id'])
+            fire = datetime.fromisoformat(alarm_row['next_fire_at'].replace('Z', '+00:00')).timestamp()
+            life.clock = lambda: fire + 1
+            life.tick()
+
+            # 1. Only an existing ringing occurrence can stage snooze / ack.
             r_snooze = await agent.submit_command(
                 AgentCommandInput(request_id='alm-snooze-1', text='기상 알람 5분 미뤄줘', mode='local_only')
             )
@@ -1554,6 +1551,8 @@ class TestDisplayRBACVoiceEndToEndAndIndoorSensors(unittest.TestCase):
 
             # Seed two paired display devices and one revoked device
             now = utcnow()
+            # Use the real SpeechHub schema and its actual device: owner format.
+            SpeechHub(store, Path(tmp), agent.changed)
             with store.connect() as db:
                 db.execute(
                     "INSERT INTO devices VALUES('ipad-1', '거실 iPad', ?, 0, ?, '1024x768')",
@@ -1567,30 +1566,13 @@ class TestDisplayRBACVoiceEndToEndAndIndoorSensors(unittest.TestCase):
                     "INSERT INTO devices VALUES('ipad-revoked', '폐기 iPad', ?, 1, ?, '1024x768')",
                     (now, now),
                 )
-                db.executescript(
-                    '''CREATE TABLE IF NOT EXISTS speech_jobs(
-                        id TEXT PRIMARY KEY,
-                        request_id TEXT,
-                        owner TEXT,
-                        status TEXT,
-                        audio_path TEXT,
-                        mime_type TEXT,
-                        size_bytes INTEGER,
-                        duration_seconds REAL,
-                        text TEXT,
-                        error_code TEXT,
-                        error TEXT,
-                        voice_id TEXT,
-                        created_at TEXT,
-                        updated_at TEXT
-                    );'''
-                )
                 db.execute(
-                    '''INSERT INTO speech_jobs(
-                        id, request_id, owner, status, audio_path, mime_type, size_bytes,
-                        duration_seconds, text, error_code, error, voice_id, created_at, updated_at
-                    ) VALUES('job-ipad-1', 'req-speech-1', 'display:ipad-1', 'succeeded', '', 'audio/wav', 1000,
-                             2.0, '오늘 저녁 8시 운동 할 일 추가해줘', NULL, NULL, 'voice-1', ?, ?)''',
+                    '''INSERT INTO voice(id,request_id,source,kind,text,locale,status,metadata,filename,media_type,digest,created_at)
+                       VALUES('voice-1','req-speech-1','ipad.device.ipad-1','audio','오늘 저녁 8시 운동 할 일 추가해줘',
+                              'ko-KR','pending_review','{}',NULL,'audio/wav','synthetic',?)''', (now,))
+                db.execute(
+                    '''INSERT INTO speech_jobs(id,voice_id,owner,request_id,status,digest,created_at,updated_at)
+                       VALUES('job-ipad-1','voice-1','device:ipad-1','req-speech-1','succeeded','synthetic',?,?)''',
                     (now, now),
                 )
 
@@ -1736,28 +1718,18 @@ class TestDisplayRBACVoiceEndToEndAndIndoorSensors(unittest.TestCase):
             self.assertFalse(res_err['data']['is_fresh'])
 
 
-class TestLiveGPT61SolHigh(unittest.TestCase):
-    """Live OpenAI API integration test — strictly opt-in and never executed during standard test runs."""
+class TestGPT61SolHighPolicy(unittest.TestCase):
+    """Offline configuration assertions; not evidence of live model integration."""
 
-    def test_live_gpt_6_1_sol_high_multi_widget_plan_and_briefing_under_5_usd(self):
-        if os.environ.get('HUB_RUN_LIVE_OPENAI_TESTS') != '1':
-            self.skipTest('Live OpenAI API tests are disabled by default (set HUB_RUN_LIVE_OPENAI_TESTS=1 to run)')
-        if not os.environ.get('HUB_LIVE_OPENAI_BUDGET_USD'):
-            self.skipTest('HUB_LIVE_OPENAI_BUDGET_USD must be explicitly set for live OpenAI tests')
-        if not resolve_openai_api_key():
-            self.skipTest('OPENAI_API_KEY not present in environment')
-        run_async(self._run_live_gpt_6_1_sol_high())
-
-    async def _run_live_gpt_6_1_sol_high(self):
+    def test_sol_high_policy_with_synthetic_budget(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-            store, life, timers, _protocol, agent, _ = build_test_harness(Path(tmp))
-            budget_cap = float(os.environ.get('HUB_LIVE_OPENAI_BUDGET_USD', '5.0'))
+            _store, _life, _timers, _protocol, agent, _ = build_test_harness(Path(tmp), api_key='')
             policy = agent.governor.set_policy(
                 BudgetPolicy(
                     agent_enabled=True,
                     cloud_enabled=True,
                     audio_cloud_enabled=True,
-                    monthly_cap_usd=budget_cap,
+                    monthly_cap_usd=5.0,
                     fast_model='gpt-6.1-sol',
                     deep_model='gpt-6.1-sol',
                     reasoning_effort='high',

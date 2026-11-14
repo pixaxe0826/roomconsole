@@ -23,6 +23,7 @@ from .recurrence import occurrences
 from .widgets import discover
 from .weather import fetch_weather
 from .speech import SpeechHub
+from .settings_service import apply_settings, weather_settings_key
 from .llm import LLMHub, LLMConfig, LLMCreate, LLMRetry, sha as llm_sha
 from .personal_agent import PersonalAgentService, register_agent_routes
 ROOT=Path(__file__).resolve().parent.parent
@@ -33,6 +34,7 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
  data=Path(data_dir or os.getenv('HUB_DATA_DIR',ROOT/'data')).resolve();data.mkdir(parents=True,exist_ok=True);(data/'audio').mkdir(exist_ok=True)
  widget_root=Path(os.getenv('HUB_WIDGET_DIR',ROOT/'widgets')).resolve()
  store=Store(data/'room-hub.sqlite3');connections={};attempts={};wx={'last_attempt':0.,'error':None};wx_lock=asyncio.Lock()
+ wx['settings_key']=weather_settings_key(store.get('settings'))
  secure=os.getenv('HUB_SECURE_COOKIE','false').lower()=='true'
  def secret(env,name):
   v=os.getenv(env);path=data/name
@@ -54,6 +56,8 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
  async def changed(event,detail=''):
   store.bump(event,detail)
   if store.in_unit_of_work():return
+  current_weather_key=weather_settings_key(store.get('settings'))
+  if current_weather_key!=wx['settings_key']:wx.update(last_attempt=0.,error=None,settings_key=current_weather_key)
   await broadcast({'type':'invalidate','revision':store.get('revision')})
  async def refresh_weather():
   async with wx_lock:
@@ -267,8 +271,7 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
   await changed('layout.updated');return result
  @app.put('/api/settings')
  async def settings(body:HubSettings,_=Depends(admin)):
-  old=store.get('settings');new=body.model_dump();store.set('settings',new)
-  if any(old[k]!=new[k] for k in ['latitude','longitude','location_name','timezone']):store.set('weather',None);wx.update(last_attempt=0,error=None)
+  new,_invalidated=apply_settings(store,body)
   await changed('settings.updated');return new
  @app.post('/api/weather/refresh')
  async def refresh(_=Depends(admin)):
@@ -347,6 +350,7 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
   if personal_agent.is_enabled():return await personal_agent.submit_from_speech_job(job_id,voice_id,text)
   return await llm.submit_transcription(job_id,voice_id,text)
  speech.set_transcript_sink(route_speech_transcript)
+ speech.set_agent_hooks(options=personal_agent.speech_options,transcribe=personal_agent.transcribe_speech_job,viewer=personal_agent.get_run_for_viewer)
  @app.get('/api/admin/export')
  async def export(_=Depends(admin)):
   with store.connect() as db:series=[dict(r) for r in db.execute('SELECT * FROM series')]

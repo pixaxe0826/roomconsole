@@ -13,13 +13,15 @@ services:
       HUB_DATA_DIR: /app/data
       HUB_PORT: "8088"
       HUB_SECURE_COOKIE: "false"
+      # Initial policy seeds only; existing DB policy is changed by the manager.
+      # Supply real keys through private deployment configuration, not this file.
       HUB_PERSONAL_AGENT_ENABLED: "false"
       HUB_OPENAI_ENABLED: "false"
       HUB_OPENAI_AUDIO_ENABLED: "false"
-      HUB_OPENAI_INCLUDE_SHARED_NOTES: "false"
+      HUB_OPENAI_ALLOW_SHARED_NOTES: "false"
       OPENAI_API_KEY: ""
       HUB_OPENAI_API_KEY: ""
-      HUB_OPENAI_MONTHLY_BUDGET_USD: "100.00"
+      HUB_OPENAI_MONTHLY_CAP_USD: "100.00"
       HUB_OPENAI_FAST_MODEL: "gpt-6.1-sol"
       HUB_OPENAI_DEEP_MODEL: "gpt-6.1-sol"
       HUB_OPENAI_REASONING_EFFORT: "high"

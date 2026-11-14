@@ -10,6 +10,7 @@ ambiguous transport failures as `unknown`.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import math
 import os
@@ -22,7 +23,7 @@ from urllib.parse import urlsplit
 import urllib.request
 import uuid
 
-from .openai_budget import BudgetGovernor, UsageCategory
+from .openai_budget import ALLOWED_CHAT_MODELS, ALLOWED_STT_MODELS, BudgetGovernor, UsageCategory
 
 MAX_RESPONSE_BYTES = 512 * 1024
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
@@ -86,48 +87,61 @@ def validate_openai_base_url(url: str) -> str:
 
 
 def has_usage(body: Any) -> bool:
-    if not isinstance(body, dict):
-        return False
-    u = body.get('usage')
-    if not isinstance(u, dict):
-        return False
-    return any(
-        isinstance(u.get(k), (int, float)) and u.get(k, 0) > 0
-        for k in ('prompt_tokens', 'completion_tokens', 'total_tokens', 'input_tokens', 'output_tokens', 'seconds')
-    )
+    return isinstance(body, dict) and extract_usage(body)['usage_kind'] != 'unknown'
 
 
 def extract_usage(body: dict[str, Any]) -> dict[str, Any]:
+    """Accept a complete provider usage pair; missing fields are never zero spend.
+
+    Optional subset counters may be absent (provider default zero), but invalid,
+    inconsistent, or partial counters leave the full reservation unsettled.
+    """
     usage = body.get('usage') if isinstance(body.get('usage'), dict) else {}
-    prompt_tokens = usage.get('prompt_tokens')
-    if not (type(prompt_tokens) is int and prompt_tokens >= 0):
-        in_tok = usage.get('input_tokens')
-        prompt_tokens = in_tok if type(in_tok) is int and in_tok >= 0 else 0
-
-    completion_tokens = usage.get('completion_tokens')
-    if not (type(completion_tokens) is int and completion_tokens >= 0):
-        out_tok = usage.get('output_tokens')
-        completion_tokens = out_tok if type(out_tok) is int and out_tok >= 0 else 0
-
-    details = usage.get('prompt_tokens_details') if isinstance(usage.get('prompt_tokens_details'), dict) else {}
-    cached_tokens = details.get('cached_tokens')
-    comp_details = (
-        usage.get('completion_tokens_details')
-        if isinstance(usage.get('completion_tokens_details'), dict)
-        else {}
-    )
-    reasoning_tokens = comp_details.get('reasoning_tokens')
-    seconds_val = usage.get('seconds')
-    if not isinstance(seconds_val, (int, float)) or isinstance(seconds_val, bool):
-        seconds_val = body.get('duration') if isinstance(body.get('duration'), (int, float)) else 0.0
-
+    unknown = dict.fromkeys(('prompt_tokens', 'cached_tokens', 'completion_tokens',
+                            'reasoning_tokens', 'cache_write_30m_tokens',
+                            'cache_write_12h_tokens', 'audio_seconds'))
+    unknown['usage_kind'] = 'unknown'
+    zeros = {k: 0 for k in unknown if k != 'usage_kind'}
+    if usage.get('type') == 'duration':
+        seconds = usage.get('seconds')
+        if type(seconds) in (int, float) and 0 < seconds <= MAX_AUDIO_DURATION_SECONDS and math.isfinite(seconds):
+            return zeros | {'audio_seconds': float(seconds), 'usage_kind': 'duration'}
+        return unknown
+    if 'prompt_tokens' in usage or 'completion_tokens' in usage:
+        prompt, completion = usage.get('prompt_tokens'), usage.get('completion_tokens')
+    else:
+        prompt, completion = usage.get('input_tokens'), usage.get('output_tokens')
+    if any(type(n) is not int or n < 0 for n in (prompt, completion)) or prompt + completion == 0:
+        return unknown
+    total = usage.get('total_tokens', prompt + completion)
+    if type(total) is not int or total != prompt + completion:
+        return unknown
+    details = usage.get('prompt_tokens_details', usage.get('input_tokens_details', {}))
+    comp_details = usage.get('completion_tokens_details', usage.get('output_tokens_details', {}))
+    if not isinstance(details, dict) or not isinstance(comp_details, dict):
+        return unknown
+    cached = details.get('cached_tokens', 0)
+    writes = details.get('cache_write_tokens', 0)
+    write_details = details.get('cache_write_tokens_details', {'ttl_30m_tokens': writes, 'ttl_12h_tokens': 0})
+    reasoning = comp_details.get('reasoning_tokens', 0)
+    if not isinstance(write_details, dict):
+        return unknown
+    writes30, writes12 = write_details.get('ttl_30m_tokens'), write_details.get('ttl_12h_tokens')
+    if any(type(n) is not int or n < 0 for n in (cached, writes, writes30, writes12, reasoning)):
+        return unknown
+    if writes30 + writes12 != writes or cached + writes > prompt or reasoning > completion:
+        return unknown
     return {
-        'prompt_tokens': prompt_tokens if type(prompt_tokens) is int and prompt_tokens >= 0 else 0,
-        'cached_tokens': cached_tokens if type(cached_tokens) is int and cached_tokens >= 0 else 0,
-        'completion_tokens': completion_tokens if type(completion_tokens) is int and completion_tokens >= 0 else 0,
-        'reasoning_tokens': reasoning_tokens if type(reasoning_tokens) is int and reasoning_tokens >= 0 else 0,
-        'audio_seconds': float(seconds_val) if isinstance(seconds_val, (int, float)) and seconds_val > 0 else 0.0,
+        'usage_kind': 'tokens', 'prompt_tokens': prompt, 'completion_tokens': completion,
+        'cached_tokens': cached, 'reasoning_tokens': reasoning,
+        'cache_write_30m_tokens': writes30, 'cache_write_12h_tokens': writes12,
+        'audio_seconds': 0.0,
     }
+
+
+def _fingerprint(value: Any) -> str:
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
+                                     separators=(',', ':'), allow_nan=False).encode('utf-8')).hexdigest()
 
 
 _CONTAINER_RULES: dict[str, dict[str, set[str]]] = {
@@ -174,7 +188,7 @@ def _verify_wav_chunks(blob: bytes) -> float:
     if len(blob) < 44:
         raise ValueError('WAV 헤더 길이가 너무 짧습니다.')
     riff_size = struct.unpack_from('<I', blob, 4)[0]
-    if riff_size + 8 > len(blob):
+    if riff_size + 8 != len(blob):
         raise ValueError('WAV RIFF 청크 크기가 실제 파일 크기와 일치하지 않습니다.')
 
     offset = 12
@@ -192,23 +206,30 @@ def _verify_wav_chunks(blob: bytes) -> float:
         if body_end > len(blob):
             raise ValueError('WAV 내부 청크가 파일 끝을 벗어납니다.')
         if chunk_id == b'fmt ':
-            if chunk_size < 16:
+            if fmt_found or chunk_size < 16:
                 raise ValueError('WAV fmt 청크가 손상되었습니다.')
             audio_fmt, channels, sample_rate, byte_rate, block_align, bits_per_sample = struct.unpack_from(
                 '<HHIIHH', blob, body_start
             )
             if audio_fmt not in {1, 3} or channels not in {1, 2} or sample_rate < 8000 or sample_rate > 96000:
                 raise ValueError('지원하지 않는 WAV 오디오 포맷입니다.')
+            if (audio_fmt == 1 and bits_per_sample not in {8, 16, 24, 32}) or (
+                audio_fmt == 3 and bits_per_sample not in {32, 64}
+            ):
+                raise ValueError('지원하지 않는 WAV 샘플 크기입니다.')
             expected_align = channels * (bits_per_sample // 8)
             if block_align <= 0 or expected_align != block_align or byte_rate != sample_rate * block_align:
                 raise ValueError('WAV 프레임 정렬/바이트율 정보가 일치하지 않습니다.')
             fmt_found = True
         elif chunk_id == b'data':
+            if data_found or not fmt_found:
+                raise ValueError('WAV 데이터 청크는 fmt 이후 하나만 허용됩니다.')
             data_size = chunk_size
             data_found = True
-            break
         offset = body_end + (chunk_size % 2)
 
+    if offset != len(blob):
+        raise ValueError('WAV 청크 정렬 또는 파일 끝이 일치하지 않습니다.')
     if not fmt_found or not data_found or data_size <= 0:
         raise ValueError('WAV 필수 청크(fmt/data)가 없거나 비어 있습니다.')
     if data_size % block_align != 0:
@@ -345,6 +366,44 @@ class OpenAIGateway:
             'monthly_cap_usd': budget['monthly_cap_usd'],
         }
 
+    def _reserve_call(self, *args, **kwargs):
+        try:
+            decision = self.governor.reserve_budget(*args, **kwargs)
+        except ValueError as exc:
+            raise OpenAIGatewayError('과금 요청 ID 또는 요청 매개변수가 일치하지 않습니다.',
+                                     'request_conflict', 409) from exc
+        if decision.reason == 'request_already_reserved':
+            raise OpenAIGatewayError('이미 전송했거나 처리 중인 요청입니다. 자동으로 재전송하지 않습니다.',
+                                     'request_already_dispatched', 409)
+        if not decision.allowed_cloud:
+            raise OpenAIGatewayError('월간 OpenAI API 예산 한도에 도달하여 클라우드 호출을 차단했습니다.',
+                                     'budget_exceeded', 402)
+        if not decision.reservation_acquired:
+            raise OpenAIGatewayError('과금 예약의 전송 권한을 확보하지 못했습니다.',
+                                     'reservation_not_acquired', 409)
+        return decision
+
+    def _account_response(self, body: Any, *, request_id: str, category: UsageCategory,
+                          model: str, note: str, at_iso: str | None,
+                          cost_source: str = 'provider_usage') -> dict[str, Any] | None:
+        """Settle only priced, complete provider usage, including paid failures."""
+        usage = extract_usage(body if isinstance(body, dict) else {})
+        expected_kind = 'duration' if model == 'whisper-1' else 'tokens'
+        actual_tier = body.get('service_tier') if isinstance(body, dict) else None
+        actual_model = body.get('model') if isinstance(body, dict) else None
+        if (usage['usage_kind'] != expected_kind or actual_tier not in {None, 'default'}
+                or (actual_model and actual_model != model and not str(actual_model).startswith(model + '-'))):
+            return None
+        try:
+            return self.governor.record_usage(
+                request_id=request_id, category=category, model=model,
+                **{k: v for k, v in usage.items() if k != 'usage_kind'},
+                cost_source=cost_source, note=note, at_iso=at_iso,
+            )
+        except ValueError:
+            # A new/unpriced billing component must not silently free the reserve.
+            return None
+
     async def _post_json(self, path: str, payload: dict[str, Any], timeout: float = 60.0) -> tuple[dict[str, Any], str]:
         key = self._api_key()
         if not key and self.base_url.startswith('https://'):
@@ -364,7 +423,11 @@ class OpenAIGateway:
 
         if callable(self.transport) and not hasattr(self.transport, 'handle_async_request'):
             body = await self.transport('POST', url, headers, payload)
-            raw = json.dumps(body, ensure_ascii=False)
+            raw = json.dumps(body, ensure_ascii=False, allow_nan=False)
+            if len(raw.encode('utf-8')) > MAX_RESPONSE_BYTES:
+                raise OpenAIGatewayError('OpenAI 응답이 512KiB 제한을 초과했습니다.', 'response_too_large')
+            if not isinstance(body, dict):
+                raise OpenAIGatewayError('OpenAI 응답은 JSON 객체여야 합니다.', 'invalid_response')
             return body, raw
 
         labels = {
@@ -483,21 +546,13 @@ class OpenAIGateway:
         at_iso: str | None,
         exc: OpenAIGatewayError,
     ) -> None:
-        if exc.response_body and has_usage(exc.response_body):
-            usage = extract_usage(exc.response_body)
-            self.governor.record_usage(
-                request_id=request_id,
-                category=category,
-                model=model,
-                prompt_tokens=usage['prompt_tokens'],
-                cached_tokens=usage['cached_tokens'],
-                completion_tokens=usage['completion_tokens'],
-                reasoning_tokens=usage['reasoning_tokens'],
-                audio_seconds=usage['audio_seconds'],
-                cost_source='provider_usage_on_error',
-                note=f'{note} [error:{exc.code}]',
-                at_iso=at_iso,
-            )
+        if self._account_response(exc.response_body, request_id=request_id,
+                                  category=category, model=model,
+                                  cost_source='provider_usage_on_error',
+                                  note=f'{note} [error:{exc.code}]', at_iso=at_iso) is not None:
+            return
+        if isinstance(exc.response_body, dict) and isinstance(exc.response_body.get('usage'), dict):
+            self.governor.mark_reservation_unknown(request_id, 'incomplete_error_usage')
             return
         if exc.code == 'missing_api_key':
             self.governor.release_reservation(request_id, 'missing_api_key')
@@ -543,8 +598,17 @@ class OpenAIGateway:
                 401,
             )
 
-        est_input = max(256, (len(system_prompt) + len(user_text) + len(json.dumps(schema))) // 3)
-        decision = self.governor.reserve_budget(
+        chosen_model = requested_model or (pol.deep_model if category in {'agent_deep', 'briefing'} else pol.fast_model)
+        if chosen_model not in ALLOWED_CHAT_MODELS or chosen_model == 'o3-mini':
+            raise OpenAIGatewayError('지원하지 않거나 종료된 플래너 모델입니다. 모델 설정을 확인하세요.',
+                                     'unsupported_model', 400)
+        # UTF-8 bytes plus framing/schema overhead form a conservative reservation
+        # bound for byte-level tokenization. This is NOT measured provider usage.
+        prompt_material = {'system': system_prompt, 'user': user_text, 'schema': schema, 'name': schema_name}
+        est_input = len(json.dumps(prompt_material, ensure_ascii=False).encode('utf-8')) + 2048
+        if est_input > 272_000:
+            raise OpenAIGatewayError('예약 가능한 입력 크기를 초과했습니다.', 'input_too_large', 413)
+        decision = self._reserve_call(
             request_id,
             category,
             requested_model,
@@ -553,13 +617,12 @@ class OpenAIGateway:
             force_model=force_model,
             note=schema_name,
             at_iso=at_iso,
+            request_fingerprint=_fingerprint(prompt_material | {
+                'requested_model': chosen_model, 'temperature': temperature,
+                'reasoning_effort': pol.reasoning_effort, 'max_output_tokens': max_output_tokens,
+                'base_url': self.base_url,
+            }),
         )
-        if not decision.allowed_cloud:
-            raise OpenAIGatewayError(
-                '월간 OpenAI API 예산 한도에 도달하여 클라우드 호출을 차단했습니다. 로컬 규칙 모드로 전환합니다.',
-                'budget_exceeded',
-                402,
-            )
 
         is_reasoning_model = decision.selected_model.startswith(('gpt-6', 'gpt-5', 'o'))
         payload: dict[str, Any] = {
@@ -569,6 +632,7 @@ class OpenAIGateway:
                 {'role': 'user', 'content': user_text},
             ],
             'stream': False,
+            'service_tier': 'default',
             'response_format': {
                 'type': 'json_schema',
                 'json_schema': {
@@ -581,6 +645,8 @@ class OpenAIGateway:
         if is_reasoning_model:
             payload['reasoning_effort'] = decision.reasoning_effort
             payload['max_completion_tokens'] = decision.max_output_tokens
+            if decision.selected_model in {'gpt-6.1-sol', 'gpt-6.1-terra'}:
+                payload['prompt_cache_options'] = {'mode': 'implicit', 'ttl': '30m'}
         else:
             payload['max_tokens'] = decision.max_output_tokens
             payload['temperature'] = temperature
@@ -591,6 +657,9 @@ class OpenAIGateway:
                 self._post_json('/chat/completions', payload, timeout=timeout),
                 timeout + 1.0,
             )
+        except asyncio.CancelledError:
+            self.governor.mark_reservation_unknown(request_id, 'cancelled_after_dispatch')
+            raise
         except OpenAIGatewayError as exc:
             self._settle_or_handle_failure(
                 request_id=request_id,
@@ -615,25 +684,15 @@ class OpenAIGateway:
 
         elapsed = time.perf_counter() - start
         usage = extract_usage(body)
-        ledger: dict[str, Any] | None = None
-        if has_usage(body):
-            ledger = self.governor.record_usage(
-                request_id=request_id,
-                category=category,
-                model=decision.selected_model,
-                prompt_tokens=usage['prompt_tokens'],
-                cached_tokens=usage['cached_tokens'],
-                completion_tokens=usage['completion_tokens'],
-                reasoning_tokens=usage['reasoning_tokens'],
-                cost_source='provider_usage',
-                note=f'{schema_name} ({decision.state})',
-                at_iso=at_iso,
-            )
+        ledger = self._account_response(body, request_id=request_id, category=category,
+                                        model=decision.selected_model, note=f'{schema_name} ({decision.state})',
+                                        at_iso=at_iso)
+        if ledger is None:
+            self.governor.mark_reservation_unknown(request_id, 'missing_or_incomplete_provider_usage')
 
         try:
             if isinstance(body.get('error'), dict):
-                err_msg = str(body['error'].get('message') or 'OpenAI API 오류 응답입니다.')
-                raise OpenAIGatewayError(err_msg, 'api_error', 400, response_body=body)
+                raise OpenAIGatewayError('OpenAI API 오류 응답입니다.', 'api_error', 400, response_body=body)
             choices = body.get('choices')
             if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
                 raise OpenAIGatewayError('OpenAI 응답에 choices가 없습니다.', 'invalid_response', response_body=body)
@@ -655,20 +714,6 @@ class OpenAIGateway:
                 self.governor.mark_reservation_unknown(request_id, 'unsettled_invalid_response')
             raise
 
-        if ledger is None:
-            ledger = self.governor.record_usage(
-                request_id=request_id,
-                category=category,
-                model=decision.selected_model,
-                prompt_tokens=usage['prompt_tokens'],
-                cached_tokens=usage['cached_tokens'],
-                completion_tokens=usage['completion_tokens'],
-                reasoning_tokens=usage['reasoning_tokens'],
-                cost_source='provider_usage',
-                note=f'{schema_name} ({decision.state})',
-                at_iso=at_iso,
-            )
-
         return {
             'parsed': structured,
             'raw_output': content,
@@ -677,8 +722,10 @@ class OpenAIGateway:
             'selected_model': decision.selected_model,
             'budget_decision': decision.data(),
             'usage': usage,
-            'cost_microdollars': ledger['cost_microdollars'],
-            'cost_usd': ledger['cost_usd'],
+            'cost_microdollars': ledger['cost_microdollars'] if ledger else None,
+            'cost_usd': ledger['cost_usd'] if ledger else None,
+            'cost_known': ledger is not None,
+            'cost_source': 'provider_usage' if ledger else 'unknown_unsettled',
             'latency_seconds': round(elapsed, 4),
         }
 
@@ -704,6 +751,13 @@ class OpenAIGateway:
                 'audio_cloud_disabled',
                 403,
             )
+        if not isinstance(language, str):
+            raise OpenAIGatewayError('전사 언어는 두 글자 언어 코드 또는 auto여야 합니다.',
+                                     'invalid_language', 422)
+        language = language.strip().lower()
+        if language != 'auto' and (len(language) != 2 or not language.isascii() or not language.isalpha()):
+            raise OpenAIGatewayError('전사 언어는 두 글자 언어 코드 또는 auto여야 합니다.',
+                                     'invalid_language', 422)
 
         verified = verify_audio_payload(
             audio_bytes,
@@ -712,6 +766,12 @@ class OpenAIGateway:
             claimed_duration_seconds=duration_seconds,
         )
         verified_seconds = verified['verified_duration_seconds']
+        if verified['duration_source'] != 'wav_header':
+            raise OpenAIGatewayError('클라우드 전사에는 서버에서 길이를 확인한 WAV가 필요합니다.',
+                                     'unverified_audio_duration', 422)
+        chosen_model = requested_model or pol.stt_model
+        if chosen_model not in ALLOWED_STT_MODELS:
+            raise OpenAIGatewayError('지원하지 않는 음성 전사 모델입니다.', 'unsupported_model', 400)
 
         key = self._api_key()
         if not key and self.base_url.startswith('https://'):
@@ -721,7 +781,7 @@ class OpenAIGateway:
                 401,
             )
 
-        decision = self.governor.reserve_budget(
+        decision = self._reserve_call(
             request_id,
             'stt',
             requested_model,
@@ -730,29 +790,33 @@ class OpenAIGateway:
             audio_seconds=max(0.25, verified_seconds),
             note=f'audio_stt_reserve ({verified_seconds}s)',
             at_iso=at_iso,
+            request_fingerprint=_fingerprint({
+                'sha256': hashlib.sha256(audio_bytes).hexdigest(), 'language': language,
+                'prompt_hint': prompt_hint[:800], 'model': chosen_model, 'base_url': self.base_url,
+            }),
         )
-        if not decision.allowed_cloud:
-            raise OpenAIGatewayError(
-                '월간 OpenAI API 예산 한도에 도달하여 클라우드 음성 인식을 차단했습니다.',
-                'budget_exceeded',
-                402,
-            )
 
         headers = {'Accept': 'application/json'}
         if key:
             headers['Authorization'] = f'Bearer {key}'
         data = {
             'model': decision.selected_model,
-            'language': language,
             'response_format': 'json',
         }
+        # The API auto-detects only when language is omitted; "auto" is a
+        # Room Hub setting, not an ISO-639-1 code accepted by the provider.
+        if language != 'auto':
+            data['language'] = language
         if prompt_hint:
             data['prompt'] = prompt_hint[:800]
 
         start = time.perf_counter()
         try:
             if callable(self.transport) and not hasattr(self.transport, 'handle_async_request'):
-                body = await self.transport('POST', self.base_url + '/audio/transcriptions', headers, audio_bytes)
+                body = await asyncio.wait_for(
+                    self.transport('POST', self.base_url + '/audio/transcriptions', headers, audio_bytes), timeout)
+                if len(json.dumps(body, ensure_ascii=False, allow_nan=False).encode('utf-8')) > MAX_RESPONSE_BYTES:
+                    raise OpenAIGatewayError('OpenAI 응답이 512KiB 제한을 초과했습니다.', 'response_too_large')
             elif self.transport is None:
                 def _urllib_stt() -> dict[str, Any]:
                     boundary = f'----RoomHubBoundary{uuid.uuid4().hex}'
@@ -765,8 +829,8 @@ class OpenAIGateway:
                         )
                     parts.append(
                         f'--{boundary}\r\n'
-                        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
-                        f'Content-Type: {mime_type}\r\n\r\n'.encode('utf-8')
+                        f'Content-Disposition: form-data; name="file"; filename="voice.wav"\r\n'
+                        f'Content-Type: audio/wav\r\n\r\n'.encode('utf-8')
                         + audio_bytes
                         + f'\r\n--{boundary}--\r\n'.encode('utf-8')
                     )
@@ -786,16 +850,25 @@ class OpenAIGateway:
                         with opener.open(req, timeout=timeout) as resp:
                             raw_bytes = resp.read(MAX_RESPONSE_BYTES + 1)
                     except urllib.error.HTTPError as exc:
-                        raise OpenAIGatewayError(f'OpenAI Audio HTTP {exc.code}', 'stt_http_error', exc.code) from None
+                        error_body = None
+                        try:
+                            error_raw = exc.read(MAX_RESPONSE_BYTES)
+                            error_body = json.loads(error_raw.decode('utf-8'))
+                        except (UnicodeError, ValueError):
+                            pass
+                        raise OpenAIGatewayError(f'OpenAI Audio HTTP {exc.code}', 'stt_http_error', exc.code,
+                                                 response_body=error_body if isinstance(error_body, dict) else None) from None
                     except urllib.error.URLError as exc:
                         if isinstance(getattr(exc, 'reason', None), TimeoutError):
                             raise OpenAIGatewayError('OpenAI 음성 전사 제한 시간을 초과했습니다.', 'timeout') from None
                         raise OpenAIGatewayError('OpenAI 오디오 서버에 연결할 수 없습니다.', 'connection_failed') from None
                     except TimeoutError:
                         raise OpenAIGatewayError('OpenAI 음성 전사 제한 시간을 초과했습니다.', 'timeout') from None
-                    return json.loads(raw_bytes.decode('utf-8'))
+                    if len(raw_bytes) > MAX_RESPONSE_BYTES:
+                        raise OpenAIGatewayError('OpenAI 응답이 512KiB 제한을 초과했습니다.', 'response_too_large')
+                    return json.loads(raw_bytes.decode('utf-8'), parse_constant=lambda _x: (_ for _ in ()).throw(ValueError('nonfinite')))
 
-                body = await asyncio.to_thread(_urllib_stt)
+                body = await asyncio.wait_for(asyncio.to_thread(_urllib_stt), timeout + 1.0)
             else:
                 import httpx
                 try:
@@ -805,19 +878,36 @@ class OpenAIGateway:
                         follow_redirects=False,
                         timeout=httpx.Timeout(timeout, connect=min(8.0, timeout)),
                     ) as client:
-                        res = await client.post(
+                        async with client.stream(
+                            'POST',
                             self.base_url + '/audio/transcriptions',
                             headers=headers,
                             data=data,
-                            files={'file': (filename, audio_bytes, mime_type)},
-                        )
-                    if res.status_code != 200:
-                        raise OpenAIGatewayError(f'OpenAI Audio HTTP {res.status_code}', 'stt_http_error', res.status_code)
-                    body = res.json()
+                            files={'file': ('voice.wav', audio_bytes, 'audio/wav')},
+                        ) as res:
+                            chunks, size = [], 0
+                            async for chunk in res.aiter_bytes():
+                                size += len(chunk)
+                                if size > MAX_RESPONSE_BYTES:
+                                    raise OpenAIGatewayError('OpenAI 응답이 512KiB 제한을 초과했습니다.', 'response_too_large')
+                                chunks.append(chunk)
+                            raw_bytes = b''.join(chunks)
+                            if res.status_code != 200:
+                                error_body = None
+                                try:
+                                    error_body = json.loads(raw_bytes.decode('utf-8'))
+                                except (UnicodeError, ValueError):
+                                    pass
+                                raise OpenAIGatewayError(f'OpenAI Audio HTTP {res.status_code}', 'stt_http_error', res.status_code,
+                                                         response_body=error_body if isinstance(error_body, dict) else None)
+                            body = json.loads(raw_bytes.decode('utf-8'), parse_constant=lambda _x: (_ for _ in ()).throw(ValueError('nonfinite')))
                 except OpenAIGatewayError:
                     raise
                 except Exception as exc:
                     raise OpenAIGatewayError('OpenAI 음성 전사 요청에 실패했습니다.', 'stt_failed') from exc
+        except asyncio.CancelledError:
+            self.governor.mark_reservation_unknown(request_id, 'cancelled_after_dispatch')
+            raise
         except OpenAIGatewayError as exc:
             self._settle_or_handle_failure(
                 request_id=request_id,
@@ -828,26 +918,19 @@ class OpenAIGateway:
                 exc=exc,
             )
             raise
+        except Exception as exc:
+            self.governor.mark_reservation_unknown(request_id, 'stt_transport_or_response_failure')
+            raise OpenAIGatewayError('음성 전사 응답을 확인하지 못했습니다. 자동 재전송하지 않습니다.',
+                                     'stt_failed') from exc
 
         elapsed = time.perf_counter() - start
         usage = extract_usage(body if isinstance(body, dict) else {})
-        provider_has_usage = has_usage(body)
-        billed_seconds = usage['audio_seconds'] if usage['audio_seconds'] > 0 else verified_seconds
-        cost_source = 'provider_usage' if provider_has_usage else 'duration_estimate'
-
-        ledger = self.governor.record_usage(
-            request_id=request_id,
-            category='stt',
-            model=decision.selected_model,
-            prompt_tokens=usage['prompt_tokens'],
-            cached_tokens=usage['cached_tokens'],
-            completion_tokens=usage['completion_tokens'],
-            reasoning_tokens=usage['reasoning_tokens'],
-            audio_seconds=0.0 if (usage['prompt_tokens'] or usage['completion_tokens']) else max(0.25, billed_seconds),
-            cost_source=cost_source,
-            note=f'audio_stt ({round(billed_seconds, 2)}s, {cost_source})',
-            at_iso=at_iso,
-        )
+        ledger = self._account_response(body, request_id=request_id, category='stt',
+                                        model=decision.selected_model, note=f'audio_stt ({verified_seconds}s)',
+                                        at_iso=at_iso)
+        cost_source = 'provider_usage' if ledger else 'unknown_unsettled'
+        if ledger is None:
+            self.governor.mark_reservation_unknown(request_id, 'missing_or_incomplete_stt_usage')
 
         text = body.get('text') if isinstance(body, dict) else None
         if not isinstance(text, str) or not text.strip():
@@ -857,11 +940,13 @@ class OpenAIGateway:
         return {
             'text': text,
             'model': decision.selected_model,
-            'duration_seconds': round(billed_seconds, 3),
+            'duration_seconds': verified_seconds,
             'verified_duration_seconds': verified_seconds,
             'cost_source': cost_source,
             'latency_seconds': round(elapsed, 4),
-            'cost_microdollars': ledger['cost_microdollars'],
-            'cost_usd': ledger['cost_usd'],
+            'usage': usage,
+            'cost_microdollars': ledger['cost_microdollars'] if ledger else None,
+            'cost_usd': ledger['cost_usd'] if ledger else None,
+            'cost_known': ledger is not None,
             'budget_decision': decision.data(),
         }

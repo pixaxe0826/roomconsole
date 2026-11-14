@@ -22,11 +22,11 @@
  rows.unshift(assistant(make('오늘 남은 할 일 확인해줘')));
  rows.unshift(assistant(make('오늘 할 일에 택배 보내기 추가해?')));
  function summary(r){return {...r,model:r.config_json.model,metrics:r.response_json?.metrics||{},source_preview:r.source_text,output_preview:r.response_json?.output||''}}
- let agentPolicy={agent_enabled:false,cloud_enabled:false,audio_cloud_enabled:false};
+ let agentPolicy={agent_enabled:false,cloud_enabled:false,audio_cloud_enabled:false,allow_shared_notes_in_cloud:false,monthly_cap_usd:100};
  let agentDemoRuns=[];
  window.ROOM_LLM_DEMO={async api(path,method='GET',body){
   const u=new URL(path,'http://demo'),p=u.pathname;
-  if(p==='/api/agent/status')return {agent_enabled:agentPolicy.agent_enabled,cloud_enabled:agentPolicy.cloud_enabled,audio_cloud_enabled:agentPolicy.audio_cloud_enabled,cloud_status:agentPolicy.agent_enabled?(agentPolicy.cloud_enabled?'ready':'cloud_disabled'):'agent_disabled',local_tier0_available:true,local_stt_available:false,budget:{state:'normal',committed_usd:0,spent_usd:0,monthly_budget_usd:100}};
+  if(p==='/api/agent/status')return {...clone(agentPolicy),cloud_status:agentPolicy.agent_enabled?(agentPolicy.cloud_enabled?'ready':'cloud_disabled'):'agent_disabled',local_tier0_available:true,local_stt_available:false,budget:{state:'NORMAL',committed_usd:0,spent_usd:0,unknown_usd:0,reserved_usd:0,monthly_cap_usd:agentPolicy.monthly_cap_usd}};
   if(p==='/api/agent/budget/policy'&&method==='PUT'){agentPolicy={...agentPolicy,...(body||{})};return {ok:true,policy:clone(agentPolicy)};}
   if(p==='/api/agent/runs')return {items:clone(agentDemoRuns)};
   if(p==='/api/agent/command'||p==='/api/agent/briefing'){const rid='demo-agent-'+(++seq),run={run_id:rid,id:rid,status:'completed',mode:body?.mode||'auto',tier:'tier0_local',model:'local',source_text:body?.text||'브리핑',assistant_reply:'[예시 Personal Agent 응답] 실제 서버에서 실행하세요.',requires_confirmation:false,preview_sha256:null,staged_steps:[],executed_results:[],schedule_conflicts:[],cost_microdollars:0,created_at:now()};agentDemoRuns.unshift(run);return clone(run);}

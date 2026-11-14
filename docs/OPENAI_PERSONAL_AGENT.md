@@ -1,131 +1,105 @@
-# OpenAI Personal Agent 아키텍처 및 운영 가이드 (`pixaxe0826/roomconsole`)
+# OpenAI Personal Agent: 동작·적용·안전 경계
 
-[문서 홈](../README.md) · [설치](SETUP.md) · [보안](../SECURITY.md) · [Widget Protocol 1.0](WIDGET_PROTOCOL.md) · [실내 온도·공기질 센서](INDOOR_TEMPERATURE.md) · [M3.4-0 런타임](RUNTIME_M340.md)
+[문서 홈](../README.md) · [설치](SETUP.md) · [보안](../SECURITY.md) · [테스트](TESTING.md) · [Widget Protocol](WIDGET_PROTOCOL.md)
 
-## 1. 개요 및 활성화 경계
+## 1. 제공하는 기능
 
-Room Hub의 **OpenAI Personal Agent**는 기존 로컬 `Whisper + Qwen` 구조의 결정론적 엔진(`fast_reads`, `timer_commands`, `memo_grounding`, `semantic_parser`)을 **Tier 0($0.00)**으로 재사용하면서, 관리자가 명시적으로 활성화한 경우에만 **예산 예약·정산 거버너(`BudgetGovernor`)** 하에 **GPT-6.1 Sol High (`model="gpt-6.1-sol"`, `reasoning_effort="high"`)** Structured Outputs 및 선택적 OpenAI Audio STT를 결합하는 하이브리드 비서 계층입니다.
+기존 Room Hub 위에 선택적으로 활성화하는 비서 계층입니다. 명확한 요청은 기존 로컬 규칙(`fast_reads`, `timer_commands`, `memo_grounding`, `semantic_parser`)로 처리합니다. 필요한 경우에만 예산 예약을 거쳐 OpenAI의 구조화된 계획을 요청합니다. 기본 모델 설정은 `gpt-6.1-sol`, 추론 강도는 `high`입니다. 설정값은 실제 계정의 모델 접근이나 응답 품질을 검증한 결과가 아닙니다.
 
-### 1.1 명시적 활성화 (Opt-in 기본 비활성화)
+기존 iPad 음성 화면과 `/api/speech/jobs`를 그대로 사용합니다. 에이전트를 끄면 기존 전사 → LLM 수신 흐름을 사용합니다. 에이전트를 켜면 완료된 전사문을 저장된 job 소유자 권한으로 전달합니다. 로컬/원격 Whisper 설정·모델은 자동으로 교체하지 않습니다.
 
-신규 에이전트와 외부 클라우드 호출은 기본적으로 **비활성화**되어 있으며, 비활성 상태에서는 기존의 iPad 음성 수신함(`SpeechHub` $\to$ `LLMHub`), 관리자 LLM 인터페이스(`/api/llm/requests`), 표시 위젯 동작이 100% 그대로 유지됩니다.
+조회와 제한된 타이머 제어는 즉시 실행할 수 있습니다. 그 밖의 데이터 변경은 관리자 미리보기 승인 후에만 실행합니다. 항상 켜진 마이크나 음성만으로 승인하는 기능은 추가하지 않습니다.
 
-| 환경변수 | DB 정책 필드 | 기본값 | 역할 |
-|---|---|---|---|
-| `HUB_PERSONAL_AGENT_ENABLED` | `agent_enabled` | `false` | `/api/agent/*` 실행 및 `SpeechHub` 전사 결과의 에이전트 전달 활성화 |
-| `HUB_OPENAI_ENABLED` | `cloud_enabled` | `false` | Tier 1 / Tier 2 OpenAI 클라우드 플래너 호출 허용 여부 |
-| `HUB_OPENAI_AUDIO_ENABLED` | `audio_cloud_enabled` | `false` | `/api/agent/audio`에서 OpenAI STT 외부 전송 허용 여부 |
-| `HUB_OPENAI_INCLUDE_SHARED_NOTES` | `allow_shared_notes_in_cloud` | `false` | 디스플레이 공유 메모(`shared=true`) 제목·ID의 클라우드 프롬프트 포함 허용 (비공개 메모는 항상 제외) |
-| `OPENAI_API_KEY` / `HUB_OPENAI_API_KEY` | — | 미설정 | OpenAI 전용 API 키 (**`HUB_LLM_API_KEY`를 자동 재사용하지 않음**) |
-| `HUB_OPENAI_MONTHLY_BUDGET_USD` | `monthly_cap_usd` | `100.00` | 월간 비용 예약·추정 한도(USD) |
-| `HUB_OPENAI_FAST_MODEL` | `fast_model` | `gpt-6.1-sol` | Tier 1 Fast 계획 모델 |
-| `HUB_OPENAI_DEEP_MODEL` | `deep_model` | `gpt-6.1-sol` | Tier 2 Deep 복합 계획·브리핑 모델 |
-| `HUB_OPENAI_REASONING_EFFORT` | `reasoning_effort` | `high` | 추론 강도 (`low` / `medium` / `high`) |
-| `HUB_OPENAI_STT_MODEL` | `stt_model` | `gpt-4o-mini-transcribe` | 클라우드 STT 모델 (`gpt-4o-mini-transcribe`, `gpt-4o-transcribe`, `whisper-1`) |
+## 2. 정책과 환경변수
 
-### 1.2 설정 우선순위와 재시작 보존
+다음 환경변수는 `hub_ai_budget_policy` 행을 **최초 생성할 때** 사용합니다. 이후에는 관리자 UI 또는 `PUT /api/agent/budget/policy`로 저장한 정책이 기준입니다. 재시작해도 저장된 필드를 환경변수 초기값으로 덮어쓰지 않습니다. 정책을 초기화하려고 운영 DB를 삭제하지 마세요.
 
-1. **요청 수준 `local_only` (`mode="local_only"` 또는 `local_only=true`)**: 전역 클라우드 설정이 켜져 있어도 해당 요청(텍스트·음성·브리핑·폴백)에서 외부 AI/STT 호출을 강제로 차단합니다.
-2. **DB 저장 정책 (`hub_ai_budget_policy`, `PUT /api/agent/budget/policy`)**: 관리자가 UI 또는 API로 변경·저장한 정책은 SQLite에 영속 저장되며, **서버를 재시작해도 환경변수 초기값으로 덮어쓰지 않습니다.**
-3. **최초 DB 생성 시 환경변수 시드 (`policy_from_env()`)**: `hub_ai_budget_policy` 행이 없을 때만 환경변수를 읽어 초기 정책을 생성합니다.
-4. **코드 기본값**: 환경변수도 지정되지 않은 경우 모든 스위치는 `false`(비활성)로 시작합니다.
+| 환경변수 | DB 정책 필드 | 기본값 |
+|---|---|---|
+| `HUB_PERSONAL_AGENT_ENABLED` | `agent_enabled` | `false` |
+| `HUB_OPENAI_ENABLED` | `cloud_enabled` | `false` |
+| `HUB_OPENAI_AUDIO_ENABLED` | `audio_cloud_enabled` | `false` |
+| `HUB_OPENAI_ALLOW_SHARED_NOTES` | `allow_shared_notes_in_cloud` | `false` |
+| `HUB_OPENAI_MONTHLY_CAP_USD` | `monthly_cap_usd` | `100.00` |
+| `HUB_OPENAI_FAST_MODEL` | `fast_model` | `gpt-6.1-sol` |
+| `HUB_OPENAI_DEEP_MODEL` | `deep_model` | `gpt-6.1-sol` |
+| `HUB_OPENAI_REASONING_EFFORT` | `reasoning_effort` | `high` |
+| `HUB_OPENAI_STT_MODEL` | `stt_model` | `gpt-4o-mini-transcribe` |
 
-> **주의**: `run.py` 직접 실행은 `.env` 파일을 자동으로 읽지 않습니다. Python/systemd에서는 셸 `export` 또는 `EnvironmentFile=`을 설정하고, Docker에서는 `compose.yaml`의 `environment:` 매핑을 통해 프로세스에 전달해야 합니다.
+API 키는 DB 정책에 넣지 않습니다. 실행 프로세스의 `OPENAI_API_KEY` 또는 `HUB_OPENAI_API_KEY`를 읽으며 기존 `HUB_LLM_API_KEY`는 재사용하지 않습니다. 직접 Python 실행은 `.env`를 자동으로 읽지 않습니다. 셸/systemd 환경 또는 Compose의 `environment:` 매핑을 사용합니다. 예제 파일에 실제 키를 커밋하지 마세요.
 
----
+### OpenAI 음성 전사 조건
 
-## 2. 3-Tier 라우팅 및 `local_only` / 로컬 폴백
+`agent_enabled`, `cloud_enabled`, `audio_cloud_enabled`가 **모두 true**여야 합니다. 키와 남은 예산도 필요합니다. iPad의 압축 녹음은 실행 가능한 로컬 FFmpeg로 형식·길이를 확인하고 WAV로 변환한 뒤에만 외부 전송합니다. WAV는 서버가 헤더·프레임 정합성과 길이를 확인합니다. 사용자가 제출한 길이 값이나 압축 비트레이트 추정만으로 업로드를 허용하지 않습니다.
 
-```text
-[iPad 마이크 (/api/speech/jobs) 또는 /api/agent/audio, /api/agent/command]
-       │
-       ├─ (1) 요청/정책 판정: should_use_cloud(mode, local_only, category)
-       │      └─ local_only 또는 클라우드 비활성/예산 차단/장애 시:
-       │           • 음성: 로컬/LAN SpeechHub(Whisper) 전사 경로 재사용 (불가 시 503 구조화 오류)
-       │           • 텍스트/브리핑: Tier 0 로컬 처리기 또는 로컬 브리핑 실행 (외부 호출 0회)
-       │
-       ├─ (2) Tier 0 로컬 빠른 경로 ($0.00, 클라우드 호출 0회)
-       │      ├─ 실내 센서 읽기 (indoor.read / indoor.air)
-       │      ├─ 활성 알람 이벤트 제어 (alarm.snooze / alarm.ack)
-       │      ├─ 빠른 읽기 (fast_reads: clock, weather, todo.list, calendar.list, memo.read)
-       │      ├─ 타이머 명령 (timer_commands: timer.start, timer.stop, timer.list)
-       │      ├─ 이름 기반 메모 그라운딩 (memo_grounding: 로컬 전용 카탈로그 사용)
-       │      └─ 한국어 시맨틱 파서 (semantic_parser: 단일 할 일·일정·알람·메모 변경 스테이징)
-       │      * 복합 다중 의도 명령은 일부 단계만 조용히 잘라 실행하지 않고 Tier 1/2로 넘기거나
-       │        로컬 전용 모드에서는 분리 요청 안내(needs_clarification)를 반환합니다.
-       │
-       └─ (3) Tier 1 / Tier 2 OpenAI Structured Outputs (`gpt-6.1-sol`, `reasoning_effort="high"`)
-              ├─ 호출 전 BudgetGovernor.reserve_budget() 트랜잭션으로 예산 예약
-              ├─ 엄격한 JSON Schema (`AGENT_PLAN_JSON_SCHEMA`, 최대 12단계 제한)
-              └─ 서버 측 카탈로그·원문 근거·버전 검증 후 실행(읽기) 또는 승인 대기(쓰기)
-```
+요청의 `mode="local_only"` 또는 `local_only=true`가 위 정책보다 우선합니다. 이 요청은 OpenAI 계획·브리핑·STT를 호출하지 않습니다. 로컬 전사가 불가능하면 명시적인 오류를 반환합니다. 클라우드 오류 뒤 로컬 폴백이 성공하더라도 앞서 전송한 클라우드 요청의 비용이 취소되는 것은 아닙니다.
 
----
+## 3. 적용 순서
 
-## 3. 예산 예약·정산 원장 (`app/openai_budget.py`, `app/openai_gateway.py`)
+1. 기존 소스 버전과 운영 데이터·설정을 별도 백업합니다. 새 소스의 의존성을 설치하고 같은 `HUB_DATA_DIR`로 서버를 정상 재시작합니다. 이 문서는 서버를 실제 배포했다는 기록이 아닙니다.
+2. 관리자 LLM 화면의 Personal Agent 패널에서 정책을 확인합니다. 우선 에이전트만 켜고 `local_only` 텍스트 조회로 연결을 확인합니다.
+3. 클라우드를 사용할 경우 서버의 비공개 환경에 전용 키를 설정합니다. 월 한도와 클라우드 허용을 저장합니다. 음성 외부 전송은 별도로 선택합니다.
+4. `/api/agent/status`(관리자)와 `/api/speech/status`(표시 세션 또는 관리자)를 확인합니다. `backend="openai"`는 현재 라우팅 선택이며 `ready`는 로컬 준비 조건입니다. 공급자 접속·키 유효성·모델 접근·실제 음성 인식 성공까지 검증한 표시가 아닙니다.
+5. iPad는 마이크 버튼 → 녹음 확인 → 직접 전송 순서로 사용합니다. 음성 화면은 전사 이후 `pending`/`running`/`awaiting_confirmation` 상태도 계속 조회합니다. 변경 미리보기는 관리자 화면에서 확인하고 승인합니다.
+6. 실패·타임아웃·재시작 뒤에는 기존 job/run과 원장을 먼저 확인합니다. 같은 요청을 새 ID로 반복하면 별개의 유료 요청이 될 수 있습니다. 클라우드를 끄는 작업은 신규 전송 차단이며 이미 전송한 요청의 취소나 확정된 변경의 롤백이 아닙니다.
 
-동시 요청에서 한도를 초과하지 않도록 외부 네트워크 호출 전에 짧은 `BEGIN IMMEDIATE` 트랜잭션으로 비용을 예약합니다.
+에이전트 비활성 상태에서는 기존 흐름을, 에이전트만 활성화한 상태에서는 로컬 규칙 경로를 사용할 수 있습니다. 로컬 규칙으로 처리할 수 없는 복합 요청은 일부만 조용히 실행하지 않고 분리 요청 또는 추가 확인을 요구합니다.
 
-$$\text{확정 사용량(settled)} + \text{미정산 예약(reserved)} + \text{결과 불명 비용(unknown)} + \text{이번 보수적 예상 비용} \le \text{설정 한도}$$
+## 4. 권한·음성 결과·표시 계약
 
-- **응답 파싱 전 usage 우선 정산**: HTTP 4xx/5xx 오류, 모델 `refusal`, `finish_reason != "stop"`, JSON 파싱 실패가 발생하더라도 응답 본문에 `usage`가 포함되어 있으면 예외를 발생시키기 **전에** `settle_reservation()`으로 실제 토큰 비용을 먼저 원장에 기록합니다.
-- **추론·캐시 토큰 이중 계산 방지**: OpenAI API 규격상 `prompt_tokens`에 `cached_tokens`가 포함되고 `completion_tokens`에 `reasoning_tokens`가 이미 포함되어 있으므로, 캐시 토큰은 차감 후 할인 단가를 적용하고 추론 토큰은 출력 토큰에 중복 합산하지 않습니다.
-- **Timeout / 재시작의 보수적 처리 (`unknown`)**: 네트워크 타임아웃이나 프로세스 재시작으로 과금 여부를 확정할 수 없는 예약은 즉시 환불하지 않고 `status='unknown'`으로 전환하여 월 한도 노출액(`committed_microdollars`)에 계속 산입합니다.
-- **오디오 컨테이너 및 실제 길이 검증 (`verify_audio_payload`)**: 호출자가 보낸 `duration_seconds`를 신뢰하지 않고, 외부 전송 전에 파일 크기(최대 10MB), 음수/NaN/Inf 길이, MIME/매직 헤더 일치 여부, WAV 프레임 무결성 및 실제 재생 시간(최대 300초)을 검증합니다. 공급자 `usage`가 있으면 `cost_source="provider_usage"`, 길이 기반 계산이면 `cost_source="duration_estimate"`로 구분 기록합니다.
-- **청구 면책 고지**: 앱 내부 원장은 단가표(`PRICING_CATALOG_METADATA`) 기반의 보수적 추정치 및 호출 차단 장치이며, 환율·세금·공급자 정산 시점까지 포함한 실제 OpenAI 청구서 금액을 절대적으로 보장하는 것은 아닙니다.
+| 경로 | 허용 주체 | 역할 |
+|---|---|---|
+| `GET /api/agent/status`, `/adapters`, `/snapshot` | 관리자 | 정책·기능·작업 문맥 확인 |
+| `PUT /api/agent/budget/policy`, `GET /api/agent/budget` | 관리자 | 예산 정책 변경·원장 요약; 현재 정책은 `/status` 참조 |
+| `POST /api/agent/command`, `/briefing`, `/audio` | 관리자 | 텍스트·브리핑·직접 음성 요청 |
+| `GET /api/agent/runs` 및 `/runs/{run_id}` | 관리자 | 원본 실행 목록·상세 |
+| `POST /api/agent/runs/{run_id}/confirm`, `/cancel` | 관리자 | 미리보기 승인·취소 |
+| `GET /api/agent/display/runs/{run_id}` | 표시 세션 또는 관리자 | 자신의 표시용 결과; 관리자는 원본 조회 |
+| `/api/speech/jobs` | 표시 세션 또는 관리자 | 기존 음성 제출·자신의 전사 작업 조회 |
 
----
+표시 기기에 일반 `/api/agent/command` 또는 승인 권한을 주지 않습니다. 음성 내부 전달은 저장된 `speech_jobs.owner`, 일치하는 voice/job, 완료된 전사문과 현재 기기 연결 상태를 확인합니다. 본문에 넣은 임의 소유자 값으로 권한을 결정하지 않습니다. 연결 해제된 기기는 이후 단계와 조회에서 거부됩니다.
 
-## 4. 개인정보 보호, 대상 검증 및 권한 경계 (`admin` vs. `display`)
+`GET /api/speech/jobs/{id}`는 기존 전사 필드에 `agent_run`을 추가합니다. 연결된 실행이 없으면 null입니다. 전달 중에는 `status: "pending"`만 있는 임시 상태일 수 있습니다. 실행이 연결되면 ID·status·표시용 summary·redacted·관리자 확인 대기 여부를 반환합니다. 표시 세션에는 원본 plan·미리보기·영수증을 공개하지 않습니다. 다른 기기의 작업은 읽을 수 없습니다.
 
-1. **비공개 메모 완전 제외**:
-   - `shared=false`인 비공개 메모는 제목·ID·본문·개수 어느 것도 클라우드 프롬프트와 STT 힌트에 포함되지 않습니다.
-   - `shared=true`(LAN iPad 표시 공유) 역시 외부 클라우드 전송 동의와 동일시하지 않으며, 기본값(`allow_shared_notes_in_cloud=false`)에서는 클라우드로 전송하지 않습니다.
-2. **신뢰할 수 없는 문자열 정화 및 카탈로그·원문 근거 검증**:
-   - 할 일 제목·알람 라벨 등에 포함된 프롬프트 인젝션 패턴을 정화(`sanitize_untrusted_label`)하고 `UNTRUSTED_DATA`로 격리합니다.
-   - 모델이 반환한 `target_id`가 DB에 존재한다는 사실만으로 변경을 허용하지 않고, **이번 요청의 허용 카탈로그 소속 여부**, **사용자 원문(`user_text`) 내 근거 존재 여부**, **동명 항목 중복 여부(2개 이상 시 `needs_clarification`)**, **낙관적 버전(`version`)**을 모두 검증합니다.
-3. **관리자(`admin`)와 페어링된 표시 기기(`display`) 분리**:
-   - 서버가 세션 쿠키/토큰에서 `ExecutionContext`(`role='admin'` vs `role='display'`, `principal='display:<device_id>'`)를 직접 결정합니다.
-   - `display` 기기는 허용된 명령 제출과 **자신의 실행 기록(`principal` 일치)**만 조회할 수 있으며, 다른 기기나 관리자의 실행 기록 조회(`403`), 데이터 변경 최종 승인(`POST /api/agent/confirm/{run_id}`, `403`), 예산 정책 수정(`403`), 비공개 메모 접근이 차단됩니다. 기기 연결이 해제(`revoke`)되면 즉시 접근이 거부됩니다.
+음성 UI를 닫았다 열거나 Wi-Fi가 복구되면 저장된 동일 job을 **GET으로 조회**합니다. 모델 호출·음성 POST·승인 POST를 자동 재실행하지 않습니다. STT 완료와 비서 처리 완료를 구분하며, 승인 대기는 관리자 처리 결과가 나올 때까지 조회합니다. 표시 화면에는 승인 버튼이 없습니다.
 
----
+공용 `llm-response` 위젯은 배치 opt-in이 필요하며 paired 화면끼리 공유됩니다. 이것은 자신의 음성 실행만 읽는 owner-bound 경로와 다릅니다. 어느 표시 경로에서도 raw DB 텍스트 대신 안전한 표시 투영을 사용합니다.
 
-## 5. 단일 트랜잭션 복합 변경(`unit_of_work`) 및 영속 멱등성
+## 5. 개인정보와 대상 확정
 
-- **사전 실행 예약 (`hub_agent_runs`)**: 클라우드 호출이나 즉시 타이머 실행 전에 `(principal, request_id)`와 요청 본문 해시(`request_sha256`)를 `BEGIN IMMEDIATE`로 먼저 예약합니다.
-  - 동일 ID + 동일 본문: 기존 실행 결과 또는 진행 상태(`running`) 반환 (`duplicate: true`).
-  - 동일 ID + 다른 본문: `409 Conflict` 거절.
-- **즉시 제어와 승인 필요 변경의 단계 검증 및 분리 안내**: `timer.start/stop` 같은 비-트랜잭션 즉시 제어는 계획 내 모든 단계의 검증이 통과한 뒤에만 실행되며, DB 변경(`mutations`)과 함께 포함된 경우 미리보기 및 취소 응답에서 선행 실행된 즉시 제어와 승인 대기 중인 DB 변경을 명확히 구분해 안내합니다.
-- **단일 트랜잭션 승인 (`Store.unit_of_work()`)**: `confirm_run()`은 권한·미리보기 해시(`preview_sha256`)·만료(10분)·시간대·버전 검증, 모든 어댑터의 실제 DB 변경, 실행 영수증(`hub_agent_receipts`), 실행 상태(`succeeded`) 갱신을 **단 하나의 SQLite `BEGIN IMMEDIATE` 트랜잭션** 안에서 처리합니다. 두 번째 단계가 실패하면 첫 번째 단계의 DB 변경과 메모리 중복 방지 캐시도 완전히 롤백됩니다. 실시간 WebSocket 알림은 커밋 완료 후 실행되어 알림 오류가 발생해도 이미 커밋된 변경을 재실행하지 않습니다.
+- 서버가 자동 수집하는 클라우드 카탈로그에서 비공개 메모의 제목·ID·본문·개수를 제외합니다. 공유 메모도 `allow_shared_notes_in_cloud=false`이면 포함하지 않습니다. STT 힌트에는 메모를 넣지 않습니다. 사용자가 요청 원문에 직접 쓴 민감정보까지 자동 제거한다는 뜻은 아닙니다.
+- 메모 조회 결과를 다시 표시할 때 현재 note 배치·공개 여부·정확한 버전을 확인합니다. 이후 비공개로 전환되거나 버전이 달라진 결과는 가립니다. 메모 변경 결과, 출처를 확인할 수 없는 결과도 가립니다.
+- `llm-response`를 통해 과거 응답을 읽은 파생 결과도 원본 출처를 재검사합니다. 결과 목록이나 에이전트 자신의 실행 기록을 통한 우회를 허용하지 않습니다. 실행 중인 현재 요청을 최신 완료 응답으로 선택하지 않습니다.
+- 저장된 제목·본문은 명령이 아닌 비신뢰 데이터입니다. 모델이 유효한 JSON을 반환하거나 DB에 존재하는 ID를 제시했다는 사실만으로 변경을 허용하지 않습니다. 허용 카탈로그, 원문 근거, 유일한 대상, 버전과 승인 시점 상태를 확인합니다.
 
----
+## 6. 예산·중복 요청·불명 비용
 
-## 6. 12개 WidgetProtocol 1.0 통합 어댑터
+외부 전송 전에 짧은 `BEGIN IMMEDIATE` 트랜잭션으로 예약합니다. **정산 사용량 + 활성 예약 + 불명 예약 + 이번 예약**을 한도와 비교합니다. 공급자의 청구서·세금·환율까지 보장하는 장치는 아닙니다. 가격 출처·확인일·지원 범위는 `app/openai_budget.py`의 `PRICING_CATALOG_METADATA`에 기록합니다.
 
-| 번호 | 도메인 (`widget_id`) | 어댑터 클래스 | 지원 동작 (`action`) | 비고 |
-|---|---|---|---|---|
-| 1 | `memo` | `FullMemoAdapter` | `read`, `list`, `write`, `append`, `clear`, `delete`, `pin`, `share` | 비공개 메모 클라우드/디스플레이 격리 |
-| 2 | `todo` | `FullTodoAdapter` | `list`, `get`, `add`, `update`, `complete`, `reopen`, `delete` | 단일/반복 할 일 및 버전 검증 |
-| 3 | `calendar` | `FullCalendarAdapter` | `list`, `get`, `add`, `update`, `delete` | 일정 관리 및 시간 충돌 감지 |
-| 4 | `alarm` | `FullAlarmAdapter` | `list`, `events`, `set`, `update`, `cancel`, `delete`, `snooze`, `ack` | 예약 알람 및 활성 이벤트 미루기/확인 (승인 게이트 적용) |
-| 5 | `timer` | `TimerAdapter` | `list`, `get`, `start`, `stop` | 카운트다운 타이머 즉시 제어 |
-| 6 | `clock` | `ClockAdapter` | `read`, `resolve` | 현재 시각·요일·시간대 및 상대 날짜 해석 |
-| 7 | `weather` | `WeatherAdapter` | `read`, `refresh` | 날씨 스냅샷 조회 및 갱신 |
-| 8 | `indoor` | `IndoorSensorAdapter` | `read`, `air`, `devices` | 실내 온도·습도·기압 및 먼지 ADC·전압 읽기 전용 조회 (`ok`/`stale`/`offline`/`sensor_error`/`waiting` 구분, 추가 폴링 및 임의 PM2.5/AQI 환산 없음) |
-| 9 | `llm-response` | `LLMResponseAdapter` | `list`, `read`, `latest`, `get` | `llm_requests` + `hub_agent_runs` 공통 표시 투영 |
-| 10 | `layout` | `LayoutAdapter` | `read`, `update_widget`, `add_widget`, `remove_widget`, `get_data`, `set_data`, `focus`, `select_date` | 전체 `Layout` 8×6 경계·겹침·최대 12개·설치 위젯 종류 검증 및 빈 슬롯 탐색 |
-| 11 | `settings` | `SettingsAdapter` | `read`, `update` | 허브 제목·테마·위치·시간대 설정 |
-| 12 | `system` | `SystemStatusAdapter` | `status`, `overview`, `devices`, `audit` | 전체 작업·메모·알람·위젯 요약, 기기 목록 및 감사 로그 |
+- 동일 유료 요청 ID의 전송 권한은 최초 예약에만 부여합니다. ID와 입력 지문이 다르면 충돌로 거부합니다. 동시 요청·재조회·재시작이 같은 호출을 다시 보내지 않습니다.
+- 음성 입력도 변환·업로드 전에 `(principal, request_id)`와 오디오·옵션 지문을 저장합니다. 완료된 동일 요청은 저장 결과를 재사용합니다. 중단·결과 불명 요청은 동일 ID로 다시 전송하지 않습니다.
+- 파싱 실패·refusal·토큰 제한·HTTP 오류라도 완전한 usage가 확인되면 먼저 비용을 기록합니다. 추론 토큰을 출력에 중복 합산하지 않으며 캐시 읽기/쓰기 항목은 단가표에 맞춰 구분합니다.
+- usage 누락·불완전·알 수 없는 과금 항목·취소·통신 결과 불명은 비용 `$0`이 아닙니다. `unknown` 예약을 유지하며 `cost_known=false`, 비용 null로 표시합니다. 실제로는 무료였다고 임의 확정하지 않습니다.
+- 토큰 기반 STT는 음성 길이의 분당 추정만으로 정산하지 않습니다. 완전한 토큰 usage가 없으면 미정 상태를 유지합니다. `whisper-1`의 공급자 duration usage는 해당 시간 단가로 정산합니다. 서버에서 확인한 녹음 길이와 공급자 usage는 서로 다른 근거입니다.
+- 미정 예약은 시간 경과나 재시작만으로 한도에서 사라지지 않습니다. 알려진 비용과 미정 노출액은 관리자 원장에서 따로 확인합니다. 원장을 지우거나 요청 ID를 바꿔 한도·중복 방지를 우회하지 마세요.
 
----
+## 7. 승인과 어댑터 연결
 
-## 7. 단계별 시각 관측 및 미구현 범위 (`NOT_IMPLEMENTED`)
+`memo`, `todo`, `calendar`, `alarm`, `timer`, `clock`, `weather`, `indoor`, `llm-response`, `layout`, `settings`, `system`의 12개 도메인을 `WidgetProtocol 1.0`으로 연결합니다. 실제 작업 목록과 스키마는 `/api/agent/adapters`를 기준으로 확인합니다.
 
-- 각 실행(`hub_agent_runs`)은 `timestamps` 객체에 `recorded_at`, `uploaded_at`, `transcribed_at`, `planned_at`, `awaiting_confirmation_at`, `confirmed_at`, `executed_at`, `displayed_at`을 구분 기록합니다.
-- 음성 시작부터 응답 표시까지 15초 이내는 설계 목표치이며, 네트워크·모델 부하에 따라 달라질 수 있는 미검증 목표치입니다. 관리자 승인 대기 시간(`awaiting_confirmation_at` $\to$ `confirmed_at`)은 자동 처리 시간과 별도로 구분됩니다.
-- **미구현 항목 (`NOT_IMPLEMENTED`)**:
-  - 음성 합성(TTS) 출력: `NOT_IMPLEMENTED` (시각 대시보드 및 텍스트 응답 전용)
-  - 항상 켜진 호출어(Wake word) 감지: `NOT_IMPLEMENTED` (사용자 명시적 마이크 버튼 탭 방식 유지)
-  - 자동 브리핑 백그라운드 스케줄러: `NOT_IMPLEMENTED` (사용자/관리자 명시적 브리핑 요청 시 생성)
-  - 멀티턴 장기 기억 DB: `NOT_IMPLEMENTED` (단일 요청 + 현재 시점 구조화 컨텍스트 방식)
-  - 관리자 승인 없는 자율 DB 쓰기 실행: `NOT_IMPLEMENTED` (안전 정책상 모든 DB 변경은 관리자 확인 필수)
+- **일반 변경**: 관리자 역할, 10분 미리보기 만료, `preview_sha256`, 시간대, 대상과 버전을 재검사합니다. 어댑터 DB 변경·영수증·실행 완료 상태를 단일 SQLite UoW로 커밋합니다. 단계 중 하나가 실패하면 해당 승인 트랜잭션 전체를 롤백합니다. 알림은 커밋 뒤에 전송합니다.
+- **타이머 예외**: 인증된 1–600초 로컬 타이머 시작/종료는 검증 후 즉시 실행할 수 있습니다. 복합 계획의 즉시 타이머와 승인 대기 변경은 결과에서 구분합니다. 뒤에 승인 대기 변경을 취소했다고 이미 실행한 타이머가 되돌아간다고 가정하지 마세요.
+- **알람 회차**: snooze/ack는 미리보기 때 확인한 기존 이벤트 ID와 필수 version으로 고정합니다. 끝난 회차를 새로운 회차로 바꾸거나 미래 일정에 가짜 ringing 이벤트를 만들지 않습니다. 미래 일정 시각을 바꾸려면 `alarm.update` 변경으로 승인합니다.
+- **설정**: HTTP 설정과 에이전트 설정은 공통 `HubSettings` 검증·저장을 사용합니다. 위치·지역명·시간대 변경은 날씨 snapshot을 같은 UoW에서 무효화합니다. 날씨 재시도 상태와 알림은 커밋 후 갱신합니다.
+- **센서**: 실내 온도·습도·기압·먼지 ADC/전압은 기존 snapshot의 상태와 함께 읽습니다. 추가 센서 폴링이나 임의 PM2.5/AQI 변환을 하지 않습니다.
+- **지원하지 않는 외부 제어**: 에이전트의 `weather.refresh`, `layout.focus`, `layout.select_date`는 `unavailable`입니다. 외부 HTTP와 표시 기기 명령은 SQLite 승인 트랜잭션으로 되돌릴 수 없고, 현재는 별도 영속 전송·중복 방지 계약이 없습니다. 확인된 요청이라도 실행하거나 성공으로 표시하지 않습니다. 기존 관리자 날씨 갱신·화면 제어 UI와 날씨 스케줄러는 변경하지 않습니다.
+
+## 8. 검증과 남은 한계
+
+표준 검증은 임시 SQLite, 합성 음성·문자열, 모의 OpenAI transport를 사용합니다. 실제 asyncio 루프를 사용하며 `asyncio.to_thread`를 동기 함수로 바꾸지 않습니다. [테스트 명령](TESTING.md)에 서버·음성 상태·권한·비용·표시 회귀를 정리했습니다.
+
+CI는 live OpenAI 스위치와 키를 비활성화합니다. Node VM 검사는 production JS의 상태 처리를 확인하지만 브라우저 렌더링은 확인하지 않습니다. Chromium fixture는 렌더링과 모의 통신을 확인하지만 iPad/Safari·실제 네트워크·운영 서버를 검증하지 않습니다. 테스트 코드나 CI 단계 추가 자체를 실행 성공으로 보고하지 않습니다.
+
+15초 내 음성 요청 완료는 실기기 검증이 필요한 목표입니다. `timestamps`의 수집된 시각만 근거로 사용합니다. 녹음 시작·실제 화면 표시 시각이 없으면 end-to-end 지연을 측정했다고 주장하지 않습니다. 관리자 승인 대기 시간은 자동 처리 시간과 구분합니다.
+
+TTS, 호출어 감지, 자동 브리핑 스케줄러, 장기 멀티턴 기억, 일반 데이터의 관리자 승인 없는 자율 변경은 제공하지 않습니다. 실제 OpenAI 계정의 모델 사용 가능 여부·정확도·비용, 물리 iPad/Safari, 재부팅·운영 장애 복구, 배포 적용은 별도 검증 대상입니다.

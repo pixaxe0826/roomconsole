@@ -9,6 +9,8 @@ let root=null,cfg=null,list={items:[],total:0},selected=null,detail=null,status=
 let lastDetail='',loading=false,pendingRefresh=false,generation=0,timer=null,searchTimer=null,draft=null,filterKey='';
 let requestMode='auto';
 let agentState=null,agentRuns=[],selectedAgentRunId=null,selectedAgentRun=null,agentMode='auto',agentTextDraft='';
+let agentPolicyDirty=false;
+const agentCost=r=>r.cost_known!==false&&typeof r.cost_microdollars==='number'?`$${(r.cost_microdollars/1000000).toFixed(4)}`:'미정 · 예산 예약 유지';
 const sending=new Set(),keys=new Map();
 const requestKey=()=>globalThis.crypto?.randomUUID?.() || 'llm-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
 const fnum=(n,d=2)=>typeof n==='number'&&Number.isFinite(n)?n.toFixed(d):'—';
@@ -52,6 +54,8 @@ function shell(){return `
    <label><input id="agentEnabledToggle" type="checkbox"> Personal Agent 활성화</label>
    <label><input id="agentCloudToggle" type="checkbox"> OpenAI 클라우드 플래너 허용</label>
    <label><input id="agentAudioCloudToggle" type="checkbox"> 음성 외부 OpenAI STT 전송 허용</label>
+   <label><input id="agentSharedNotesToggle" type="checkbox"> 공유 메모 제목의 클라우드 문맥 포함 허용</label>
+   <label>월 예산 USD <input id="agentMonthlyCap" type="number" min="1" max="10000" step="0.01" value="100" aria-label="OpenAI 월 예산 USD"></label>
    <button type="button" class="btn small" data-llm="agent-save-policy">정책 적용</button>
    <span id="agentPolicyFeedback" class="field-help"></span>
   </div>
@@ -94,16 +98,21 @@ function paintAgentSection(){
   budBadge.textContent=`예산 (${b.state||'normal'}): $${fnum(comm,4)} / $${fnum(lim,2)}`;
  }
  const tAgent=$('#agentEnabledToggle'),tCloud=$('#agentCloudToggle'),tAudio=$('#agentAudioCloudToggle');
- if(tAgent&&document.activeElement!==tAgent)tAgent.checked=!!(agentState.agent_enabled??agentState.enabled);
- if(tCloud&&document.activeElement!==tCloud)tCloud.checked=!!agentState.cloud_enabled;
- if(tAudio&&document.activeElement!==tAudio)tAudio.checked=!!agentState.audio_cloud_enabled;
+ if(!agentPolicyDirty){
+  if(tAgent)tAgent.checked=!!(agentState.agent_enabled??agentState.enabled);
+  if(tCloud)tCloud.checked=!!agentState.cloud_enabled;
+  if(tAudio)tAudio.checked=!!agentState.audio_cloud_enabled;
+  const shared=$('#agentSharedNotesToggle'),cap=$('#agentMonthlyCap');
+  if(shared)shared.checked=!!agentState.allow_shared_notes_in_cloud;
+  if(cap)cap.value=String(b.monthly_cap_usd??100);
+ }
  const cnt=$('#agentRunsCount');if(cnt)cnt.textContent=String(agentRuns.length);
  const rList=$('#agentRunsList');
  if(rList){
   rList.innerHTML=agentRuns.map(r=>{
    const rid=r.run_id||r.id;
-   const costUsd=((r.cost_microdollars||0)/1000000).toFixed(4);
-   return `<button type="button" class="llm-history-item ${selectedAgentRunId===rid?'selected':''}" data-llm="agent-select" data-run-id="${E(rid)}"><span class="llm-history-line">${badge(r.status)}<time>${E(when(r.created_at))}</time></span><strong>${E(r.source_text||'—')}</strong><span class="llm-history-model">${E(r.model_used||r.model||'local')} · ${E(r.tier_used||r.tier||r.mode||'tier0_local')} · $${E(costUsd)}</span></button>`;
+   const costUsd=agentCost(r);
+   return `<button type="button" class="llm-history-item ${selectedAgentRunId===rid?'selected':''}" data-llm="agent-select" data-run-id="${E(rid)}"><span class="llm-history-line">${badge(r.status)}<time>${E(when(r.created_at))}</time></span><strong>${E(r.source_text||'—')}</strong><span class="llm-history-model">${E(r.model_used||r.model||'local')} · ${E(r.tier_used||r.tier||r.mode||'tier0_local')} · ${E(costUsd)}</span></button>`;
   }).join('')||'<div class="empty">아직 에이전트 실행 기록이 없습니다.</div>';
  }
  const rDetail=$('#agentRunDetail');
@@ -117,10 +126,10 @@ function paintAgentSection(){
  const steps=Array.isArray(d.preview?.mutations)?d.preview.mutations:(Array.isArray(d.staged_steps)?d.staged_steps:[]);
  const results=Array.isArray(d.receipt?.results)?d.receipt.results:(Array.isArray(d.executed_results)?d.executed_results:[]);
  const conflicts=Array.isArray(d.schedule_conflicts)?d.schedule_conflicts:steps.flatMap(s=>Array.isArray(s.conflicts)?s.conflicts:[]);
- const costUsd=((d.cost_microdollars||0)/1000000).toFixed(4);
+ const costUsd=agentCost(d);
  const previewBox=d.status==='awaiting_confirmation'?`<div class="assistant-confirm-box" data-agent-preview="true"><strong>변경 미리보기 · 관리자 승인 대기 (아직 DB에 반영되지 않음)</strong>${conflicts.length?`<p class="assistant-warning">${conflicts.map(c=>E(c)).join('<br>')}</p>`:''}<ul class="assistant-targets">${steps.map(s=>{const req=s.widget_request||s.request||{},args=req.args||s.payload||{},tgt=req.target?.value||s.target_lock?.id||'신규/기본';return `<li><strong>${E(s.summary||s.summary_ko||(s.domain+'.'+s.action))}</strong> · 대상: <code>${E(tgt)}</code> · 날짜/시각: ${E(args.date||'—')} ${E(args.time||'')} · 변경값: <code>${E(JSON.stringify(args))}</code></li>`;}).join('')}</ul><div class="form-actions"><button type="button" class="btn primary" data-llm="agent-confirm" data-run-id="${E(rid)}" data-preview="${E(d.preview_sha256||'')}">변경 내용 승인 및 실행</button><button type="button" class="btn danger" data-llm="agent-cancel" data-run-id="${E(rid)}">취소 · 변경하지 않음</button></div></div>`:'';
  const executedBox=results.length?`<details class="llm-disclosure" open><summary>실행 결과 (${results.length}건)</summary><pre>${E(pretty(results))}</pre></details>`:'';
- rDetail.innerHTML=`<div class="panel"><div class="panel-head"><div><span class="eyebrow">AGENT RUN ${E(rid.slice(0,8))}</span><h3>${E(d.source_text||'—')}</h3><p>모델: ${E(d.model_used||d.model||'local')} · 경로: ${E(d.tier_used||d.tier||d.mode||'tier0_local')} · 추정 비용: $${E(costUsd)}</p></div>${badge(d.status)}</div><pre class="llm-output">${E(d.summary_text||d.assistant_reply||'—')}</pre>${previewBox}${executedBox}</div>`;
+ rDetail.innerHTML=`<div class="panel"><div class="panel-head"><div><span class="eyebrow">AGENT RUN ${E(rid.slice(0,8))}</span><h3>${E(d.source_text||'—')}</h3><p>모델: ${E(d.model_used||d.model||'local')} · 경로: ${E(d.tier_used||d.tier||d.mode||'tier0_local')} · 계산 비용: ${E(costUsd)}</p></div>${badge(d.status)}</div><pre class="llm-output">${E(d.summary_text||d.assistant_reply||'—')}</pre>${previewBox}${executedBox}</div>`;
 }
 function paintList(){if(!root?.isConnected)return;$('#llmTotal').textContent=list.total;const box=$('#llmList'),scroll=box.scrollTop;
  const html=list.items.map(j=>`<button class="llm-history-item ${selected===j.id?'selected':''}" data-llm="select" data-id="${E(j.id)}"><span class="llm-history-line">${badge(j.status)}<time>${E(when(j.created_at))}</time></span><strong>${E(j.source_preview)}</strong><span class="llm-history-model">${E(['rule','clarify'].includes(j.route)?'Room Hub 서버 · 모델 미호출':j.model)}${j.parent_id?' · 재요청':''}</span><span class="llm-history-metrics">${['succeeded','awaiting_confirmation','needs_clarification'].includes(j.status)?`${seconds(j.request_seconds)} <i>·</i> ${j.metrics.output_tokens??'—'} tokens <i>·</i> ${fnum(j.metrics.generation_tps,1)} tok/s`:j.error?E(j.error):j.status==='prepared'?'아직 LLM에 전송하지 않았습니다.':'결과를 기다리고 있습니다.'}</span></button>`).join('')||'<div class="empty"><strong>요청 기록이 없습니다</strong><span>음성 수신함에서 저장된 전사문을 보내세요.</span><button class="btn soft" data-llm="voice">음성 수신함 열기</button></div>';
@@ -187,7 +196,7 @@ async function refresh(){
  }catch(err){if(gen===generation&&root?.isConnected){$('#llmTopNotice').textContent=err.message;if(err.status===401)window.RoomManager?.refresh(false)}}
  finally{loading=false;if(pendingRefresh){pendingRefresh=false;setTimeout(refresh,0)}}
 }
-function mount(el){if(!el)return;if(root===el){refresh();return}root=el;lastDetail='';root.innerHTML=shell();$('#assistantMode').value=requestMode;$('#assistantMode').onchange=e=>{requestMode=e.target.value};const am=$('#agentCommandMode');if(am){am.value=agentMode;am.onchange=e=>{agentMode=e.target.value}}const ai=$('#agentCommandInput');if(ai){ai.value=agentTextDraft;ai.oninput=e=>{agentTextDraft=e.target.value}}root.addEventListener('click',handle);$('#llmStatus').onchange=e=>{status=e.target.value;limit=30;offset=0;selected=null;generation++;refresh()};$('#llmSearch').oninput=e=>{query=e.target.value;clearTimeout(searchTimer);searchTimer=setTimeout(()=>{limit=30;offset=0;selected=null;generation++;refresh()},250)};clearInterval(timer);timer=setInterval(refresh,3000);refresh()}
+function mount(el){if(!el)return;if(root===el){refresh();return}root=el;lastDetail='';agentPolicyDirty=false;root.innerHTML=shell();$('#agentPolicyBar').addEventListener('input',()=>{agentPolicyDirty=true});$('#agentPolicyBar').addEventListener('change',()=>{agentPolicyDirty=true});$('#assistantMode').value=requestMode;$('#assistantMode').onchange=e=>{requestMode=e.target.value};const am=$('#agentCommandMode');if(am){am.value=agentMode;am.onchange=e=>{agentMode=e.target.value}}const ai=$('#agentCommandInput');if(ai){ai.value=agentTextDraft;ai.oninput=e=>{agentTextDraft=e.target.value}}root.addEventListener('click',handle);$('#llmStatus').onchange=e=>{status=e.target.value;limit=30;offset=0;selected=null;generation++;refresh()};$('#llmSearch').oninput=e=>{query=e.target.value;clearTimeout(searchTimer);searchTimer=setTimeout(()=>{limit=30;offset=0;selected=null;generation++;refresh()},250)};clearInterval(timer);timer=setInterval(refresh,3000);refresh()}
 async function handle(e){const b=e.target.closest('[data-llm]');if(!b||b.disabled)return;const op=b.dataset.llm,id=b.dataset.id;try{
  if(op==='select'){selected=id;detail=null;lastDetail='';generation++;paintList();await refresh();return}
  if(op==='agent-select'){selectedAgentRunId=b.dataset.runId;selectedAgentRun=agentRuns.find(x=>(x.run_id||x.id)===selectedAgentRunId)||null;paintAgentSection();return}
@@ -203,8 +212,12 @@ async function handle(e){const b=e.target.closest('[data-llm]');if(!b||b.disable
    agent_enabled:!!$('#agentEnabledToggle')?.checked,
    cloud_enabled:!!$('#agentCloudToggle')?.checked,
    audio_cloud_enabled:!!$('#agentAudioCloudToggle')?.checked,
+   allow_shared_notes_in_cloud:!!$('#agentSharedNotesToggle')?.checked,
+   monthly_cap_usd:Number($('#agentMonthlyCap')?.value),
   };
+  if(!Number.isFinite(patch.monthly_cap_usd)||patch.monthly_cap_usd<1||patch.monthly_cap_usd>10000)throw Error('월 예산은 1~10,000 USD로 입력하세요.');
   await api('/api/agent/budget/policy','PUT',patch);
+  agentPolicyDirty=false;
   const fb=$('#agentPolicyFeedback');if(fb)fb.textContent='에이전트 정책을 저장했습니다.';
   await refresh();return;
  }

@@ -45,6 +45,8 @@ class ExecutionContext:
     role: str | None = None
     permissions: frozenset[str] = frozenset()
     confirmed_digest: str | None = None
+    # Trusted server callback only; recheck revocation after an async lock wait.
+    reauthorize: Callable[[], None] | None = None
 
 
 class ProtocolFault(Exception):
@@ -230,6 +232,8 @@ class WidgetRegistry:
             # No request/session/source field can confer principal/permissions.
             if not authority.principal or authority.role != 'admin':
                 raise ProtocolFault('permission_denied', 'PERMISSION_DENIED', '관리자 실행 권한이 필요합니다.')
+            if authority.reauthorize is not None:
+                authority.reauthorize()
             adapter = self.get(request.widget)
             if adapter is None:
                 raise ProtocolFault('not_found', 'WIDGET_NOT_FOUND', '등록된 서비스가 없습니다.', 'widget')
@@ -257,6 +261,8 @@ class WidgetRegistry:
                     raise ProtocolFault('unavailable', 'RECEIPT_CAPACITY', '중복 방지 기록 용량을 확인하세요.')
             if response is None:
                 try:
+                    if authority.reauthorize is not None:
+                        authority.reauthorize()
                     result = await adapter.execute(request, authority)
                     # Bad service output is NOT a caller validation error or fabricated success.
                     data = spec.outputs.model_validate(result.data).model_dump(mode='json')

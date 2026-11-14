@@ -10,10 +10,10 @@ single unified adapter protocol:
 - alarm (widgets/alarms): list, events, set, update, cancel, delete, snooze, ack
 - timer (widgets/timers): list, get, start, stop
 - clock (widgets/clock): read, resolve
-- weather (widgets/weather): read, refresh
+- weather (widgets/weather): read (refresh unavailable in Agent batches)
 - indoor (widgets/indoor-temperature, widgets/indoor-air-quality): read, air, devices
 - llm-response (widgets/llm-response): list, read, latest, get
-- layout (dashboard 8x6 grid & widget instances): read, update_widget, add_widget, remove_widget, get_data, set_data, focus, select_date
+- layout (dashboard 8x6 grid & widget instances): read, update_widget, add_widget, remove_widget, get_data, set_data (remote controls unavailable)
 - settings (hub settings): read, update
 - system (hub status, devices, audit log): status, overview, devices, audit
 """
@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import closing
-from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import inspect
@@ -32,13 +31,14 @@ from typing import Any, Callable, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import HTTPException
-from pydantic import Field, JsonValue, field_validator
+from pydantic import Field, JsonValue, ValidationError, field_validator
 
 from ..clock_service import clock_context, resolve_range
 from ..indoor_temperature import TemperatureError, TemperatureStore, device_id_valid
 from ..life import AlarmCreate, AlarmUpdate, EventAction, LifeService, NoteCreate, NoteUpdate
 from .. import llm_display
 from ..models import HubSettings, Layout, RemoteCommand, WidgetInstance
+from ..settings_service import apply_settings
 from ..store import Store, uid, utcnow
 from ..widgets import discover
 from .adapters import (
@@ -100,16 +100,6 @@ async def _notify_if_committed(store: Store | None, changed: Callable | None, ev
         await res
 
 
-@dataclass(frozen=True)
-class ImmediateControlOperation(Operation):
-    """Bounded control operation that can execute without a separate manager confirmation step."""
-
-    def capability(self, action: str):
-        cap = super().capability(action)
-        cap.requires_confirmation = False
-        return cap
-
-
 # --- Extended Memo Schemas & Adapter ---
 
 
@@ -160,7 +150,7 @@ class FullMemoAdapter(MemoAdapter):
         if request.action == 'list':
             items = await _call_sync(self.store, self.life.notes)
             if not getattr(args, 'include_private', True):
-                items = [n for n in items if n.get('shared') or n.get('pinned')]
+                items = [n for n in items if n.get('shared')]
             limit = int(getattr(args, 'limit', 50) or 50)
             sliced = items[:limit]
             return AdapterResult({'count': len(sliced), 'items': sliced}, source=self.source_of_truth)
@@ -296,7 +286,7 @@ class AlarmUpdateResult(Contract):
 
 
 class AlarmEventActionInput(Contract):
-    version: int | None = Field(default=None, ge=1)
+    version: int = Field(ge=1)
     request_id: str | None = Field(default=None, max_length=128)
 
 
@@ -324,21 +314,7 @@ class FullAlarmAdapter(AlarmAdapter):
 
     @staticmethod
     def authorize(request, authority: ExecutionContext, spec: Operation):
-        if not authority.principal or authority.role != 'admin' or spec.permission not in authority.permissions:
-            raise ProtocolFault('permission_denied', 'PERMISSION_DENIED', '신뢰된 관리자 실행 권한이 필요합니다.')
-        if not spec.available:
-            raise ProtocolFault('unavailable', 'CAPABILITY_UNAVAILABLE', '이 capability는 아직 연결하지 않았습니다.')
-        if not spec.read_only and not isinstance(spec, ImmediateControlOperation) and authority.confirmed_digest != (
-            hashlib.sha256(
-                json.dumps(
-                    request.model_dump(mode='json', exclude={'request_id', 'idempotency_key', 'context'}),
-                    sort_keys=True,
-                    ensure_ascii=False,
-                    allow_nan=False,
-                ).encode()
-            ).hexdigest()
-        ):
-            raise ProtocolFault('needs_confirmation', 'CONFIRMATION_REQUIRED', '신뢰된 서버의 요청별 확인이 필요합니다.')
+        WidgetAdapter.authorize(request, authority, spec)
 
     def validate_slots(self, request, args):
         super().validate_slots(request, args)
@@ -379,56 +355,10 @@ class FullAlarmAdapter(AlarmAdapter):
             await _notify_if_committed(self.store, self.changed, 'alarm.updated', request.target.value)
             return AdapterResult(res, changed=True, event='alarm.updated', entity_id=request.target.value)
         if request.action in {'snooze', 'ack'}:
-            eid = request.target.value
-            ver = args.version
-            events = await _call_sync(self.store, self.life.events)
-            matched = next(
-                (
-                    e
-                    for e in events
-                    if e['id'] == eid
-                    or (e.get('alarm_id') == eid and e.get('state') in {'ringing', 'snoozed', 'missed'})
-                ),
-                None,
-            )
-            if matched is None:
-                alarms = await _call_sync(self.store, self.life.alarms)
-                alarm_row = next((a for a in alarms if a['id'] == eid), None)
-                if alarm_row is None:
-                    raise ProtocolFault('not_found', 'NOT_FOUND', '알람 이벤트가 없습니다.', 'target')
-
-                def _materialize_event():
-                    from ..life import stamp
-                    now_ts = self.life.clock()
-                    ev_id = f'ev_{eid}_{int(now_ts)}'
-                    with self.life.db(write=True) as db:
-                        cur = db.execute(
-                            "SELECT * FROM hub_alarm_events WHERE alarm_id=? AND state IN ('ringing','snoozed','missed') ORDER BY scheduled_at DESC LIMIT 1",
-                            (eid,),
-                        ).fetchone()
-                        if cur:
-                            return str(cur['id']), int(cur['version'])
-                        db.execute(
-                            'INSERT INTO hub_alarm_events VALUES(?,?,?,?,?,?,?,1,0,?,?)',
-                            (
-                                ev_id,
-                                eid,
-                                alarm_row['label'],
-                                alarm_row['timezone'],
-                                now_ts,
-                                now_ts,
-                                'ringing',
-                                now_ts + 300,
-                                stamp(now_ts),
-                            ),
-                        )
-                        return ev_id, 1
-
-                target_ev_id, ev_ver = await _call_sync(self.store, _materialize_event)
-            else:
-                target_ev_id = matched['id']
-                ev_ver = int(matched.get('version', 1))
-            use_ver = ver if ver is not None else ev_ver
+            # The confirmed target is one occurrence, never a schedule or a
+            # late-bound "current" event. LifeService checks the persisted
+            # receipt before state/version, so retries cannot affect a new ring.
+            target_ev_id = request.target.value
             req_token = args.request_id or request.idempotency_key or request.request_id
             key = hashlib.sha256(((authority.principal if authority else 'admin') + ':' + str(req_token)).encode()).hexdigest()
             try:
@@ -437,7 +367,7 @@ class FullAlarmAdapter(AlarmAdapter):
                     self.life.act,
                     target_ev_id,
                     request.action,
-                    EventAction(request_id=key, version=use_ver),
+                    EventAction(request_id=key, version=args.version),
                 )
             except HTTPException as exc:
                 if exc.status_code == 404:
@@ -540,7 +470,10 @@ class WeatherAdapter(WidgetAdapter):
     state_action = 'read'
     operations = MappingProxyType({
         'read': Operation(Empty, WeatherStateData, '현재 저장된 날씨 및 7일 예보 데이터 조회'),
-        'refresh': ImmediateControlOperation(Empty, WeatherStateData, '날씨 공급자에서 최신 날씨 즉시 갱신', False, 'control'),
+        # External I/O cannot be rolled back with a confirmed SQLite batch.
+        # Keep manual UI/scheduler controls separate until durable post-commit
+        # delivery is implemented, rather than silently claiming success.
+        'refresh': Operation(Empty, WeatherStateData, '에이전트의 외부 날씨 갱신은 지원하지 않음; 기존 관리자 UI 사용', False, 'control', available=False),
     })
 
     def __init__(self, store, refresh_fn: Callable | None = None):
@@ -549,8 +482,7 @@ class WeatherAdapter(WidgetAdapter):
 
     @staticmethod
     def authorize(request, authority: ExecutionContext, spec: Operation):
-        if not authority.principal or authority.role != 'admin' or spec.permission not in authority.permissions:
-            raise ProtocolFault('permission_denied', 'PERMISSION_DENIED', '신뢰된 관리자 실행 권한이 필요합니다.')
+        WidgetAdapter.authorize(request, authority, spec)
 
     def _snapshot(self) -> dict:
         settings = self.store.get('settings') or {}
@@ -820,6 +752,7 @@ class LLMDisplayItemSummary(Contract):
     created_at: str | None = None
     finished_at: str | None = None
     model: str | None = None
+    redacted: bool = False
 
 
 class LLMDisplayListData(Contract):
@@ -843,66 +776,57 @@ class LLMDisplayAdapter(WidgetAdapter):
     def __init__(self, store):
         self.store = store
 
-    def _list(self) -> dict:
-        placed = llm_display.enabled(self.store)
-        idx = llm_display.index(self.store)
-        with closing(self.store.connect()) as db:
-            has_table = db.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='hub_agent_runs'"
-            ).fetchone()
-            runs = []
-            if has_table:
-                cols = {r['name'] for r in db.execute('PRAGMA table_info(hub_agent_runs)').fetchall()}
-                src_col = 'input_text' if 'input_text' in cols else 'source_text'
-                rows = db.execute(
-                    f'SELECT id, status, {src_col} AS src_text, summary_text, model_used, created_at, updated_at '
-                    'FROM hub_agent_runs ORDER BY created_at DESC LIMIT 10'
-                ).fetchall()
-                for r in rows:
-                    runs.append(
-                        {
-                            'id': str(r['id']),
-                            'status': str(r['status']),
-                            'source_text': str(r['src_text'] or ''),
-                            'summary_text': str(r['summary_text'] or ''),
-                            'input_text': str(r['src_text'] or ''),
-                            'output_text': str(r['summary_text'] or ''),
-                            'created_at': r['created_at'],
-                            'finished_at': r['updated_at'],
-                            'model': r['model_used'],
-                        }
-                    )
+    @staticmethod
+    def _summary(entry: dict) -> dict:
+        """Only adapt the shared-display allowlist, never raw agent rows."""
+        input_text = str(entry.get('input_text') or entry.get('input') or '')
+        output_text = str(entry.get('output_text') or entry.get('output') or '')
         return {
-            'widget_placed': placed,
+            'id': str(entry['id']),
+            'status': str(entry['status']),
+            'source_text': input_text,
+            'summary_text': output_text,
+            'input_text': input_text,
+            'output_text': output_text,
+            'created_at': entry.get('created_at') or entry.get('sent_at'),
+            'finished_at': entry.get('finished_at'),
+            'model': entry.get('model'),
+            'redacted': bool(entry.get('redacted', False)),
+        }
+
+    def _list(self) -> dict:
+        idx = llm_display.index(self.store)
+        runs = []
+        for item in reversed(idx.get('items') or []):
+            if item.get('status') in {'prepared', 'queued', 'pending', 'running'}:
+                continue  # The current agent run is not a previous answer.
+            try:
+                entry = llm_display.entry(self.store, item['id'])
+            except HTTPException as exc:
+                if exc.status_code == 404:  # Deleted between index and projection.
+                    continue
+                raise
+            if entry.get('source') == 'personal_agent':
+                runs.append(self._summary(entry))
+                if len(runs) >= 10:
+                    break
+        return {
+            'widget_placed': bool(idx.get('enabled')),
             'llm_total': idx.get('total', 0),
             'agent_run_count': len(runs),
             'recent_agent_runs': runs,
         }
 
     def _read_one(self, target) -> dict:
-        data = self._list()
-        runs = data['recent_agent_runs']
+        if not llm_display.enabled(self.store):
+            raise ProtocolFault('permission_denied', 'DISPLAY_NOT_ENABLED', 'LLM 응답 위젯이 배치되어 있지 않습니다.')
         if target is None or (target.type == 'reference' and target.value in {'current', 'last', 'latest'}):
-            if runs:
-                return runs[0]
             idx = llm_display.index(self.store)
-            idx_items = idx.get('items') or []
-            latest_id = idx.get('latest_id') or (idx_items[-1]['id'] if idx_items else None)
+            idx_items = [item for item in idx.get('items') or []
+                         if item.get('status') not in {'prepared', 'queued', 'pending', 'running'}]
+            latest_id = idx_items[-1]['id'] if idx_items else None
             if latest_id:
-                ent = llm_display.entry(self.store, latest_id)
-                in_txt = str(ent.get('input_text') or ent.get('input') or '')
-                out_txt = str(ent.get('output_text') or ent.get('output') or '')
-                return {
-                    'id': str(ent['id']),
-                    'status': str(ent['status']),
-                    'source_text': in_txt,
-                    'summary_text': out_txt,
-                    'input_text': in_txt,
-                    'output_text': out_txt,
-                    'created_at': ent.get('created_at') or ent.get('sent_at'),
-                    'finished_at': ent.get('finished_at'),
-                    'model': ent.get('model'),
-                }
+                return self._summary(llm_display.entry(self.store, latest_id))
             return {
                 'id': 'none',
                 'status': 'empty',
@@ -913,27 +837,14 @@ class LLMDisplayAdapter(WidgetAdapter):
                 'created_at': None,
                 'finished_at': None,
                 'model': None,
+                'redacted': False,
             }
         if target.type == 'item_id':
-            found = next((r for r in runs if r['id'] == target.value), None)
-            if found:
-                return found
             try:
-                ent = llm_display.entry(self.store, target.value)
-                in_txt = str(ent.get('input_text') or ent.get('input') or '')
-                out_txt = str(ent.get('output_text') or ent.get('output') or '')
-                return {
-                    'id': str(ent['id']),
-                    'status': str(ent['status']),
-                    'source_text': in_txt,
-                    'summary_text': out_txt,
-                    'input_text': in_txt,
-                    'output_text': out_txt,
-                    'created_at': ent.get('created_at') or ent.get('sent_at'),
-                    'finished_at': ent.get('finished_at'),
-                    'model': ent.get('model'),
-                }
-            except HTTPException:
+                return self._summary(llm_display.entry(self.store, target.value))
+            except HTTPException as exc:
+                if exc.status_code != 404:
+                    raise
                 raise ProtocolFault('not_found', 'NOT_FOUND', '해당 ID의 응답 기록이 없습니다.', 'target') from None
         raise ProtocolFault('needs_clarification', 'CONTEXT_NOT_RESOLVED', 'current/last 또는 실제 ID를 지정하세요.', 'target')
 
@@ -1030,8 +941,8 @@ class LayoutAdapter(WidgetAdapter):
         'remove_widget': Operation(VersionArgs, LayoutStateData, '대시보드에서 지정 위젯 인스턴스 제거', False, 'write', ('widget_id', 'item_id'), True),
         'get_data': Operation(Empty, WidgetCustomData, '위젯 종류별 커스텀 저장 데이터 조회', target_types=('widget_id',), target_required=True),
         'set_data': Operation(WidgetCustomDataInput, WidgetCustomData, '위젯 종류별 커스텀 저장 데이터 변경', False, 'write', ('widget_id',), True),
-        'focus': ImmediateControlOperation(LayoutRemoteCommandInput, LayoutRemoteCommandData, '표시 기기에서 특정 위젯을 확대 또는 홈으로 전환', False, 'control'),
-        'select_date': ImmediateControlOperation(LayoutRemoteCommandInput, LayoutRemoteCommandData, '표시 기기의 달력/할 일 선택 날짜 이동', False, 'control'),
+        'focus': Operation(LayoutRemoteCommandInput, LayoutRemoteCommandData, '에이전트 원격 화면 제어는 지원하지 않음; 기존 관리자 UI 사용', False, 'control', available=False),
+        'select_date': Operation(LayoutRemoteCommandInput, LayoutRemoteCommandData, '에이전트 원격 날짜 제어는 지원하지 않음; 기존 관리자 UI 사용', False, 'control', available=False),
     })
 
     def __init__(self, store, changed, *, timers=None, widget_root: Path | None = None, broadcast_fn: Callable | None = None):
@@ -1221,12 +1132,12 @@ class SettingsStateData(Contract):
 
 
 class SettingsPatchInput(Contract):
-    title: str | None = Field(default=None, min_length=1, max_length=60)
+    title: str | None = Field(default=None, min_length=1, max_length=50)
     timezone: str | None = Field(default=None, min_length=1, max_length=60)
-    location_name: str | None = Field(default=None, max_length=80)
+    location_name: str | None = Field(default=None, max_length=60)
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
-    weather_interval_minutes: int | None = Field(default=None, ge=5, le=180)
+    weather_interval_minutes: int | None = Field(default=None, ge=5, le=120)
     theme: Literal['light', 'dark'] | None = None
 
     @field_validator('timezone')
@@ -1235,7 +1146,7 @@ class SettingsPatchInput(Contract):
         if v is not None:
             try:
                 ZoneInfo(v)
-            except ZoneInfoNotFoundError:
+            except (ZoneInfoNotFoundError, ValueError):
                 raise ValueError('유효하지 않은 IANA 시간대입니다.') from None
         return v
 
@@ -1266,14 +1177,14 @@ class SettingsAdapter(WidgetAdapter):
         }
 
     def _update_settings(self, args: SettingsPatchInput) -> dict:
-        current = self._read_settings()
-        patches = {k: v for k, v in args.model_dump(exclude_unset=True).items() if v is not None}
+        patches = args.model_dump(exclude_unset=True)
         if not patches:
             missing('args')
-        updated = {**current, **patches}
-        if (updated.get('latitude') is None) != (updated.get('longitude') is None):
-            raise ProtocolFault('invalid_request', 'INCOMPLETE_COORDINATES', '위도와 경도를 함께 입력하세요.', 'args')
-        self.store.set('settings', updated)
+        try:
+            updated, _ = apply_settings(self.store, patches, patch=True)
+        except ValidationError:
+            # Never leak the model's input/context (private setting values).
+            raise ProtocolFault('invalid_request', 'INVALID_SETTINGS', '설정 값과 위도·경도 쌍을 확인하세요.', 'args') from None
         return updated
 
     async def _execute(self, request, args, authority=None):
