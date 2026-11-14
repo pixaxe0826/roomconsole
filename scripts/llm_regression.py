@@ -131,7 +131,32 @@ def main():
             page.evaluate("RoomManager.navigate('llm')");page.wait_for_selector('#llmList')
             for width,height in [(1194,834),(834,1194),(390,844)]:
                 page.set_viewport_size({'width':width,'height':height});page.wait_for_timeout(200)
-                check(f'no horizontal overflow {width}',page.evaluate('document.documentElement.scrollWidth <= window.innerWidth + 2'))
+                layout=page.evaluate('''() => ({viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,
+                  outside:[...document.querySelectorAll('.manager-main *')].filter(e=>{
+                    const r=e.getBoundingClientRect();return r.width>0&&(r.right>innerWidth+2||r.left < -2);
+                  }).slice(0,12).map(e=>({tag:e.tagName,id:e.id,classes:e.className,
+                    width:e.getBoundingClientRect().width,right:e.getBoundingClientRect().right,
+                    text:(e.textContent||'').trim().slice(0,120)}))})''')
+                result.setdefault('layout_checks',[]).append(layout)
+                fits=layout['scrollWidth']<=layout['viewport']+2
+                if not fits:
+                    print('OVERFLOW',json.dumps(layout,ensure_ascii=False),flush=True)
+                    page.screenshot(path=str(artifacts/'screenshots'/f'llm-overflow-{width}.png'),full_page=True)
+                check(f'no horizontal overflow {width}',fits)
+            # Long configuration IDs and PC-free policy labels must wrap without
+            # clipping the whole document or hiding the affected controls.
+            for width,height in [(390,844),(320,740)]:
+                page.set_viewport_size({'width':width,'height':height});page.wait_for_timeout(100)
+                # Set and measure in one browser task so status polling cannot
+                # replace the stress text between injection and the assertion.
+                fits=page.evaluate('''() => {
+                  document.querySelector('#agentModelSettings').textContent='설정 모델: '+('synthetic-model-'.repeat(18))+' (reasoning_effort=high)';
+                  document.querySelector('#agentStatusBadge').textContent='OpenAI 설정 준비됨 · 실제 호출 별도 확인';
+                  document.querySelector('#agentLocalBadge').textContent='Odyssey 로컬 규칙 · 전사 OpenAI · PC 사용 안 함';
+                  return document.documentElement.scrollWidth <= innerWidth + 2;
+                }''')
+                check(f'long AI labels fit viewport {width}',fits)
+                check(f'AI controls remain visible {width}',page.locator('#agentStatusBadge').is_visible() and page.locator('#agentCommandInput').is_visible())
             check('no browser JS errors',not result['page_errors'])
             # privacy ACLs with an actual paired display cookie.
             pair=request('post','/api/devices/pair',{'name':'test-ipad'}).json()
