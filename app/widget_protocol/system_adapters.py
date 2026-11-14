@@ -886,16 +886,20 @@ class LLMDisplayAdapter(WidgetAdapter):
             if runs:
                 return runs[0]
             idx = llm_display.index(self.store)
-            if idx.get('latest_id'):
-                ent = llm_display.entry(self.store, idx['latest_id'])
+            idx_items = idx.get('items') or []
+            latest_id = idx.get('latest_id') or (idx_items[-1]['id'] if idx_items else None)
+            if latest_id:
+                ent = llm_display.entry(self.store, latest_id)
+                in_txt = str(ent.get('input_text') or ent.get('input') or '')
+                out_txt = str(ent.get('output_text') or ent.get('output') or '')
                 return {
                     'id': str(ent['id']),
                     'status': str(ent['status']),
-                    'source_text': str(ent.get('input_text') or ''),
-                    'summary_text': str(ent.get('output_text') or ''),
-                    'input_text': str(ent.get('input_text') or ''),
-                    'output_text': str(ent.get('output_text') or ''),
-                    'created_at': ent.get('created_at'),
+                    'source_text': in_txt,
+                    'summary_text': out_txt,
+                    'input_text': in_txt,
+                    'output_text': out_txt,
+                    'created_at': ent.get('created_at') or ent.get('sent_at'),
                     'finished_at': ent.get('finished_at'),
                     'model': ent.get('model'),
                 }
@@ -916,14 +920,16 @@ class LLMDisplayAdapter(WidgetAdapter):
                 return found
             try:
                 ent = llm_display.entry(self.store, target.value)
+                in_txt = str(ent.get('input_text') or ent.get('input') or '')
+                out_txt = str(ent.get('output_text') or ent.get('output') or '')
                 return {
                     'id': str(ent['id']),
                     'status': str(ent['status']),
-                    'source_text': str(ent.get('input_text') or ''),
-                    'summary_text': str(ent.get('output_text') or ''),
-                    'input_text': str(ent.get('input_text') or ''),
-                    'output_text': str(ent.get('output_text') or ''),
-                    'created_at': ent.get('created_at'),
+                    'source_text': in_txt,
+                    'summary_text': out_txt,
+                    'input_text': in_txt,
+                    'output_text': out_txt,
+                    'created_at': ent.get('created_at') or ent.get('sent_at'),
                     'finished_at': ent.get('finished_at'),
                     'model': ent.get('model'),
                 }

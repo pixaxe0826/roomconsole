@@ -75,7 +75,7 @@ def enabled(store) -> bool:
 
 def index(store) -> dict:
     if not enabled(store):
-        return {'enabled': False, 'items': [], 'total': 0, 'count': 0, 'latest_id': None}
+        return {'enabled': False, 'items': [], 'total': 0}
     items: list[dict] = []
     with store.connect() as db:
         if _table_exists(db, 'llm_requests'):
@@ -103,7 +103,7 @@ def index(store) -> dict:
 
         if _table_exists(db, 'hub_agent_runs'):
             arows = db.execute(
-                """SELECT id, status, created_at, updated_at, tier_used, model_used
+                """SELECT id, status, created_at, updated_at
                 FROM hub_agent_runs
                 ORDER BY created_at ASC, id ASC"""
             ).fetchall()
@@ -114,20 +114,14 @@ def index(store) -> dict:
                         'status': _map_agent_status(r['status']),
                         'sent_at': r['created_at'],
                         'updated_at': r['updated_at'],
-                        'source': 'personal_agent',
-                        'route': r['tier_used'],
-                        'model': r['model_used'],
                     }
                 )
 
     items.sort(key=lambda x: (str(x.get('sent_at') or ''), str(x.get('id') or '')))
-    latest_id = items[-1]['id'] if items else None
     return {
         'enabled': True,
         'items': items,
         'total': len(items),
-        'count': len(items),
-        'latest_id': latest_id,
     }
 
 
@@ -199,14 +193,11 @@ def entry(store, rid: str) -> dict:
                 'id': row['id'],
                 'status': row['status'],
                 'sent_at': row['started_at'],
-                'created_at': row['started_at'],
                 'updated_at': row['updated_at'],
                 'finished_at': row['finished_at'],
                 'model': cfg.get('model') if isinstance(cfg.get('model'), str) else '',
                 'input': input_text,
                 'output': output,
-                'input_text': input_text or '',
-                'output_text': output or '',
                 'refusal': refusal,
                 'output_kind': kind,
                 'truncated': result.get('finish_reason') == 'length',
