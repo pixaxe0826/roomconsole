@@ -35,7 +35,20 @@ async function api(path,method='GET',body){
  const ctrl=new AbortController(),to=setTimeout(()=>ctrl.abort(),15000);
  try{
   const res=await fetch(path,{method,credentials:'same-origin',headers:{'X-Room-Request':'1',...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:ctrl.signal});
-  const out=await res.json();if(!res.ok){const err=Error(typeof out.detail==='string'?out.detail:'요청 설정 또는 권한을 확인하세요.');err.status=res.status;throw err}return out;
+  const out=await res.json().catch(()=>null);
+  if(!res.ok){
+   let message=typeof out?.detail==='string'?out.detail:'';
+   if(!message&&Array.isArray(out?.detail)){
+    message=out.detail.slice(0,3).map(e=>{
+     const loc=Array.isArray(e.loc)?e.loc.filter(x=>!['body','query'].includes(x)).join('.'):'';
+     return `${loc||'요청'}: ${typeof e.msg==='string'?e.msg:'입력값을 확인하세요.'}`;
+    }).join(' · ');
+   }
+   if(!message&&typeof out?.detail?.message==='string')message=out.detail.message;
+   if(!message)message=res.status===401?'관리자 로그인이 필요합니다. 다시 로그인하세요.':res.status===403?'관리자 권한 또는 요청 출처를 확인하세요.':`요청 실패 (HTTP ${res.status}). 서버 로그를 확인하세요.`;
+   const err=Error(message);err.status=res.status;throw err;
+  }
+  return out;
  }catch(err){if(err.name==='AbortError')throw Error('요청 응답 시간이 지났습니다. LLM 기록에서 접수 여부를 확인하세요. 자동 재전송하지 않습니다.');throw err}
  finally{clearTimeout(to)}
 }
@@ -60,14 +73,14 @@ function shell(){return `
    </div>
   </div>
   <p id="agentRuntimeNotice" class="field-help">로컬 규칙과 클라우드 사용 정책을 구분합니다.</p>
-  <div id="agentPolicyBar" class="llm-checks">
+  <div id="agentPolicyBar" class="llm-checks agent-policy-controls">
    <label><input id="agentEnabledToggle" type="checkbox"> Personal Agent 활성화</label>
    <label><input id="agentCloudToggle" type="checkbox"> OpenAI 클라우드 플래너 허용</label>
    <label><input id="agentAudioCloudToggle" type="checkbox"> 음성 외부 OpenAI STT 전송 허용</label>
    <label><input id="agentSharedNotesToggle" type="checkbox"> 공유 메모 제목의 클라우드 문맥 포함 허용</label>
-   <label>월 예산 USD <input id="agentMonthlyCap" type="number" min="1" max="10000" step="0.01" value="100" aria-label="OpenAI 월 예산 USD"></label>
-   <button type="button" class="btn small" data-llm="agent-save-policy">정책 적용</button>
-   <span id="agentPolicyFeedback" class="field-help"></span>
+   <label class="agent-policy-budget">월 예산 USD <input id="agentMonthlyCap" type="number" min="1" max="10000" step="0.01" value="100" aria-label="OpenAI 월 예산 USD"></label>
+   <button type="button" class="btn small agent-policy-save" data-llm="agent-save-policy">정책 적용</button>
+   <span id="agentPolicyFeedback" class="field-help" role="status" aria-live="polite"></span>
   </div>
   <div class="llm-filters">
    <select id="agentCommandMode" aria-label="Personal Agent 실행 모드">
@@ -237,7 +250,10 @@ async function handle(e){const b=e.target.closest('[data-llm]');if(!b||b.disable
    monthly_cap_usd:Number($('#agentMonthlyCap')?.value),
   };
   if(!Number.isFinite(patch.monthly_cap_usd)||patch.monthly_cap_usd<1||patch.monthly_cap_usd>10000)throw Error('월 예산은 1~10,000 USD로 입력하세요.');
-  await api('/api/agent/budget/policy','PUT',patch);
+  try{await api('/api/agent/budget/policy','PUT',patch)}catch(err){
+   const fb=$('#agentPolicyFeedback');if(fb)fb.textContent=err.message;
+   throw err;
+  }
   agentPolicyDirty=false;
   const fb=$('#agentPolicyFeedback');if(fb)fb.textContent='에이전트 정책을 저장했습니다.';
   await refresh();return;

@@ -31,6 +31,7 @@ import tempfile
 import time
 from typing import Any, Callable, Literal
 
+from fastapi import Request, UploadFile
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .clock_service import clock_context, resolve_range
@@ -3293,7 +3294,7 @@ class PersonalAgentService:
 
 
 def register_agent_routes(app, service: PersonalAgentService, admin, viewer=None):
-    from fastapi import Depends, File, Form, HTTPException, Request, UploadFile
+    from fastapi import Depends, File, Form, HTTPException
 
     viewer_dep = viewer or admin
 

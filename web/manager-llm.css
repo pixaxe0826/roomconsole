@@ -26,3 +26,27 @@
  .llm-connection-tools{max-width:100%}
  .assistant-mode-bar label{min-width:0;max-width:100%}
 }
+
+/* Policy checkboxes are compact, but the USD amount must be a real input field.
+   The shared .llm-checks input rule otherwise compresses number inputs to 16px. */
+.llm-checks label{flex-direction:row}
+.personal-agent-panel .agent-policy-controls{
+ display:grid;
+ grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));
+ gap:15px 20px;
+ align-items:center;
+ margin:18px 0;
+}
+.personal-agent-panel .agent-policy-controls>label{min-width:0;line-height:1.5}
+.personal-agent-panel .agent-policy-budget{flex-wrap:wrap;gap:9px}
+.personal-agent-panel .agent-policy-budget input[type=number]{
+ width:170px;
+ min-width:140px;
+ max-width:200px;
+ height:auto;
+ min-height:41px;
+ padding:10px 12px;
+ flex:1 1 140px;
+}
+.personal-agent-panel .agent-policy-save{justify-self:start;min-width:110px}
+.personal-agent-panel #agentPolicyFeedback{grid-column:1/-1;margin:0}

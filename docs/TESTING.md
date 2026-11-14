@@ -129,3 +129,13 @@ python scripts/runtime_browser.py
 PC 설정이 켜진 채 남아 있어도 업로드·전사·에이전트 결과가 클라우드 전용 경로를 유지하는지, 비활성 정책·키 누락·예산 초과·공급자 실패가 PC 폴백을 일으키지 않는지 확인합니다. 이전 대기 작업의 무단 클라우드 전환, 전사 도중 에이전트 비활성화 후 명령 실행, 중복 과금도 검사합니다. 상태 조회·진단은 로컬 준비 조건만 확인하며 실제 공급자 성공을 주장하지 않습니다.
 
 Node 검사는 LLM 탭을 열기 전 음성 전달, 읽기 전용 과거 이력, 새 요청의 Personal Agent 경로와 상태 문구를 검사합니다. Chromium 검사는 PC-free 진단의 표시·문자열 이스케이프·반응형 폭을 합성 fixture에서 확인합니다. 실제 Odyssey 배포와 PC 전원 종료 후 iPad 검증은 [운영 안내](ODYSSEY_OPENAI.md)의 별도 단계입니다.
+
+## Personal Agent 정책 저장/예산 입력 회귀
+
+```bash
+python -m pytest -q tests/test_agent_policy_routes.py
+node scripts/odyssey_ui_regression.js
+python scripts/agent_policy_browser.py
+```
+
+관리자 정책 PUT의 FastAPI `Request` 바인딩, 관리자 인증/CSRF/Origin 거부, 숫자 예산·동의 저장, 음성 multipart 바인딩을 합성 환경에서 확인합니다. Node 검사는 검증 오류 422와 로그인 만료 401의 표시를 확인합니다. Chromium 검사는 실제 CSS 숫자 입력 너비와 화면 폭 1440/390px을 확인합니다. 실제 서비스의 쿠키·터널·OpenAI 키/권한 및 유료 호출은 검증하지 않습니다.
