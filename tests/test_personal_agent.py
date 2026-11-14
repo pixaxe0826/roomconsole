@@ -13,6 +13,7 @@ import tempfile
 from typing import Any
 import unittest
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 
 def run_async(coro):
@@ -993,11 +994,21 @@ class TestPersonalAgentEndToEnd(unittest.TestCase):
             self.assertIn('우유, 계란, 두부', memo_run['summary_text'])
 
     def test_tier2_openai_compound_plan_conflict_detection_and_atomic_confirm(self):
-        run_async(self._test_tier2_openai_compound_plan_conflict_detection_and_atomic_confirm())
+        # The fake planner and alarm validator must share the request's Korean
+        # calendar day, even when a UTC runner still reports the previous date.
+        for now in (
+            datetime(2026, 11, 14, 14, 59, tzinfo=timezone.utc),
+            datetime(2026, 11, 14, 15, 0, tzinfo=timezone.utc),
+            datetime(2026, 11, 14, 23, 31, tzinfo=timezone.utc),
+        ):
+            with self.subTest(now=now.isoformat()):
+                run_async(self._test_tier2_openai_compound_plan_conflict_detection_and_atomic_confirm(now))
 
-    async def _test_tier2_openai_compound_plan_conflict_detection_and_atomic_confirm(self):
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-            tomorrow_iso = (date.today() + timedelta(days=1)).isoformat()
+    async def _test_tier2_openai_compound_plan_conflict_detection_and_atomic_confirm(self, now):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp, patch(
+            'app.personal_agent.utcnow', return_value=now.isoformat(),
+        ):
+            tomorrow_iso = (now.astimezone(ZoneInfo('Asia/Seoul')).date() + timedelta(days=1)).isoformat()
 
             async def fake_transport(method: str, url: str, headers: dict, body: Any):
                 self.assertIn('Authorization', headers)
@@ -1063,6 +1074,8 @@ class TestPersonalAgentEndToEnd(unittest.TestCase):
                 transport=fake_transport,
                 api_key='sk-test-dummy-key-for-unit-tests-only',
             )
+            life.clock = lambda: now.timestamp()
+            self.assertEqual(agent.build_workspace_snapshot()['clock']['tomorrow'], tomorrow_iso)
 
             await agent.task_services.add(
                 TaskCreate(
@@ -1115,6 +1128,7 @@ class TestPersonalAgentEndToEnd(unittest.TestCase):
             alarms = life.alarms()
             self.assertEqual(len(alarms), 1)
             self.assertEqual(alarms[0]['time'], '08:30')
+            self.assertEqual(alarms[0]['date'], tomorrow_iso)
             self.assertEqual(alarms[0]['label'], '회의 준비 기상')
 
             notes = life.notes()
@@ -1438,17 +1452,28 @@ class TestAllElevenWidgetAdapters(unittest.TestCase):
             self.assertEqual(llm_list['status'], 'success')
 
     def test_alarm_snooze_ack_and_plan_limits_and_multi_widget_layout_staging(self):
-        run_async(self._test_alarm_snooze_ack_and_plan_limits_and_multi_widget_layout_staging())
+        # Include both sides of midnight in Seoul and the former CI failure
+        # window, when the runner's UTC date is still the previous day.
+        for now in (
+            datetime(2026, 11, 14, 14, 59, tzinfo=timezone.utc),
+            datetime(2026, 11, 14, 15, 0, tzinfo=timezone.utc),
+            datetime(2026, 11, 14, 22, 7, tzinfo=timezone.utc),
+        ):
+            with self.subTest(now=now.isoformat()):
+                run_async(self._test_alarm_snooze_ack_and_plan_limits_and_multi_widget_layout_staging(now))
 
-    async def _test_alarm_snooze_ack_and_plan_limits_and_multi_widget_layout_staging(self):
+    async def _test_alarm_snooze_ack_and_plan_limits_and_multi_widget_layout_staging(self, now):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             store, life, timers, protocol, agent, _ = build_test_harness(Path(tmp))
-            tomorrow_iso = (date.today() + timedelta(days=1)).isoformat()
+            life.clock = lambda: now.timestamp()
+            alarm_timezone = ZoneInfo('Asia/Seoul')
+            tomorrow_iso = (now.astimezone(alarm_timezone).date() + timedelta(days=1)).isoformat()
             alarm = life.create_alarm(
                 AlarmCreate(
                     request_id='seed-alarm-1',
                     label='기상 알람',
                     time='07:00',
+                    timezone=alarm_timezone.key,
                     repeat='once',
                     date=tomorrow_iso,
                     weekdays=[],
@@ -1463,8 +1488,12 @@ class TestAllElevenWidgetAdapters(unittest.TestCase):
             self.assertEqual(life.events(), [])
             alarm_row = next(a for a in life.alarms() if a['id'] == alarm['id'])
             fire = datetime.fromisoformat(alarm_row['next_fire_at'].replace('Z', '+00:00')).timestamp()
+            self.assertGreater(fire, life.clock())
+            self.assertEqual(life.tick(), 0)
+            self.assertEqual(life.events(), [])
             life.clock = lambda: fire + 1
             life.tick()
+            self.assertEqual(life.events()[0]['state'], 'ringing')
 
             # 1. Only an existing ringing occurrence can stage snooze / ack.
             r_snooze = await agent.submit_command(
