@@ -1,8 +1,10 @@
 # Room Hub 0.1.7
 
-**LG V35 로컬 서버 + iPad 생활 대시보드 + 음성 전사 + 확인 기반 로컬 비서.**
+**Odyssey Room Hub + iPad 생활 대시보드 + OpenAI 전사·플래너 + 확인 기반 작업 실행.**
 
 Room Hub는 방에 남는 iPad를 시계·날씨·할 일·달력 허브로 사용하고, 같은 LAN의 로컬 서버가 데이터 저장·실시간 동기화·음성 전사를 담당하도록 만든 개인용 프로젝트입니다. 현재 소스는 **0.1.7**이며, 이전 버전의 패치를 순서대로 적용할 필요가 없는 통합본입니다.
+
+PC를 추론 경로에서 완전히 분리하려면 **`HUB_AI_PROFILE=odyssey_openai`**를 선택합니다. Odyssey가 요청·FFmpeg·규칙·예산·승인·DB를 관리하고 OpenAI STT/플래너를 직접 호출합니다. Windows Whisper/Qwen·SSH 터널은 필요하지 않으며, 클라우드 오류에도 PC로 폴백하지 않습니다. API 키와 관리자 전송 동의는 별도로 설정합니다. 기본 `legacy` 프로필은 기존 설치 호환용입니다. [Odyssey 적용·업데이트·PC 없는 검증](docs/ODYSSEY_OPENAI.md). 소스 지원은 운영 서버에 배포됐다는 의미가 아닙니다.
 
 > 이 저장소에는 운영 DB, 인증 토큰, TLS 개인키, 녹음 파일, Whisper 모델, LLM 모델이 포함되지 않습니다. GitHub에는 소스만 올리세요.
 
@@ -28,18 +30,18 @@ Room Hub는 방에 남는 iPad를 시계·날씨·할 일·달력 허브로 사�
 | 완료 처리 | iPad에서 완료/완료 취소 가능. 생성·수정·삭제는 관리자 전용 |
 | 반복 일정 | 매일, 평일, 요일 선택, 월간, N 간격, 종료일 포함 |
 | 위젯 시스템 | 폴더형 플러그인, 4~16 격자, 위젯별 크기/위치 설정 |
-| 음성 | iPad 버튼 녹음 → HTTPS 업로드 → V35 whisper.cpp 로컬 전사 → 관리자 수신함 |
+| 음성 | iPad 버튼 녹음 → Odyssey HTTPS 업로드·검증 → 허용된 OpenAI 전사. 레거시 Whisper는 별도 호환 프로필 |
 | LLM/비서 관리자 | 자동 분기·실제 조회·변경 미리보기/확인·일반 대화·입력/결과/통계 기록 |
 | LLM 클라이언트 위젯 | 처리된 원문/LLM 응답/서버 실행 결과를 4×2에서 한 쌍씩 탐색. 새 확인 권한 없음 |
-| LLM 모델 | 기존 Qwen3-0.6B Q5_K_M / CPU 6T 연결 재사용. 새 설치 기본값은 비활성 |
+| LLM 모델 | Odyssey OpenAI 프로필은 OpenAI 플래너를 사용. 기존 Qwen 연결은 레거시 호환용이며 새 설치 전송은 기본 비활성 |
 | 저장 | SQLite, JSON 내보내기, DB 복원 도구 |
 | 연결 | 표시 기기 1회용 QR/링크, WebSocket 갱신, 관리자 원격 화면 제어 |
 
-### 현재 운영 기준
+### 이전 V35 운영 기록 — 2026-09-20
 
 2026-09-20 사용자는 **V35 Termux/PRoot roomhub에 Room Hub 0.1.7 업데이트 패키지를 적용**했다고 확인했습니다. iPad HTTPS8443, Whisper multilingual Base / 한국어 / **6 threads / careful(beam 5)**, Qwen3-0.6B-Q5_K_M CPU6T/컨텍스트1024/non-thinking 구조는 유지합니다.
 
-현재 V35의 `~/room-hub`는 아직 패키지 설치 디렉터리라 Git commit/tree 동일성은 검증되지 않았습니다. [V35 Git 관리형 업데이트](docs/V35_GIT_UPDATE.md)로 전환한 뒤 `update-from-git.sh --check`를 소스 동일성 기준으로 사용합니다. 0.1.7 설치 완료와 실제 iPad 알람 소리·절전·장시간 운용 검증은 구분합니다.
+당시 V35의 `~/room-hub`는 패키지 설치 디렉터리라 Git commit/tree 동일성은 검증되지 않았습니다. 이 기록만으로 현재 Odyssey의 설치 방식은 알 수 없습니다. [V35 Git 관리형 업데이트](docs/V35_GIT_UPDATE.md)는 V35용이며 Odyssey에서는 [별도 절차](docs/ODYSSEY_OPENAI.md)를 사용합니다. 0.1.7 설치 완료와 실제 iPad 알람 소리·절전·장시간 운용 검증은 구분합니다.
 
 ### 0.1.6에서 달라진 것
 
@@ -50,6 +52,8 @@ Room Hub는 방에 남는 iPad를 시계·날씨·할 일·달력 허브로 사�
 [기능 상세](docs/CONTEXT_016.md) · [V35 업데이트](docs/CONTEXT_UPDATE_016.md) · [검증과 한계](docs/CONTEXT_TEST_REPORT_016.md)
 
 ## 구조
+
+Odyssey OpenAI 프로필에서 요청 접수·전사 전처리·도구 실행·저장은 모두 Odyssey가 담당합니다. 외부 전사·계획만 OpenAI가 수행합니다. 아래는 이전 V35/로컬 추론 프로필의 구조이며 PC 없는 배포의 필수 구성은 아닙니다.
 
 ```text
 [iPad Safari]
@@ -65,7 +69,7 @@ Room Hub는 방에 남는 iPad를 시계·날씨·할 일·달력 허브로 사�
   └─ LLM request notebook → local LLM API + confirmed assistant tools
 ```
 
-Windows PC는 서버를 실행할 필요 없이 필요할 때 `/manager`에 접속하는 관리자 단말로 사용할 수 있습니다. 현재 V35 배포는 `termux-services`로 Room Hub를 백그라운드 실행하고, 재부팅 후 서비스 관리자를 시작하는 동작은 Tasker 같은 외부 자동화에서 호출할 수 있습니다. 자세한 내용은 [V35/Termux 안내](docs/V35_TERMUX.md)를 확인하세요.\n\n운영 V35를 Git clone으로 전환한 뒤에는 **기능 개발 → PR → 사용자 검토/Merge → 최종 main CI 확인 → V35 fast-forward 업데이트** 흐름을 권장합니다. 운영 DB·키·모델은 Git에 넣지 않습니다. [V35 Git 관리형 업데이트](docs/V35_GIT_UPDATE.md)
+Windows PC는 서버를 실행할 필요 없이 원할 때 `/manager`를 여는 관리자 단말로만 사용할 수 있습니다. Odyssey는 기존 systemd 서비스와 HTTPS를 유지합니다. **기능 개발 → PR → 사용자 검토/Merge → 최종 main CI 확인 → 운영 서버의 검증된 업데이트** 순서이며 GitHub push만으로 운영 서버가 바뀌지 않습니다. 운영 DB·키·모델은 Git에 넣지 않습니다. 이전 V35의 `termux-services`/Tasker 구성은 [V35/Termux 안내](docs/V35_TERMUX.md)와 [V35 Git 관리형 업데이트](docs/V35_GIT_UPDATE.md)에 별도로 보존합니다.
 
 ## 빠른 시작 — 일반 Python
 
@@ -227,6 +231,8 @@ M3는 기존 FAST_PATH/정확한 atomic write를 유지하면서, 명확한 단�
 
 ## M3.4-0 — 선택적 PC 추론 런타임
 
+기존 PC 분산 추론을 유지하는 레거시 구성입니다. `odyssey_openai` 프로필에는 아래 PC 경로가 필요하지 않습니다.
+
 SQLite FD 수명/벤치마크 factory를 통합하고, 기존 local CLI를 보존한 채 원격 Whisper HTTP backend를 추가합니다.
 관리자 AI 노드 진단은 설정값과 실제 API 확인 범위를 구분합니다. 자동 배포·모델 교체·Parser 변경은 없습니다.
 적용/롤백과 모의·실기기 검증 구분은 [런타임 안정화](docs/RUNTIME_M340.md)를 참고하세요.
@@ -236,6 +242,7 @@ SQLite FD 수명/벤치마크 factory를 통합하고, 기존 local CLI를 보�
 기본 비활성화된 선택적 비서 계층(`/api/agent/*`)입니다. 기존 결정론적 빠른 경로를 재사용하고, 허용된 요청에 한해 월 예산 거버너 하에서 클라우드 계획을 사용합니다. 기본 설정 모델은 `gpt-6.1-sol`, 추론 강도는 `high`이며 실제 계정의 모델 접근 가능 여부나 성능을 보장하지 않습니다.
 
 - OpenAI 음성 전사는 **에이전트·클라우드·음성 전송 세 정책 스위치**, 전용 키, 사용 가능한 예산, 로컬 FFmpeg 검증이 필요합니다. 기본값은 모두 비활성입니다. 기존 로컬/원격 Whisper 설정을 자동 교체하지 않습니다.
+- `HUB_AI_PROFILE=odyssey_openai`는 기존 PC/로컬 추론·probe·폴백을 차단합니다. 저장 설정을 지울 필요가 없고 클라우드를 꺼도 PC 경로가 켜지지 않습니다. 프로필과 전송 동의는 별개이며, 실제 전사는 OpenAI에서 수행합니다.
 - 환경변수는 정책 최초 생성 시의 초기값입니다. 이후에는 관리자 패널/API에 저장된 DB 정책을 사용합니다. 정식 변수는 `HUB_OPENAI_MONTHLY_CAP_USD`, `HUB_OPENAI_ALLOW_SHARED_NOTES`입니다.
 - iPad의 기존 음성 화면은 전사 이후 개인 비서 상태까지 조회합니다. 재연결은 같은 작업을 GET으로 읽으며 유료 요청을 자동 재전송하지 않습니다. 조회·제한된 타이머 외 변경은 관리자 승인이 필요합니다.
 - 비용을 확인하지 못한 요청은 `$0`으로 표시하지 않고 미정 상태와 예약액을 유지합니다. 공유 응답은 현재 메모 공개 여부·버전을 다시 확인하여 비공개 내용을 가립니다.

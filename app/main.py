@@ -26,11 +26,13 @@ from .speech import SpeechHub
 from .settings_service import apply_settings, weather_settings_key
 from .llm import LLMHub, LLMConfig, LLMCreate, LLMRetry, sha as llm_sha
 from .personal_agent import PersonalAgentService, register_agent_routes
+from .ai_profile import AIProfile
 ROOT=Path(__file__).resolve().parent.parent
 
 def hashed(value):return hashlib.sha256(value.encode()).hexdigest()
 
 def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_runner=None,llm_backend=None,agent_gateway=None):
+ ai_profile=AIProfile.from_env()
  data=Path(data_dir or os.getenv('HUB_DATA_DIR',ROOT/'data')).resolve();data.mkdir(parents=True,exist_ok=True);(data/'audio').mkdir(exist_ok=True)
  widget_root=Path(os.getenv('HUB_WIDGET_DIR',ROOT/'widgets')).resolve()
  store=Store(data/'room-hub.sqlite3');connections={};attempts={};wx={'last_attempt':0.,'error':None};wx_lock=asyncio.Lock()
@@ -74,8 +76,8 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
    settings=store.get('settings')
    if settings['latitude'] is not None and time.monotonic()-wx['last_attempt']>=settings['weather_interval_minutes']*60:await refresh_weather()
    await asyncio.sleep(20)
- speech=SpeechHub(store,data,changed,config=speech_config,runner=speech_runner)
- llm=LLMHub(store,changed,speech=speech,backend=llm_backend)
+ speech=SpeechHub(store,data,changed,config=speech_config,runner=speech_runner,profile=ai_profile)
+ llm=LLMHub(store,changed,speech=speech,backend=llm_backend,profile=ai_profile)
  speech.set_transcript_sink(llm.submit_transcription)
  life=LifeService(store,changed)
  timers=TimerService(store,changed)
@@ -108,6 +110,7 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
  app.state.timers=timers
  app.state.speech=speech
  app.state.llm=llm
+ app.state.ai_profile=ai_profile
  app.state.store=store;app.state.admin_token=admin_key;app.state.ingest_token=ingest_key;app.state.connections=connections
  @app.middleware('http')
  async def security(request,call_next):
@@ -157,7 +160,6 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
   if auth.startswith('Bearer ') and hmac.compare_digest(auth[7:],ingest_key):return {'role':'ingest'}
   return authenticate(request,'admin')
  from .ai_runtime import register_routes as register_ai_runtime
- register_ai_runtime(app,speech,llm,admin)
  register_life_routes(app,life,admin,viewer,changed)
  register_timer_routes(app,timers,viewer)
  register_temperature_routes(app,data,store,admin,viewer)
@@ -343,11 +345,13 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
  app.state.widget_protocol=protocol
  llm.set_widget_registry(protocol)
  widget_protocol.register_routes(app,protocol,admin)
- personal_agent=PersonalAgentService(store,life,timers,None,task_services,speech=speech,llm=llm,gateway=agent_gateway,changed=changed,refresh_weather=refresh_weather,broadcast_fn=broadcast,widget_root=widget_root,temperature_store=getattr(app.state,'indoor_temperature',None))
+ personal_agent=PersonalAgentService(store,life,timers,None,task_services,speech=speech,llm=llm,gateway=agent_gateway,changed=changed,refresh_weather=refresh_weather,broadcast_fn=broadcast,widget_root=widget_root,temperature_store=getattr(app.state,'indoor_temperature',None),profile=ai_profile)
  app.state.personal_agent=personal_agent
  register_agent_routes(app,personal_agent,admin,viewer)
+ register_ai_runtime(app,speech,llm,admin,agent=personal_agent)
  async def route_speech_transcript(job_id:str,voice_id:str,text:str):
   if personal_agent.is_enabled():return await personal_agent.submit_from_speech_job(job_id,voice_id,text)
+  if ai_profile.pc_free:raise HTTPException(503,'Personal Agent가 꺼져 있습니다. 전사 결과는 보관하며 PC LLM으로 전송하지 않습니다.')
   return await llm.submit_transcription(job_id,voice_id,text)
  speech.set_transcript_sink(route_speech_transcript)
  speech.set_agent_hooks(options=personal_agent.speech_options,transcribe=personal_agent.transcribe_speech_job,viewer=personal_agent.get_run_for_viewer)

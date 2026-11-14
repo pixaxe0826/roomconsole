@@ -1,5 +1,7 @@
 # M3.4-0 — Odyssey / PC 추론 분리의 정식 런타임
 
+> 이 문서는 **기존 PC 분산 추론 구성**의 호환·이력 문서입니다. PC를 제거하고 Odyssey가 OpenAI를 직접 호출하는 구성은 [Odyssey 단독 OpenAI 운영](ODYSSEY_OPENAI.md)을 사용합니다. `odyssey_openai`에서는 아래 PC 엔드포인트·SSH·모델 연결 및 probe를 사용하지 않습니다. 이 문서의 `configure_remote_speech.py`는 PC 연결을 설정하는 도구이며 PC 제거 도구가 아닙니다.
+
 이 패치는 Room Hub 0.1.7의 운영 안정화입니다. Parser, LLM prompt/JSON schema,
 operation 등록, 확인·버전·receipt 정책, 벤치마크 채점과 평가 데이터는 변경하지 않습니다.
 M3.4-A/NLU v2는 다음 작업이며 이 패치에 포함하지 않습니다.

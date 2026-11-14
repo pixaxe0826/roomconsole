@@ -11,6 +11,8 @@ services:
       HUB_ADMIN_TOKEN: "${HUB_ADMIN_TOKEN:-}"
       HUB_INGEST_TOKEN: "${HUB_INGEST_TOKEN:-}"
       HUB_SECURE_COOKIE: "${HUB_SECURE_COOKIE:-false}"
+      HUB_AI_PROFILE: "${HUB_AI_PROFILE:-legacy}"
+      HUB_FFMPEG: "${HUB_FFMPEG:-}"
       # Initial policy seeds only; existing DB policy is changed by the manager.
       HUB_PERSONAL_AGENT_ENABLED: "${HUB_PERSONAL_AGENT_ENABLED:-false}"
       HUB_OPENAI_ENABLED: "${HUB_OPENAI_ENABLED:-false}"

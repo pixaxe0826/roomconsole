@@ -35,13 +35,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .clock_service import clock_context, resolve_range
 from .agent_audio import AudioIngress
+from .ai_profile import AIProfile
 from .entity_catalog import EntityCatalog
 from .fast_reads import match_read
 from .life import LifeService, memo_snapshot, note_catalog_snapshot
 from .memo_grounding import parse_memo
 from .models import Layout, RepeatRule, TaskCreate, TaskPatch
 from .openai_budget import BudgetGovernor, BudgetPolicy, UsageCategory
-from .openai_gateway import OpenAIGateway, OpenAIGatewayError, verify_audio_payload
+from .openai_gateway import OPENAI_DEFAULT_BASE_URL, OpenAIGateway, OpenAIGatewayError, verify_audio_payload
 from .semantic_parser import parse_semantic
 from .store import uid, utcnow
 from .timer_commands import exact_timer
@@ -320,6 +321,7 @@ class PersonalAgentService:
         broadcast_fn: Callable | None = None,
         widget_root: Path | None = None,
         temperature_store=None,
+        profile: AIProfile | None = None,
     ):
         self.store = store
         self.life = life
@@ -327,8 +329,13 @@ class PersonalAgentService:
         self.task_services = task_services
         self.speech = speech
         self.llm = llm
+        self.profile = profile or getattr(speech, 'profile', None) or AIProfile.from_env()
         self.governor = governor or BudgetGovernor(store)
-        self.gateway = gateway or OpenAIGateway(self.governor)
+        self.gateway = gateway or OpenAIGateway(self.governor, profile=self.profile)
+        if self.profile.pc_free:
+            # Injected transports may mock the official endpoint, but cannot
+            # turn the Odyssey profile into a loopback/PC model bridge.
+            self.gateway.profile = self.profile
         self.changed = changed
         self.refresh_weather = refresh_weather
         self.broadcast_fn = broadcast_fn
@@ -467,6 +474,8 @@ class PersonalAgentService:
             return False, 'cloud_disabled'
         if category == 'stt' and not pol.audio_cloud_enabled:
             return False, 'audio_cloud_disabled'
+        if self.profile.pc_free and self.gateway.base_url != OPENAI_DEFAULT_BASE_URL:
+            return False, 'profile_endpoint_blocked'
         if not self.gateway.key_configured() and self.gateway.base_url.startswith('https://'):
             return False, 'missing_api_key'
         budget_state = self.governor.summary()['state']
@@ -2914,7 +2923,7 @@ class PersonalAgentService:
         pol = self.governor.policy()
         oa = self.gateway.readiness()
         local_stt_ready = False
-        if self.speech is not None:
+        if self.speech is not None and not self.profile.pc_free:
             try:
                 # SpeechHub.status() can report the separately enabled cloud
                 # engine; it is not evidence that local Whisper is installed.
@@ -2923,17 +2932,10 @@ class PersonalAgentService:
                     local_stt_ready = bool(self.speech.config().readiness()[0])
             except Exception:
                 local_stt_ready = False
-        if not pol.agent_enabled:
-            cloud_status = 'agent_disabled'
-        elif not pol.cloud_enabled:
-            cloud_status = 'cloud_disabled'
-        elif not oa.get('api_key_configured'):
-            cloud_status = 'api_key_missing'
-        elif not oa.get('budget_allowed'):
-            cloud_status = 'budget_exhausted'
-        else:
-            cloud_status = 'ready'
+        allowed, cloud_reason = self.should_use_cloud('auto')
+        cloud_status = 'ready' if allowed else cloud_reason
         return {
+            **self.profile.public(),
             'agent_version': AGENT_VERSION,
             'enabled': pol.agent_enabled,
             'agent_enabled': pol.agent_enabled,
@@ -2943,13 +2945,14 @@ class PersonalAgentService:
             'cloud_status': cloud_status,
             'local_tier0_available': True,
             'local_stt_available': local_stt_ready,
+            'stt_fallback_to_local': bool(not self.profile.pc_free and pol.fallback_to_local),
             'openai': oa,
             'budget': self.governor.summary(),
             'domains': list(ALL_ADAPTER_DOMAINS) + ['briefing'],
             'adapters': self.registry.list_widgets(),
             'tiers': {
                 'tier0': 'Local deterministic rules ($0)',
-                'tier1_stt': pol.stt_model if (pol.agent_enabled and pol.cloud_enabled and pol.audio_cloud_enabled) else 'local/whisper',
+                'tier1_stt': pol.stt_model if self.profile.pc_free or (pol.agent_enabled and pol.cloud_enabled and pol.audio_cloud_enabled) else 'local/whisper',
                 'tier2_fast': f'{pol.fast_model} (reasoning_effort={pol.reasoning_effort})',
                 'tier3_deep': f'{pol.deep_model} (reasoning_effort={pol.reasoning_effort})',
             },
@@ -2958,9 +2961,12 @@ class PersonalAgentService:
     def speech_options(self) -> dict[str, Any]:
         """Read-only effective routing; never probes or invokes a provider."""
         if not self.is_enabled():
-            return {'agent_enabled': False, 'cloud_stt_available': False}
+            result = self.profile.public() | {'agent_enabled': False, 'cloud_stt_available': False, 'reason': 'agent_disabled'}
+            if self.profile.pc_free:
+                result['stt_model'] = self.governor.policy().stt_model
+            return result
         allowed, reason = self.should_use_cloud('auto', category='stt')
-        return {'agent_enabled': True, 'cloud_stt_available': allowed,
+        return {**self.profile.public(), 'agent_enabled': True, 'cloud_stt_available': allowed,
                 'stt_model': self.governor.policy().stt_model, 'reason': reason}
 
     async def _transcribe_via_local_speech(
@@ -2977,6 +2983,8 @@ class PersonalAgentService:
         """Fallback/local-only transcription using Room Hub's configured local/LAN SpeechHub."""
         from fastapi import HTTPException
 
+        if self.profile.pc_free:
+            raise HTTPException(503, 'Odyssey 전용 모드에서는 PC/로컬 Whisper 전사를 사용하지 않습니다. OpenAI 음성 설정을 확인하세요.')
         if self.speech is None:
             raise HTTPException(
                 503,
@@ -3101,6 +3109,11 @@ class PersonalAgentService:
             mime_type=mime_type, duration_seconds=duration_seconds, language=language,
             mode=mode, local_only=local_only, session=session,
         )
+        if self.profile.pc_free and not self.is_enabled():
+            # STT and its usage are already durably recorded. A policy toggle
+            # during that await must not launch a new plan or local action.
+            from fastapi import HTTPException
+            raise HTTPException(503, 'Personal Agent가 꺼져 있습니다. 전사 결과는 보관하며 명령을 실행하지 않습니다.')
         # Do not turn an oversized transcript into a truncated action.
         if len(stt['text']) > 2000:
             from fastapi import HTTPException
@@ -3157,6 +3170,8 @@ class PersonalAgentService:
                 stt_reason = 'budget_hard_cap_reached'
 
         if not allow_cloud_stt:
+            if self.profile.pc_free:
+                raise HTTPException(503, f'OpenAI 음성 전사를 사용할 수 없습니다 ({stt_reason}). Odyssey 전용 모드에서는 PC로 우회하지 않습니다.')
             stt = await self._transcribe_via_local_speech(
                 request_id=request_id,
                 audio_bytes=audio_bytes,
@@ -3202,7 +3217,7 @@ class PersonalAgentService:
             except OpenAIGatewayError as exc:
                 if exc.code in {'request_already_dispatched', 'request_conflict'}:
                     raise HTTPException(409, '이미 처리한 음성 호출은 재전송하지 않습니다.') from None
-                if self.governor.policy().fallback_to_local and self.speech is not None:
+                if not self.profile.pc_free and self.governor.policy().fallback_to_local and self.speech is not None:
                     stt = await self._transcribe_via_local_speech(
                         request_id=f'{request_id}:local',
                         audio_bytes=audio_bytes,
@@ -3257,6 +3272,8 @@ class PersonalAgentService:
         """Connect existing iPad/manager SpeechHub transcription jobs directly to PersonalAgentService."""
         from fastapi import HTTPException
         job_row, session = self._speech_identity(job_id, voice_id)
+        if self.profile.pc_free and not self.is_enabled():
+            raise HTTPException(503, 'Personal Agent가 꺼져 있습니다. 전사 결과는 보관하며 명령을 실행하지 않습니다.')
         if text != job_row['text']:
             raise HTTPException(409, '전달된 전사문이 저장된 음성 작업과 다릅니다.')
         metadata = json.loads(job_row['metadata'] or '{}')

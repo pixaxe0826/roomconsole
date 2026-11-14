@@ -24,6 +24,7 @@ import urllib.request
 import uuid
 
 from .openai_budget import ALLOWED_CHAT_MODELS, ALLOWED_STT_MODELS, BudgetGovernor, UsageCategory
+from .ai_profile import AIProfile
 
 MAX_RESPONSE_BYTES = 512 * 1024
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
@@ -319,8 +320,10 @@ class OpenAIGateway:
         base_url: str = OPENAI_DEFAULT_BASE_URL,
         api_key: str | None = None,
         transport: Any = None,
+        profile: AIProfile | None = None,
     ):
         self.governor = governor
+        self.profile = profile or AIProfile.from_env()
         self.base_url = validate_openai_base_url(base_url)
         self._explicit_api_key = (api_key or '').strip()
         self.transport = transport
@@ -331,17 +334,30 @@ class OpenAIGateway:
     def key_configured(self) -> bool:
         return bool(self._api_key())
 
+    def endpoint_allowed(self) -> bool:
+        return not self.profile.pc_free or self.base_url == OPENAI_DEFAULT_BASE_URL
+
+    def _require_endpoint(self) -> None:
+        if not self.endpoint_allowed():
+            raise OpenAIGatewayError(
+                'Odyssey 전용 모드는 OpenAI 공식 API에만 연결합니다. PC/loopback 대체 서버는 허용하지 않습니다.',
+                'profile_endpoint_blocked', 503,
+            )
+
     def readiness(self) -> dict[str, Any]:
         pol = self.governor.policy()
         has_key = self.key_configured()
         budget = self.governor.summary()
         budget_ok = budget['state'] != 'HARD_CAP_REACHED'
-        cloud_ready = bool(pol.agent_enabled and pol.cloud_enabled and has_key and budget_ok)
+        endpoint_ok = self.endpoint_allowed()
+        cloud_ready = bool(pol.agent_enabled and pol.cloud_enabled and has_key and budget_ok and endpoint_ok)
         audio_cloud_ready = bool(cloud_ready and pol.audio_cloud_enabled)
         if not pol.agent_enabled:
             status_reason = 'agent_disabled'
         elif not pol.cloud_enabled:
             status_reason = 'cloud_disabled'
+        elif not endpoint_ok:
+            status_reason = 'profile_endpoint_blocked'
         elif not has_key:
             status_reason = 'missing_api_key'
         elif not budget_ok:
@@ -355,6 +371,10 @@ class OpenAIGateway:
             'allow_shared_notes_in_cloud': pol.allow_shared_notes_in_cloud,
             'api_key_configured': has_key,
             'base_url': self.base_url,
+            'endpoint_allowed': endpoint_ok,
+            'runtime_profile': self.profile.name,
+            'provider_verified': False,
+            'readiness_scope': 'local_configuration_only; not provider availability',
             'budget_state': budget['state'],
             'cloud_ready': cloud_ready,
             'audio_cloud_ready': audio_cloud_ready,
@@ -405,6 +425,7 @@ class OpenAIGateway:
             return None
 
     async def _post_json(self, path: str, payload: dict[str, Any], timeout: float = 60.0) -> tuple[dict[str, Any], str]:
+        self._require_endpoint()
         key = self._api_key()
         if not key and self.base_url.startswith('https://'):
             raise OpenAIGatewayError(
@@ -581,6 +602,7 @@ class OpenAIGateway:
         at_iso: str | None = None,
     ) -> dict[str, Any]:
         """Run a budget-reserved OpenAI Structured Outputs call and settle exact usage."""
+        self._require_endpoint()
         if user_text is None:
             user_text = user_prompt or ''
         pol = self.governor.policy()
@@ -744,6 +766,7 @@ class OpenAIGateway:
         at_iso: str | None = None,
     ) -> dict[str, Any]:
         """Verify audio container & duration, reserve budget, and transcribe via OpenAI Audio API."""
+        self._require_endpoint()
         pol = self.governor.policy()
         if not pol.agent_enabled or not pol.cloud_enabled or not pol.audio_cloud_enabled:
             raise OpenAIGatewayError(

@@ -22,10 +22,11 @@ import sys
 import tempfile
 import time
 import wave
-from dataclasses import dataclass, fields
+from dataclasses import asdict, dataclass, fields
 from typing import Awaitable, Callable
 
 from fastapi import HTTPException
+from .ai_profile import AIProfile
 from .store import uid, utcnow
 from .stt_accuracy import AccuracyConfig, task_hint, score_summary, diagnostic_segments, serialize_report, PATCH_ID
 
@@ -72,14 +73,29 @@ class SpeechConfig:
             validate_endpoint(self.remote_url)
 
     @classmethod
-    def read(cls, path: Path) -> 'SpeechConfig':
+    def read(cls, path: Path, *, codec_only: bool = False,
+             ffmpeg_override: str | None = None) -> 'SpeechConfig':
         if not path.exists():
-            return cls()
+            return cls._from_mapping({}, codec_only=codec_only, ffmpeg_override=ffmpeg_override)
         if path.is_symlink() or path.stat().st_size > 16384:
             raise ValueError('Invalid speech configuration file')
         raw = json.loads(path.read_text('utf-8'))
+        return cls._from_mapping(raw, codec_only=codec_only, ffmpeg_override=ffmpeg_override)
+
+    @classmethod
+    def _from_mapping(cls, raw, *, codec_only: bool = False,
+                      ffmpeg_override: str | None = None) -> 'SpeechConfig':
         if not isinstance(raw, dict) or set(raw) - {f.name for f in fields(cls)}:
             raise ValueError('Invalid speech configuration fields')
+        if codec_only:
+            # A retired PC's model/endpoint/executable is not a prerequisite for
+            # OpenAI. Keep the file unchanged, using only local codec and quota
+            # fields. Invalid codec limits still fail closed.
+            codec_fields = {'ffmpeg', 'language', 'max_seconds', 'timeout_seconds',
+                            'max_pending', 'max_bytes', 'max_stored_bytes'}
+            raw = {key: value for key, value in raw.items() if key in codec_fields}
+        if ffmpeg_override is not None:
+            raw = dict(raw, ffmpeg=ffmpeg_override)
         cfg = cls(**raw)
         if type(cfg.enabled) is not bool:
             raise ValueError('enabled must be boolean')
@@ -268,8 +284,10 @@ def validate_audio(blob: bytes, mime: str) -> None:
 
 class SpeechHub:
     def __init__(self, store, data: Path, changed: Callable[..., Awaitable[None]],
-                 config: SpeechConfig | None = None, runner=None):
+                 config: SpeechConfig | None = None, runner=None, profile=None):
         self.store, self.data, self.changed = store, data, changed
+        self.profile = profile or AIProfile.from_env()
+        self.ffmpeg_override = (os.environ.get('HUB_FFMPEG') or None) if self.profile.pc_free else None
         self.override = config
         self.runner = runner or WhisperRunner()
         self.runner_override = runner is not None
@@ -315,28 +333,51 @@ class SpeechHub:
         if options.get('cloud_stt_available') and self.cloud_transcriber is not None:
             ready = bool(Path(cfg.ffmpeg).is_file() and os.access(cfg.ffmpeg, os.X_OK))
             return ready, '' if ready else '외부 음성 전송 전 검증에 필요한 FFmpeg를 확인하세요.', options
+        if self.profile.pc_free:
+            reasons = {
+                'agent_disabled': 'Personal Agent를 활성화하세요.',
+                'cloud_disabled': 'OpenAI 클라우드 플래너 허용 정책을 확인하세요.',
+                'audio_cloud_disabled': '음성 외부 OpenAI STT 전송 허용 정책을 확인하세요.',
+                'missing_api_key': 'Odyssey 서비스의 OpenAI API 키를 설정하세요.',
+                'api_key_missing': 'Odyssey 서비스의 OpenAI API 키를 설정하세요.',
+                'budget_hard_cap_reached': 'OpenAI 월 예산 한도에 도달했습니다.',
+                'budget_exhausted': 'OpenAI 월 예산 한도에 도달했습니다.',
+            }
+            reason = reasons.get(options.get('reason'), 'OpenAI 전사 설정과 준비 상태를 확인하세요.')
+            return False, reason + ' PC/로컬 Whisper로 대체하지 않습니다.', options
         ready, reason = cfg.readiness()
         return ready, reason, options
 
     def config(self) -> SpeechConfig:
-        return self.override or SpeechConfig.read(self.data / 'speech-config.json')
+        if self.override is not None:
+            if self.profile.pc_free:
+                return SpeechConfig._from_mapping(asdict(self.override), codec_only=True,
+                                                   ffmpeg_override=self.ffmpeg_override)
+            return self.override
+        return SpeechConfig.read(self.data / 'speech-config.json', codec_only=self.profile.pc_free,
+                                 ffmpeg_override=self.ffmpeg_override)
 
     def status(self) -> dict:
         try:
             cfg = self.config()
-            accuracy = AccuracyConfig.read(self.data / 'stt-accuracy.json')
+            accuracy = AccuracyConfig() if self.profile.pc_free else AccuracyConfig.read(self.data / 'stt-accuracy.json')
             ready, reason, agent = self._readiness(cfg)
         except (ValueError, TypeError, OSError, json.JSONDecodeError):
             cfg = SpeechConfig()
             accuracy = AccuracyConfig()
-            ready, reason = False, 'speech-config.json 또는 stt-accuracy.json 설정을 확인하세요.'
+            ready, reason = False, ('음성 코덱 설정 또는 HUB_FFMPEG를 확인하세요.' if self.profile.pc_free
+                                    else 'speech-config.json 또는 stt-accuracy.json 설정을 확인하세요.')
             agent = {}
         if ready and (self.task is None or self.task.done()):
-            ready, reason = False, '엔진 설치 후 Room Hub 서비스를 다시 시작하세요.'
+            ready, reason = False, ('정책 적용 또는 Odyssey의 Room Hub 서비스 재시작으로 음성 작업자를 시작하세요.'
+                                    if self.profile.pc_free else '엔진 설치 후 Room Hub 서비스를 다시 시작하세요.')
         with self.store.connect() as db:
             counts = dict(db.execute('SELECT status,COUNT(*) FROM speech_jobs GROUP BY status').fetchall())
-        cloud = bool(agent.get('cloud_stt_available'))
-        return {'ready': ready, 'enabled': cfg.enabled or cloud, 'engine': 'openai' if cloud else 'whisper.cpp',
+        cloud = self.profile.pc_free or bool(agent.get('cloud_stt_available'))
+        return {'ready': ready, 'enabled': bool(agent.get('cloud_stt_available')) if self.profile.pc_free else cfg.enabled or cloud,
+                'engine': 'openai' if cloud else 'whisper.cpp',
+                **self.profile.public(),
+                'legacy_backend_allowed': not self.profile.pc_free,
                 'agent_enabled': bool(agent.get('agent_enabled')),
                 'model': agent.get('stt_model') if cloud else (cfg.remote_model or cfg.model_name) if cfg.backend == 'remote_http' else cfg.model_name,
                 'backend': 'openai' if cloud else cfg.backend, 'model_identity_source': 'operator_config_not_verified' if cloud or cfg.backend == 'remote_http' else 'local_cli_argument',
@@ -351,6 +392,12 @@ class SpeechHub:
 
     async def probe(self):
         """Manager-only caller. No audio sent, no model load/restart or retry."""
+        if self.profile.pc_free:
+            state = self.status()
+            return {'ok': state['ready'], 'reachable': None, 'checked_at': utcnow(),
+                    'backend': 'openai', 'state': 'configured' if state['ready'] else 'unavailable',
+                    'network_checked': False, 'model_verified': False,
+                    'message': state['reason'] or 'Odyssey의 OpenAI 전사 준비 조건만 확인했습니다. 실제 API 호출은 하지 않았습니다.'}
         if self.probe_lock.locked():
             raise HTTPException(409, '전사 연결 확인이 진행 중입니다.')
         async with self.probe_lock:
@@ -370,6 +417,16 @@ class SpeechHub:
             return result
 
     def connection_status(self):
+        if self.profile.pc_free:
+            state = self.status()
+            return {'backend': 'openai', 'enabled': state['enabled'], 'ready': state['ready'],
+                    'runtime_profile': self.profile.name, 'pc_required': False,
+                    'configured_model': state['model'], 'reported_model': None, 'model_verified': False,
+                    'configured_device': 'cloud', 'reported_device': None,
+                    'identity_note': '로컬 설정/예산 확인이며 OpenAI 가용성·실제 전사 성공의 증거가 아닙니다.',
+                    'state': 'configured' if state['ready'] else 'unavailable',
+                    'message': state['reason'], 'last_probe': None, 'stale': False,
+                    'network_checked': False, 'stale_after_seconds': None}
         cfg = self.config()
         fresh = (cfg == self._probe_config and self._probe_time is not None
                  and time.monotonic() - self._probe_time <= 30)
@@ -516,6 +573,8 @@ class SpeechHub:
 
     async def retry(self, job_id: str, session: dict) -> dict:
         job = self.get(job_id, session)
+        if self.profile.pc_free and job['stt_backend'] != 'openai':
+            raise HTTPException(409, '이 녹음은 기존 PC/로컬 전사 요청입니다. 자동으로 OpenAI에 전송하지 않습니다. 새 음성 요청을 제출하세요.')
         if job['status'] in ACTIVE:
             return job  # idempotent tap, not a second job
         if job['status'] == 'succeeded':
@@ -548,6 +607,17 @@ class SpeechHub:
     async def start(self):
         if self.task is not None and not self.task.done():
             return
+        if self.profile.pc_free:
+            # Retire only in-flight legacy work, preserving source audio, exact
+            # backend choice and history. Never reinterpret it as cloud consent.
+            with self.store.connect() as db:
+                db.execute("UPDATE voice SET status='transcription_failed' WHERE id IN (SELECT voice_id FROM speech_jobs WHERE stt_backend!='openai' AND status IN ('queued','running'))")
+                db.execute("UPDATE speech_jobs SET status='failed',error=?,updated_at=? WHERE stt_backend!='openai' AND status IN ('queued','running')",
+                           ('Odyssey OpenAI 모드에서 기존 PC/로컬 전사를 중단했습니다. 새 음성 요청을 제출하세요.', utcnow()))
+                # Recovery must happen even when a key/policy/budget is missing.
+                db.execute("UPDATE voice SET status='transcription_failed' WHERE id IN (SELECT voice_id FROM speech_jobs WHERE status='running')")
+                db.execute("UPDATE speech_jobs SET status='failed',error='서버가 재시작되어 전사가 중단되었습니다. 수동으로 재시도하세요.',updated_at=? WHERE status='running'", (utcnow(),))
+                self._interrupt_agent_deliveries(db)
         # A disabled/missing engine creates no worker; restart after engine installation.
         try:
             ready, _, _ = self._readiness(self.config())
@@ -560,12 +630,16 @@ class SpeechHub:
         with self.store.connect() as db:
             db.execute("UPDATE voice SET status='transcription_failed' WHERE id IN (SELECT voice_id FROM speech_jobs WHERE status='running')")
             db.execute("UPDATE speech_jobs SET status='failed',error='서버가 재시작되어 전사가 중단되었습니다. 수동으로 재시도하세요.',updated_at=? WHERE status='running'", (utcnow(),))
-            for voice in db.execute("SELECT id,metadata FROM voice WHERE kind='audio'").fetchall():
-                metadata = json.loads(voice['metadata'] or '{}')
-                if metadata.get('agent_delivery') == 'pending':
-                    metadata['agent_delivery'] = 'interrupted'
-                    db.execute('UPDATE voice SET metadata=? WHERE id=?', (json.dumps(metadata), voice['id']))
+            self._interrupt_agent_deliveries(db)
         self.task = asyncio.create_task(self._loop())
+
+    @staticmethod
+    def _interrupt_agent_deliveries(db):
+        for voice in db.execute("SELECT id,metadata FROM voice WHERE kind='audio'").fetchall():
+            metadata = json.loads(voice['metadata'] or '{}')
+            if metadata.get('agent_delivery') == 'pending':
+                metadata['agent_delivery'] = 'interrupted'
+                db.execute('UPDATE voice SET metadata=? WHERE id=?', (json.dumps(metadata), voice['id']))
 
     async def close(self):
         if self.active_cancel:
@@ -606,6 +680,12 @@ class SpeechHub:
             source = self.data / 'audio' / Path(row['filename']).name
             report = None
             cfg = self.config()
+            if self.profile.pc_free:
+                if row.get('stt_backend') != 'openai':
+                    raise TranscriptionError('기존 PC/로컬 전사 요청은 Odyssey OpenAI 모드에서 실행하지 않습니다. 새 음성 요청을 제출하세요.')
+                ready, reason, _ = self._readiness(cfg)
+                if not ready:
+                    raise TranscriptionError(reason)
             runner = self.remote_runner if cfg.backend == 'remote_http' and not self.runner_override else self.runner
             if row.get('stt_backend') == 'openai' and self.cloud_transcriber is not None:
                 text, duration = await self.cloud_transcriber(jid, vid, source, cfg, self.active_cancel)
@@ -622,7 +702,7 @@ class SpeechHub:
             with self.store.connect() as db:
                 if db.execute("UPDATE speech_jobs SET status='succeeded',duration=?,elapsed=?,updated_at=? WHERE id=? AND status='running'", (duration,time.monotonic()-start,utcnow(),jid)).rowcount:
                     db.execute("UPDATE voice SET text=?,status='pending_review' WHERE id=?", (text,vid))
-                    if self.agent_options is not None and self.agent_options().get('agent_enabled'):
+                    if self.profile.pc_free or (self.agent_options is not None and self.agent_options().get('agent_enabled')):
                         voice = db.execute('SELECT metadata FROM voice WHERE id=?', (vid,)).fetchone()
                         metadata = json.loads(voice['metadata'] or '{}')
                         metadata['agent_delivery'] = 'pending'
@@ -670,7 +750,9 @@ class SpeechHub:
             if asyncio.current_task().cancelling():
                 raise
         except Exception as exc:
-            message = str(exc) if isinstance(exc, TranscriptionError) else '전사 실행 오류입니다. 설치 상태와 음성 파일을 확인하세요.'
+            message = (str(exc) if isinstance(exc, TranscriptionError) else
+                       'OpenAI 전사 요청을 완료하지 못했습니다. Odyssey의 API 키·예산·네트워크 상태를 확인하세요. PC/로컬 Whisper로 대체하지 않습니다.'
+                       if self.profile.pc_free else '전사 실행 오류입니다. 설치 상태와 음성 파일을 확인하세요.')
             with self.store.connect() as db:
                 if db.execute("UPDATE speech_jobs SET status='failed',error=?,elapsed=?,updated_at=? WHERE id=? AND status='running'", (message,time.monotonic()-start,utcnow(),jid)).rowcount:
                     db.execute("UPDATE voice SET status='transcription_failed' WHERE id=?", (vid,))

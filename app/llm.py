@@ -24,6 +24,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .store import uid, utcnow
+from .ai_profile import AIProfile
 from .assistant import AssistantEngine, detect, payload as assistant_payload, dump as adump, Confirmation, PROTOCOL
 
 from .clock_service import clock_context, aware
@@ -222,8 +223,9 @@ class ChatBackend:
 
 
 class LLMHub:
-    def __init__(self, store, changed, *, speech=None, backend=None):
+    def __init__(self, store, changed, *, speech=None, backend=None, profile=None):
         self.store, self.changed, self.speech = store, changed, speech
+        self.profile = profile or AIProfile.from_env()
         self.backend = backend or ChatBackend()
         self.wake=asyncio.Event(); self.worker=None; self.active_id=None; self.call=None
         self.start_lock=asyncio.Lock(); self.probe_lock=asyncio.Lock(); self.last_probe=None
@@ -254,11 +256,27 @@ class LLMHub:
 
     def config(self): return LLMConfig.model_validate(self.store.get('llm_config'))
 
+    def _require_legacy(self):
+        if self.profile.pc_free:
+            raise HTTPException(409, 'Odyssey OpenAI 모드에서는 기존 PC/로컬 LLM 경로를 사용하지 않습니다. Personal Agent에서 새 요청을 제출하세요.')
+
     def status(self):
-        cfg = self.config()
+        config_valid = True
+        try:
+            cfg = self.config()
+        except (ValueError, TypeError):
+            if not self.profile.pc_free:
+                raise
+            # A retired configuration cannot make the new runtime unavailable.
+            # Do not expose unchecked DB values or overwrite the saved settings.
+            cfg = LLMConfig()
+            config_valid = False
         with self.store.connect() as db:
             counts=dict(db.execute('SELECT status,COUNT(*) FROM llm_requests GROUP BY status').fetchall())
         return {'config':cfg.model_dump(),'counts':counts,'last_probe':self.last_probe,
+                **self.profile.public(),'legacy_backend_allowed':not self.profile.pc_free,
+                'legacy_config_valid':config_valid,'pc_required':False if self.profile.pc_free else None,
+                'effective_enabled':False if self.profile.pc_free else cfg.enabled,
                 'active_id':self.active_id,'auto_execute':False,'streaming':False,
                 'assistant_protocol':PROTOCOL,'capability_catalog':capability_manifest(),
                 'clock':clock_context(utcnow(),self.store.get('settings')['timezone']),
@@ -272,6 +290,7 @@ class LLMHub:
         await self.changed(event,detail)
 
     async def configure(self, cfg):
+        self._require_legacy()
         with self.store.connect() as db:
             active=db.execute("SELECT count(*) FROM llm_requests WHERE status IN ('queued','running')").fetchone()[0]
         if active: raise HTTPException(409, '대기·실행 중인 LLM 요청을 완료하거나 취소한 뒤 설정을 변경하세요.')
@@ -281,6 +300,10 @@ class LLMHub:
         return self.status()
 
     async def probe(self):
+        if self.profile.pc_free:
+            return {'ok':False,'reachable':None,'checked_at':utcnow(),'state':'disabled',
+                    'models':[],'network_checked':False,
+                    'message':'Odyssey OpenAI 모드에서 PC/로컬 LLM 연결은 사용하지 않습니다. Personal Agent 준비 상태를 확인하세요.'}
         if self.probe_lock.locked(): raise HTTPException(409, '연결 확인이 진행 중입니다.')
         async with self.probe_lock: self.last_probe=await self.backend.probe(self.config())
         return self.last_probe
@@ -343,6 +366,7 @@ class LLMHub:
         return self.get(row['id']) | {'duplicate':True}
 
     async def submit(self, req, *, dialog_owner=None):
+        self._require_legacy()
         sig=sha(encoded({'voice_id':req.voice_id,'text_hash':req.expected_text_sha256,**({'mode':req.mode} if req.mode!='legacy' else {})}))
         duplicate=self._duplicate(req.request_id,sig)
         if duplicate:return duplicate
@@ -367,6 +391,7 @@ class LLMHub:
         return await self.submit(req)
 
     async def retry(self,rid,req):
+        self._require_legacy()
         prev=self.get(rid)
         if ((prev.get('assistant') or {}).get('dialog_state') or {}).get('proof', {}).get('steps'):
             raise HTTPException(409, '대화 답변만 새 명령으로 재전송하지 않습니다. 최신 대화를 잇거나 전체 요청을 새로 입력하세요.')
@@ -379,6 +404,7 @@ class LLMHub:
         return await self._insert(req.request_id,sig,prev['voice_id'],prev['source_voice_id'],prev['source_text'],prev['source_meta'],rid,mode=mode)
 
     async def _insert(self,key,sig,voice_id,source_id,text,meta,parent=None,mode='legacy',dialog_owner=None):
+        self._require_legacy()
         async with self.start_lock:
             duplicate=self._duplicate(key,sig)
             if duplicate:return duplicate
@@ -422,6 +448,7 @@ class LLMHub:
         return self.get(rid)|{'duplicate':False}
 
     async def run_prepared(self,rid):
+        self._require_legacy()
         async with self.start_lock:
             d=self.get(rid);cfg=self.config()
             if d['status'] in ACTIVE:return d
@@ -468,12 +495,16 @@ class LLMHub:
 
     async def start(self):
         # Never resend jobs that may have been consumed by a backend before a restart.
+        message = ('Odyssey OpenAI 모드에서 기존 PC/로컬 LLM 요청을 중단했습니다. 자동 재전송하지 않습니다.'
+                   if self.profile.pc_free else '서버가 재시작되어 요청을 중단했습니다. 자동으로 다시 보내지 않습니다.')
+        code = 'legacy_backend_disabled' if self.profile.pc_free else 'server_restarted'
         with self.store.connect() as db:
-            db.execute("UPDATE llm_requests SET status='interrupted',error=?,error_code='server_restarted',updated_at=?,finished_at=? WHERE status IN ('queued','running')",
-                       ('서버가 재시작되어 요청을 중단했습니다. 자동으로 다시 보내지 않습니다.',utcnow(),utcnow()))
+            db.execute("UPDATE llm_requests SET status='interrupted',error=?,error_code=?,updated_at=?,finished_at=? WHERE status IN ('queued','running')",
+                       (message,code,utcnow(),utcnow()))
         self._ensure_worker()
 
     def _ensure_worker(self):
+        if self.profile.pc_free:return
         if self.worker and not self.worker.done():return
         self.wake=asyncio.Event()
         self.worker=asyncio.create_task(self._loop())
@@ -503,6 +534,9 @@ class LLMHub:
             await self._execute(row['id'])
 
     async def _execute(self,rid):
+        if self.profile.pc_free:
+            self._retire_queued(rid)
+            return
         d=self.get(rid)
         if d['status']!='queued':return
         if d.get('assistant') is not None:
@@ -563,6 +597,11 @@ class LLMHub:
         await self.notify('llm.finished',rid)
 
 
+    def _retire_queued(self, rid):
+        with self.store.connect() as db:
+            db.execute("UPDATE llm_requests SET status='interrupted',error=?,error_code='legacy_backend_disabled',updated_at=?,finished_at=? WHERE id=? AND status IN ('queued','running')",
+                       ('Odyssey OpenAI 모드에서 기존 PC/로컬 LLM 요청을 중단했습니다. 자동 재전송하지 않습니다.',utcnow(),utcnow(),rid))
+
     async def confirm_action(self,rid,body):
         record=self.assistant.get(rid) or {}
         result=(await self.widget_bridge.confirm(rid,body.preview_sha256)
@@ -621,6 +660,9 @@ class LLMHub:
                            (utcnow(),utcnow(),rid))
 
     async def _execute_assistant(self,rid,d):
+        if self.profile.pc_free:
+            self._retire_queued(rid)
+            return
         record=d['assistant'];saved=LLMConfig.model_validate(d['config_json'])
         if sha(d['request_body'])!=d['request_sha256']:
             with self.store.connect() as db:db.execute("UPDATE llm_requests SET status='failed',error='요청 무결성 오류',updated_at=? WHERE id=?",(utcnow(),rid))

@@ -13,6 +13,8 @@ python scripts/build_previews.py
 
 운영 서버를 테스트 대상으로 쓰지 않습니다. 테스트는 임시 DB와 합성 입력을 사용합니다. `app.main`의 모듈 import는 기본 앱의 데이터 폴더를 생성할 수 있으므로, 빈 소스 작업 복사본에서 실행하거나 `HUB_DATA_DIR`을 테스트 전용 경로로 설정하세요. CI는 `artifacts/runtime-data`를 사용하며 이 폴더는 소스·검증 artifact에 포함하지 않습니다.
 
+전체 호환성 회귀의 기본 환경은 `HUB_AI_PROFILE=legacy`입니다. Odyssey 검사는 fixture 안에서 `odyssey_openai`를 명시하고 종료 후 복원합니다. 운영 서비스의 프로필·키·데이터 경로를 테스트 셸에 그대로 가져오지 마세요.
+
 Windows에서는 UTF-8 텍스트 처리를 위해 필요하면 `$env:PYTHONUTF8='1'`을 지정합니다. CI에는 이 환경 변수가 설정되어 있습니다.
 
 ## 검사별 명령
@@ -113,3 +115,17 @@ python scripts/agent_speech_browser.py
 Node 검사는 브라우저 없이 실행하며 production JS + 합성 DOM/API/timer를 사용합니다. 별도 npm 설치는 필요하지 않습니다. Chromium 검사는 같은 JS의 렌더링을 `set_content` fixture로 확인합니다. 어느 검사도 마이크·OpenAI·실제 LAN을 사용하지 않습니다. 브라우저 실행이 환경 권한으로 막히면 통과로 기록하지 말고 CI나 허용된 검증 환경에서 별도로 실행합니다.
 
 CI는 provider 키와 live-test 허용값을 비워 둡니다. 저장소에 별도 유료 opt-in 검사가 존재하더라도 표준 회귀에서는 실행하지 않습니다. 실제 호출은 비용·데이터 전송 동의와 별도 테스트 한도가 필요한 다른 검증 단계입니다.
+
+## Odyssey PC 분리 회귀
+
+위의 격리된 환경에서 실행합니다. 테스트 내부의 합성 키·음성·provider transport만 사용하며 실제 OpenAI·PC·SSH에 연결하지 않습니다.
+
+```bash
+python -m pytest -q tests/test_odyssey_agent.py tests/test_odyssey_backend.py tests/test_odyssey_ai_runtime.py --junitxml=artifacts/test-results/odyssey.xml
+node scripts/odyssey_ui_regression.js
+python scripts/runtime_browser.py
+```
+
+PC 설정이 켜진 채 남아 있어도 업로드·전사·에이전트 결과가 클라우드 전용 경로를 유지하는지, 비활성 정책·키 누락·예산 초과·공급자 실패가 PC 폴백을 일으키지 않는지 확인합니다. 이전 대기 작업의 무단 클라우드 전환, 전사 도중 에이전트 비활성화 후 명령 실행, 중복 과금도 검사합니다. 상태 조회·진단은 로컬 준비 조건만 확인하며 실제 공급자 성공을 주장하지 않습니다.
+
+Node 검사는 LLM 탭을 열기 전 음성 전달, 읽기 전용 과거 이력, 새 요청의 Personal Agent 경로와 상태 문구를 검사합니다. Chromium 검사는 PC-free 진단의 표시·문자열 이스케이프·반응형 폭을 합성 fixture에서 확인합니다. 실제 Odyssey 배포와 PC 전원 종료 후 iPad 검증은 [운영 안내](ODYSSEY_OPENAI.md)의 별도 단계입니다.
