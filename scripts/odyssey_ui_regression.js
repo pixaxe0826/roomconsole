@@ -46,7 +46,7 @@ function harness(profile='odyssey_openai'){
   querySelector:selector=>body.querySelector(selector),querySelectorAll:selector=>body.querySelectorAll(selector),
   getElementById:id=>elements.find(e=>e.id===id&&e.isConnected)||null,addEventListener:(name,fn)=>events[name]=fn};
  const history={id:'retired-request',status:'prepared',created_at:'2026-01-01T00:00:00Z',source_text:'합성 전사',source_preview:'합성 전사',config_json:{model:'retired-model'},source_meta:{source:'synthetic'},request_payload:{messages:[]},endpoint:'http://127.0.0.1:8179/v1/chat/completions',metrics:{},response_json:null};
- const env={profile,configFailure:false,agentStatusFailure:false,history:false,cloud_status:'ready',state:null};
+ const env={profile,configFailure:false,agentStatusFailure:false,history:false,cloud_status:'ready',state:null,policy:null,policyError:null};
  const response=(data,status=200)=>({ok:status<400,status,json:async()=>JSON.parse(JSON.stringify(data))});
  const context={console,Date,Math,JSON,Intl,Map,Set,Promise,Error,AbortController,URLSearchParams,Blob,FormData,URL,
   crypto:{randomUUID:()=>`synthetic-${++serial}`},document,
@@ -58,8 +58,12 @@ function harness(profile='odyssey_openai'){
    if(url==='/api/llm/config')return response({runtime_profile:env.profile,config:{enabled:true,base_url:'http://127.0.0.1:8179',model:'retired-model'}},env.configFailure?503:200);
    if(url.startsWith('/api/llm/requests?'))return response({items:env.history?[history]:[],total:env.history?1:0});
    if(url==='/api/llm/requests/retired-request')return response(history);
-   if(url==='/api/agent/status')return response({runtime_profile:env.profile,cloud_status:env.cloud_status,agent_enabled:true,cloud_enabled:true,audio_cloud_enabled:true,adapters:['todo','alarm'],tiers:{tier1_stt:'synthetic-transcribe',tier2_fast:'synthetic-fast (reasoning_effort=high)',tier3_deep:'synthetic-deep (reasoning_effort=high)'},budget:{}},env.agentStatusFailure?503:200);
+   if(url==='/api/agent/status')return response({runtime_profile:env.profile,cloud_status:env.cloud_status,agent_enabled:env.policy?.agent_enabled??true,cloud_enabled:env.policy?.cloud_enabled??true,audio_cloud_enabled:env.policy?.audio_cloud_enabled??true,adapters:['todo','alarm'],tiers:{tier1_stt:'synthetic-transcribe',tier2_fast:'synthetic-fast (reasoning_effort=high)',tier3_deep:'synthetic-deep (reasoning_effort=high)'},budget:{monthly_cap_usd:env.policy?.monthly_cap_usd??100}},env.agentStatusFailure?503:200);
    if(url.startsWith('/api/agent/runs?'))return response({items:[]});
+   if(method==='PUT'&&url==='/api/agent/budget/policy'){
+    if(env.policyError)return response(env.policyError.body,env.policyError.status);
+    env.policy=payload;return response({policy:payload,budget:{monthly_cap_usd:payload.monthly_cap_usd}});
+   }
    if(method==='POST'&&url==='/api/agent/command')return response({id:'agent-run',status:'succeeded'});
    if(method==='POST'&&url==='/api/llm/requests')return response(history);
    if(url==='/healthz')return response({status:'ok'});
@@ -102,6 +106,22 @@ async function main(){
  mounted.env.agentStatusFailure=false;mounted.env.cloud_status='budget_hard_cap_reached';await mounted.context.RoomLLM.refresh();
  check('Budget state distinguishes cloud block from absent PC',mounted.node('agentStatusBadge').textContent.includes('예산 한도')&&mounted.node('agentRuntimeNotice').textContent.includes('fallback은 차단'));
  check('Cloud catalog uses actual agent adapters and configured model names',mounted.node('assistantCatalog').innerHTML.includes('alarm')&&!mounted.node('assistantCatalog').innerHTML.includes('미연결')&&mounted.node('agentModelSettings').textContent.includes('synthetic-fast'));
+
+ const policyButton=mounted.query('[data-llm="agent-save-policy"]');
+ mounted.node('agentEnabledToggle').checked=true;
+ mounted.node('agentCloudToggle').checked=true;
+ mounted.node('agentAudioCloudToggle').checked=true;
+ mounted.node('agentMonthlyCap').value='42.5';
+ await mounted.root.listeners.click({target:policyButton});await settle();
+ const policyWrites=mounted.calls.filter(c=>c.url==='/api/agent/budget/policy');
+ check('Policy submits exactly one JSON PUT with all three opt-ins and a numeric USD cap',policyWrites.length===1&&policyWrites[0].method==='PUT'&&policyWrites[0].payload.monthly_cap_usd===42.5&&['agent_enabled','cloud_enabled','audio_cloud_enabled'].every(k=>policyWrites[0].payload[k]===true));
+ check('Successful policy save shows confirmation and retains saved monthly cap',mounted.node('agentPolicyFeedback').textContent.includes('저장했습니다')&&mounted.node('agentMonthlyCap').value==='42.5');
+ mounted.env.policyError={status:422,body:{detail:[{loc:['query','request'],msg:'Field required'}]}};
+ await mounted.root.listeners.click({target:policyButton});await settle();
+ check('Policy reports field-specific 422 instead of generic permissions',mounted.notices.some(s=>s.includes('request: Field required'))&&mounted.node('agentPolicyFeedback').textContent.includes('request: Field required'));
+ mounted.env.policyError={status:401,body:{}};
+ await mounted.root.listeners.click({target:policyButton});await settle();
+ check('Policy reports explicit sign-in need on 401',mounted.node('agentPolicyFeedback').textContent.includes('관리자 로그인이 필요합니다'));
 
  const runtime=harness();for(const id of ['architecture','probe','scopeNote','speech','llm','core','message']){const n=new runtime.Element();n.id=id;runtime.root.append(n);}
  runtime.env.state={runtime_profile:'odyssey_openai',speech:{enabled:true,state:'configured',backend:'openai',configured_model:'<img src=x onerror=BAD()>',preprocessing:'Odyssey FFmpeg',identity_note:'local configuration only'},llm:{enabled:true,state:'configured',backend:'openai',configured_model:'synthetic-fast',configured_deep_model:'synthetic-deep',reasoning_effort:'high',identity_note:'local configuration only'}};

@@ -82,6 +82,7 @@ jobs:
           tests/test_odyssey_backend.py
           tests/test_odyssey_agent.py
           tests/test_odyssey_ai_runtime.py
+          tests/test_agent_policy_routes.py
           tests/test_backend.py
           tests/test_display_completion.py
           tests/test_all_tasks.py
@@ -171,6 +172,8 @@ jobs:
         run: node scripts/agent_speech_transport_regression.js
       - name: Odyssey PC-free routing and diagnostics (mocked transport)
         run: node scripts/odyssey_ui_regression.js
+      - name: Personal Agent policy form (Chromium, mocked admin API)
+        run: python scripts/agent_policy_browser.py
       - name: Speech and agent lifecycle (Chromium, mocked transport)
         run: python scripts/agent_speech_browser.py
       - run: python scripts/benchmark_fast_reads.py --iterations 30
