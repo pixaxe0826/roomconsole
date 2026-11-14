@@ -9,3 +9,20 @@
 /* Assistant action preview: no changes until explicit admin confirmation. */
 .assistant-mode-bar{display:flex;gap:24px;align-items:center;margin:16px 0;padding:18px;background:var(--surface);border:1px solid var(--line);border-radius:14px}.assistant-mode-bar label{min-width:270px}.assistant-mode-bar p{font-size:12px;line-height:1.8;color:var(--muted);max-width:640px}.assistant-confirm-box{margin-top:20px;padding:20px;background:var(--accent-soft);border:1px solid #c3d8cb;border-radius:14px}.assistant-confirm-box>strong{font-size:17px}.assistant-confirm-box p{margin:10px 0;font-size:12px;line-height:1.8}.assistant-targets{max-height:220px;overflow:auto;padding-left:20px;margin:12px 0}.assistant-targets li{font-size:13px;line-height:1.9}.assistant-targets small{margin-left:12px;color:var(--muted)}.assistant-warning{color:#955826}.llm-awaiting_confirmation{background:#fff2d7;color:#876222}.llm-needs_clarification{background:#eef0f6;color:#54667f}.voice-mode-label{margin:0 0 10px;max-width:400px}.assistant-panel pre{white-space:pre-wrap;overflow-wrap:anywhere}.assistant-panel .llm-facts{margin-top:14px}
 @media(max-width:700px){.assistant-mode-bar{display:block}.assistant-mode-bar p{margin-top:12px}.assistant-confirm-box{padding:14px}}
+
+/* AI model IDs and policy badges can be longer than a phone's panel content.
+   Let the actual flex/grid children shrink and wrap; never clip page overflow. */
+.llm-connection-main,.llm-connection-main>div,.llm-connection-tools,
+.personal-agent-panel>.panel-head>div{min-width:0}
+.llm-connection-tools>.badge,.llm-connection-tools>.btn{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.llm-connection-tools>[hidden]{display:none}
+.personal-agent-panel .field-help,.personal-agent-panel .panel-head p{overflow-wrap:anywhere}
+.personal-agent-panel .llm-filters>*,.assistant-mode-bar select{min-width:0;max-width:100%}
+.personal-agent-panel .llm-checks label{max-width:100%;overflow-wrap:anywhere}
+.personal-agent-panel .llm-checks input[type=checkbox]{flex-shrink:0}
+@media(max-width:700px){
+ .personal-agent-panel>.panel-head{flex-direction:column;align-items:stretch}
+ .personal-agent-panel>.panel-head>.llm-connection-tools{justify-content:flex-start}
+ .llm-connection-tools{max-width:100%}
+ .assistant-mode-bar label{min-width:0;max-width:100%}
+}

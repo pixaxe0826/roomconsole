@@ -13,6 +13,8 @@ python scripts/build_previews.py
 
 운영 서버를 테스트 대상으로 쓰지 않습니다. 테스트는 임시 DB와 합성 입력을 사용합니다. `app.main`의 모듈 import는 기본 앱의 데이터 폴더를 생성할 수 있으므로, 빈 소스 작업 복사본에서 실행하거나 `HUB_DATA_DIR`을 테스트 전용 경로로 설정하세요. CI는 `artifacts/runtime-data`를 사용하며 이 폴더는 소스·검증 artifact에 포함하지 않습니다.
 
+전체 호환성 회귀의 기본 환경은 `HUB_AI_PROFILE=legacy`입니다. Odyssey 검사는 fixture 안에서 `odyssey_openai`를 명시하고 종료 후 복원합니다. 운영 서비스의 프로필·키·데이터 경로를 테스트 셸에 그대로 가져오지 마세요.
+
 Windows에서는 UTF-8 텍스트 처리를 위해 필요하면 `$env:PYTHONUTF8='1'`을 지정합니다. CI에는 이 환경 변수가 설정되어 있습니다.
 
 ## 검사별 명령
@@ -55,8 +57,8 @@ JUnit·디버그 로그는 커질 수 있고 요청 내용 등을 포함할 수 
 
 `.github/workflows/ci.yml`에는 다음 작업을 정의했습니다.
 
-- Ubuntu Python 3.11/3.13, Windows Python 3.12에서 서버·패키징 테스트와 HTTP 스모크.
-- Ubuntu Chromium에서 UI·완료 통신 모의·65초 미리보기 회귀.
+- Ubuntu Python 3.11/3.13/3.14, Windows Python 3.12에서 서버·패키징 테스트와 HTTP 스모크. Windows portable 목록에도 Personal Agent·권한·예산·입력·음성 회귀를 포함합니다.
+- Ubuntu Chromium에서 UI·완료 통신 모의·65초 미리보기 회귀 및 음성 → 에이전트 lifecycle 모의 검사. Node VM 검사는 같은 production JavaScript의 GET-only 재연결·상태 전환을 별도로 검사합니다.
 - Docker Compose 설정 검사, 이미지 빌드, 비루트 프로세스·health endpoint 검사.
 
 `.github/workflows/source-archive.yml`은 수동 실행으로 소스 ZIP과 체크섬을 생성합니다. 배포·Release 생성·원격 서버 변경은 하지 않습니다. 최초 업로드 후 실제 Actions 실행 결과를 확인해야 합니다.
@@ -97,3 +99,33 @@ python scripts/llm_widget_live.py
 마지막 검사는 이 환경에서 직접 Chromium 루프백 탐색이 차단되어 명시적 HTTP 브리지를
 사용합니다. 실제 HTTP/API/SQLite + 모의 LLM, 브라우저 WS 이벤트 주입이며 물리 LAN 검사가 아닙니다.
 [현재 통합 검증](TEST_REPORT.md)
+
+## OpenAI Personal Agent 오프라인 회귀
+
+별도 테스트 환경과 합성 입력만 사용합니다. 아래 명령은 실행 절차이며 실기기·유료 API·운영 배포를 검증했다는 기록이 아닙니다. 일반 회귀에서는 `OPENAI_API_KEY`, `HUB_OPENAI_API_KEY`를 전달하지 않고, `HUB_PERSONAL_AGENT_ENABLED`, `HUB_OPENAI_ENABLED`, `HUB_OPENAI_AUDIO_ENABLED`를 `false`로 둡니다. `HUB_RUN_LIVE_OPENAI_TESTS=1`을 설정하지 않습니다. 테스트 내부에서 필요한 정책과 응답만 모의로 설정합니다.
+
+```bash
+python -m pytest -q tests/test_personal_agent.py tests/test_agent_adapter_safety.py tests/test_agent_budget_safety.py tests/test_agent_grounding_safety.py tests/test_agent_ingress.py tests/test_agent_speech_safety.py tests/test_agent_visibility.py --junitxml=artifacts/test-results/personal-agent.xml
+node scripts/agent_speech_transport_regression.js
+python scripts/agent_speech_browser.py
+```
+
+검증 범위는 동일 요청의 동시 실행·재시작·오디오 중복 방지, 사용량 누락/오류/취소의 미정 비용 유지, 정확한 대상 그라운딩, 관리자 승인·UoW 롤백, 알람 회차 ID/version 고정, 공유 메모 변경 후 표시 재검사와 소유자별 음성 결과입니다. 이벤트 루프와 `asyncio.to_thread`는 실제 비동기 동작을 유지합니다.
+
+Node 검사는 브라우저 없이 실행하며 production JS + 합성 DOM/API/timer를 사용합니다. 별도 npm 설치는 필요하지 않습니다. Chromium 검사는 같은 JS의 렌더링을 `set_content` fixture로 확인합니다. 어느 검사도 마이크·OpenAI·실제 LAN을 사용하지 않습니다. 브라우저 실행이 환경 권한으로 막히면 통과로 기록하지 말고 CI나 허용된 검증 환경에서 별도로 실행합니다.
+
+CI는 provider 키와 live-test 허용값을 비워 둡니다. 저장소에 별도 유료 opt-in 검사가 존재하더라도 표준 회귀에서는 실행하지 않습니다. 실제 호출은 비용·데이터 전송 동의와 별도 테스트 한도가 필요한 다른 검증 단계입니다.
+
+## Odyssey PC 분리 회귀
+
+위의 격리된 환경에서 실행합니다. 테스트 내부의 합성 키·음성·provider transport만 사용하며 실제 OpenAI·PC·SSH에 연결하지 않습니다.
+
+```bash
+python -m pytest -q tests/test_odyssey_agent.py tests/test_odyssey_backend.py tests/test_odyssey_ai_runtime.py --junitxml=artifacts/test-results/odyssey.xml
+node scripts/odyssey_ui_regression.js
+python scripts/runtime_browser.py
+```
+
+PC 설정이 켜진 채 남아 있어도 업로드·전사·에이전트 결과가 클라우드 전용 경로를 유지하는지, 비활성 정책·키 누락·예산 초과·공급자 실패가 PC 폴백을 일으키지 않는지 확인합니다. 이전 대기 작업의 무단 클라우드 전환, 전사 도중 에이전트 비활성화 후 명령 실행, 중복 과금도 검사합니다. 상태 조회·진단은 로컬 준비 조건만 확인하며 실제 공급자 성공을 주장하지 않습니다.
+
+Node 검사는 LLM 탭을 열기 전 음성 전달, 읽기 전용 과거 이력, 새 요청의 Personal Agent 경로와 상태 문구를 검사합니다. Chromium 검사는 PC-free 진단의 표시·문자열 이스케이프·반응형 폭을 합성 fixture에서 확인합니다. 실제 Odyssey 배포와 PC 전원 종료 후 iPad 검증은 [운영 안내](ODYSSEY_OPENAI.md)의 별도 단계입니다.

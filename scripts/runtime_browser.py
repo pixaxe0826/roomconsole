@@ -32,20 +32,21 @@ def run():
              'llm': {'enabled': True, 'state': 'unknown', 'configured_model': 'synthetic-1.7B',
              'reported_models': [], 'reported_device': None, 'model_list_match': False}}
     calls = []; errors = []
+    speech_status = {'backend': 'remote_http', 'model': 'medium', 'language': 'ko',
+                     'threads': None, 'max_seconds': 30}
 
     def api(path, method):
         calls.append((method, path))
         if path == '/healthz':
             return {'status': 200, 'data': {'status': 'ok'}}
         if path in ('/api/ai/status', '/api/ai/probe'):
-            if method == 'POST':
+            if method == 'POST' and state.get('runtime_profile') != 'odyssey_openai':
                 state['speech'].update(state='online', last_probe={'checked_at': '2026-01-02T03:04:05Z'})
                 state['llm'].update(state='online', model_list_match=True,
                                     reported_models=['<img src=x onerror="window.BAD=true">'])
             return {'status': 200, 'data': copy.deepcopy(state)}
         if path == '/api/speech/status':
-            return {'status': 200, 'data': {'backend': 'remote_http', 'model': 'medium', 'language': 'ko',
-                                           'threads': None, 'max_seconds': 30}}
+            return {'status': 200, 'data': copy.deepcopy(speech_status)}
         return {'status': 404, 'data': {}}
 
     # The actual manager document declares UTF-8. Mirror that in the reduced
@@ -105,6 +106,33 @@ def run():
             shots=ROOT/'artifacts/screenshots'; shots.mkdir(parents=True,exist_ok=True)
             page.screenshot(path=str(shots/'runtime-m340.png'), full_page=True)
             page.close()
+            state.clear()
+            state.update(runtime_profile='odyssey_openai', speech={
+                'backend': 'openai', 'enabled': True, 'state': 'configured',
+                'configured_model': '<img src=x onerror="window.BAD=true">',
+                'preprocessing': 'Odyssey FFmpeg', 'provider_verified': False,
+                'identity_note': '서버 설정 확인 · 실제 추론 미검증'}, llm={
+                'backend': 'openai', 'enabled': True, 'state': 'configured',
+                'configured_model': 'synthetic-fast', 'configured_deep_model': 'synthetic-deep',
+                'reasoning_effort': 'high', 'provider_verified': False,
+                'identity_note': '서버 설정 확인 · 실제 추론 미검증'})
+            page = open_page()
+            expect(page.locator('#speech')).to_contain_text('실제 API 호출 미검증')
+            check('Odyssey describes orchestration without a PC or SSH requirement', 'Odyssey' in page.locator('#architecture').inner_text() and '없음' in page.locator('#speech').inner_text())
+            check('Odyssey model value remains text only', page.locator('#speech img').count()==0 and not page.evaluate('!!window.BAD'))
+            check('Odyssey configuration polling has no new probe', sum(m=='POST' for m,_ in calls)==1)
+            page.locator('#probe').click()
+            expect(page.locator('#message')).to_contain_text('유료 추론은 실행하지 않았습니다')
+            check('Odyssey explicit refresh does not claim provider success', '실제 API 호출 미검증' in page.locator('#llm').inner_text() and sum(m=='POST' for m,_ in calls)==2)
+            state['speech']['state']='api_key_missing'; state['llm']['state']='budget_exhausted'
+            expect(page.locator('#speech')).to_contain_text('API 키 미설정', timeout=8000)
+            expect(page.locator('#llm')).to_contain_text('예산 한도')
+            check('Odyssey missing key and exhausted budget are not PC-offline claims', sum(m=='POST' for m,_ in calls)==2)
+            for width,height in [(1024,900), (390,844)]:
+                page.set_viewport_size({'width':width,'height':height})
+                check(f'Odyssey no horizontal overflow {width}', not page.evaluate('document.documentElement.scrollWidth>innerWidth'))
+            page.screenshot(path=str(shots/'runtime-odyssey-openai.png'), full_page=True)
+            page.close()
             # Separate document: no interval/CSP left over from the diagnostics page.
             page = open_page(summary_only=True)
             expect(page.locator('.speech-engine span')).to_contain_text('원격')
@@ -113,6 +141,12 @@ def run():
             before=sum(path=='/api/speech/status' for _,path in calls)
             page.wait_for_timeout(200)
             check('observer does not create a fetch loop', sum(path=='/api/speech/status' for _,path in calls)==before==1)
+            page.close()
+            speech_status.update(backend='openai', runtime_profile='odyssey_openai', model='synthetic-transcribe')
+            page = open_page(summary_only=True)
+            expect(page.locator('.speech-engine span')).to_contain_text('OpenAI')
+            check('OpenAI summary removes legacy CPU/install claims', 'CPU' not in page.locator('.speech-engine').inner_text() and '실제 호출 별도 확인' in page.locator('.speech-engine').inner_text())
+            check('OpenAI summary still has one diagnostics link', page.locator('[data-runtime-link]').count()==1)
             check('no uncaught browser errors', not errors)
         finally:
             browser.close()

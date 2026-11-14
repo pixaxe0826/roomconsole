@@ -26,7 +26,7 @@ function render(box,d){
  const x=d.dialog;
  if(!x){panel.hidden=true;box.append(panel);return}
  panel.className='panel';panel.dataset.dialogPanel='';panel._snapshot=d;
- const pending=x.phase==='pending'&&d.status==='needs_clarification';
+ const pending=!window.RoomLLM?.isPCFree?.()&&x.phase==='pending'&&d.status==='needs_clarification';
  const localTime=new Date(x.expires_at*1000).toLocaleTimeString('ko-KR');
  panel.innerHTML=`<h3>빠진 정보 이어서 입력</h3><p>${E(x.intent)} · ${E(x.phase)} · 유효 시각 ${E(localTime)}</p>
  <p class="field-help">선택한 요청에만 연결됩니다. 한 값씩 채우며, 기존 관리자 확인 전에는 위젯 데이터를 변경하지 않습니다.</p>
@@ -45,7 +45,7 @@ function render(box,d){
   // A stale panel must not submit a reply or cancellation for a request
   // that is no longer selected, even before the observer removes it.
   const b=e.target.closest('[data-dialog-send],[data-dialog-cancel]');
-  if(!b||busy.has(d.id)||current()!==d.id)return;
+  if(!b||busy.has(d.id)||current()!==d.id||window.RoomLLM?.isPCFree?.())return;
   const text=b.hasAttribute('data-dialog-cancel')?'취소':(drafts.get(d.id)||'');
   const message=panel.querySelector('[data-dialog-message]');
   if(!text.trim()){message.textContent='요청한 값을 입력하세요.';return}
@@ -74,6 +74,7 @@ function discardOtherPanels(box,id){
 }
 async function update(){
  const box=root(),id=current();
+ if(window.RoomLLM?.isPCFree?.()){if(box)discardOtherPanels(box,null);clear();return;}
  if(!box||!id){if(box)discardOtherPanels(box,null);clear();return}
  discardOtherPanels(box,id);
  if(box.querySelector(`[data-dialog-observed="${CSS.escape(id)}"]`))return;

@@ -7,7 +7,7 @@ function enhance(){
  const host=document.querySelector('.llm-connection-tools');
  if(host&&!host.querySelector('[data-runtime-link]')){
   const a=document.createElement('a');a.href='/manager/runtime';a.className='btn small';
-  a.dataset.runtimeLink='1';a.textContent='AI 노드 진단';host.append(a);
+  a.dataset.runtimeLink='1';a.textContent='AI 처리 경로 진단';host.append(a);
  }
  const engine=document.querySelector('.speech-engine');
  if(!engine||engine.dataset.runtimeSummary||pending)return;
@@ -17,7 +17,11 @@ function enhance(){
  .then(s=>{
   if(!engine.isConnected)return;
   engine.dataset.runtimeSummary='1';
-  if(s.backend==='remote_http'){
+  if(s.backend==='openai'){
+   const span=engine.querySelector('span'),strong=engine.querySelector('strong');
+   if(span)span.textContent='OpenAI 전사 · 서버 FFmpeg 전처리 · PC/모델 설치 불필요 · 녹음 최대 '+s.max_seconds+'초';
+   if(strong)strong.textContent=s.model+' · '+s.language+' (설정값 · 실제 호출 별도 확인)';
+  }else if(s.backend==='remote_http'){
    const span=engine.querySelector('span'),strong=engine.querySelector('strong');
    if(span)span.textContent='원격 whisper.cpp · 장치/스레드 미확인 · 녹음 최대 '+s.max_seconds+'초';
    if(strong)strong.textContent=s.model+' · '+s.language+' (설정값)';

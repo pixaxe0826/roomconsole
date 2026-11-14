@@ -6,9 +6,10 @@
 |---|---|
 | [프로젝트 README](../README.md) | 기능·빠른 시작·범위 |
 | [현재 상태](CURRENT_STATUS.md) | 실기기 운영 기준, 구현/미구현 경계 |
+| [Odyssey 단독 OpenAI 운영](ODYSSEY_OPENAI.md) | PC 없이 직접 전사·플래너 호출, systemd 프로필, 기존 데이터 보존과 적용 검증 |
 | [설치](SETUP.md) | 일반 Python/Docker와 기존 데이터 유지 원칙 |
 | [V35/Termux](V35_TERMUX.md) | V35 상시 서버, runit, Tasker 부팅 자동화, 음성/HTTPS |\n| [V35 Git 업데이트](V35_GIT_UPDATE.md) | 기존 설치 Git 전환, main 동기화, 안전한 fast-forward·rollback |
-| [배포와 백업](DEPLOYMENT.md) | Windows/Docker/V35/TrueNAS 운영·백업 |
+| [배포와 백업](DEPLOYMENT.md) | Odyssey/Windows/Docker/V35/TrueNAS 운영·백업 |
 | [GitHub 업로드](GITHUB_PUBLISH.md) | 최초 push와 보안 점검 |
 | [구조](ARCHITECTURE.md) | 상태·데이터 모델·권한 경계 |
 | [API](API.md) | HTTP/표시/음성 API |
@@ -32,4 +33,4 @@
 [메모·알람](NOTES_ALARMS.md) · [업데이트와 롤백](UPDATE_017.md) · [검증 기록](TEST_REPORT_017.md)
 
 ## M3.4-0
-[원격 AI 런타임 · 설정 이관 · 상태 진단 · 롤백](RUNTIME_M340.md) · [검증 기록](TEST_REPORT_M340.md)
+[원격 AI 런타임 · 설정 이관 · 상태 진단 · 롤백](RUNTIME_M340.md) · [검증 기록](TEST_REPORT_M340.md) · [실내 온도·공기질 센서](INDOOR_TEMPERATURE.md) · [OpenAI 개인 에이전트](OPENAI_PERSONAL_AGENT.md)

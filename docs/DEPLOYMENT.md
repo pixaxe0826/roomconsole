@@ -6,9 +6,15 @@
 
 GitHub 저장소는 소스와 이력을 보관합니다. push해도 집의 Room Hub 서버가 자동 실행되지 않습니다. GitHub Pages는 Python API·SQLite·WebSocket을 대신할 수 없습니다.
 
-## V35 상시 운영 — 현재 실사용 구성
+## Odyssey 단독 운영 — OpenAI 프로필
 
-현재 프로젝트의 주 서버는 LG V35/Termux입니다. Room Hub는 `termux-services`의 `room-hub`, HTTPS는 `room-hub-https` 서비스로 관리할 수 있습니다. 자세한 설치·상태 확인·Tasker 부팅 자동화는 [V35/Termux](V35_TERMUX.md)에 있습니다.
+PC를 제거하고 Odyssey가 모든 요청·저장·승인을 담당하는 구성은 [Odyssey 단독 OpenAI 운영](ODYSSEY_OPENAI.md)을 사용합니다. `HUB_AI_PROFILE=odyssey_openai`는 기존 PC/Whisper/Qwen 연결과 폴백을 차단하며, OpenAI 전송은 기존 세 관리자 정책과 전용 API 키·예산으로 별도 허용합니다. 프로필 설정은 외부 전송 동의가 아닙니다.
+
+기존 systemd 서비스·실행 사용자·데이터 디렉터리·HTTPS를 유지합니다. Git 여부와 로컬 수정부터 확인하고, 정지 후 전체 운영 데이터와 소스를 백업합니다. PR 병합은 실제 서버 배포가 아니며, 이 문서는 운영 배포 성공 기록이 아닙니다.
+
+## V35 상시 운영 — 이전 구성과 대체 배포
+
+이전 V35/Termux 구성에서는 Room Hub를 `termux-services`의 `room-hub`, HTTPS를 `room-hub-https` 서비스로 관리합니다. 자세한 설치·상태 확인·Tasker 부팅 자동화는 [V35/Termux](V35_TERMUX.md)에 있습니다. 이 경로는 Odyssey의 systemd 업데이트 절차가 아닙니다.
 
 Windows PC는 서버가 아니라 필요할 때 `http://<V35-LAN-IP>:8088/manager`를 여는 관리자 단말로 사용할 수 있습니다.
 

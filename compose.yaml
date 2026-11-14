@@ -11,6 +11,20 @@ services:
       HUB_ADMIN_TOKEN: "${HUB_ADMIN_TOKEN:-}"
       HUB_INGEST_TOKEN: "${HUB_INGEST_TOKEN:-}"
       HUB_SECURE_COOKIE: "${HUB_SECURE_COOKIE:-false}"
+      HUB_AI_PROFILE: "${HUB_AI_PROFILE:-legacy}"
+      HUB_FFMPEG: "${HUB_FFMPEG:-}"
+      # Initial policy seeds only; existing DB policy is changed by the manager.
+      HUB_PERSONAL_AGENT_ENABLED: "${HUB_PERSONAL_AGENT_ENABLED:-false}"
+      HUB_OPENAI_ENABLED: "${HUB_OPENAI_ENABLED:-false}"
+      HUB_OPENAI_AUDIO_ENABLED: "${HUB_OPENAI_AUDIO_ENABLED:-false}"
+      HUB_OPENAI_ALLOW_SHARED_NOTES: "${HUB_OPENAI_ALLOW_SHARED_NOTES:-false}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      HUB_OPENAI_API_KEY: "${HUB_OPENAI_API_KEY:-}"
+      HUB_OPENAI_MONTHLY_CAP_USD: "${HUB_OPENAI_MONTHLY_CAP_USD:-100.00}"
+      HUB_OPENAI_FAST_MODEL: "${HUB_OPENAI_FAST_MODEL:-gpt-6.1-sol}"
+      HUB_OPENAI_DEEP_MODEL: "${HUB_OPENAI_DEEP_MODEL:-gpt-6.1-sol}"
+      HUB_OPENAI_REASONING_EFFORT: "${HUB_OPENAI_REASONING_EFFORT:-high}"
+      HUB_OPENAI_STT_MODEL: "${HUB_OPENAI_STT_MODEL:-gpt-4o-mini-transcribe}"
     volumes:
       - room-hub-data:/app/data
       - ./widgets:/app/widgets:ro

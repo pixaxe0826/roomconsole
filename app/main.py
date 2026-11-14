@@ -23,15 +23,20 @@ from .recurrence import occurrences
 from .widgets import discover
 from .weather import fetch_weather
 from .speech import SpeechHub
+from .settings_service import apply_settings, weather_settings_key
 from .llm import LLMHub, LLMConfig, LLMCreate, LLMRetry, sha as llm_sha
+from .personal_agent import PersonalAgentService, register_agent_routes
+from .ai_profile import AIProfile
 ROOT=Path(__file__).resolve().parent.parent
 
 def hashed(value):return hashlib.sha256(value.encode()).hexdigest()
 
-def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_runner=None,llm_backend=None):
+def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_runner=None,llm_backend=None,agent_gateway=None):
+ ai_profile=AIProfile.from_env()
  data=Path(data_dir or os.getenv('HUB_DATA_DIR',ROOT/'data')).resolve();data.mkdir(parents=True,exist_ok=True);(data/'audio').mkdir(exist_ok=True)
  widget_root=Path(os.getenv('HUB_WIDGET_DIR',ROOT/'widgets')).resolve()
  store=Store(data/'room-hub.sqlite3');connections={};attempts={};wx={'last_attempt':0.,'error':None};wx_lock=asyncio.Lock()
+ wx['settings_key']=weather_settings_key(store.get('settings'))
  secure=os.getenv('HUB_SECURE_COOKIE','false').lower()=='true'
  def secret(env,name):
   v=os.getenv(env);path=data/name
@@ -51,7 +56,11 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
    if not ok:connections.pop(ws,None)
   return sum(results)
  async def changed(event,detail=''):
-  store.bump(event,detail);await broadcast({'type':'invalidate','revision':store.get('revision')})
+  store.bump(event,detail)
+  if store.in_unit_of_work():return
+  current_weather_key=weather_settings_key(store.get('settings'))
+  if current_weather_key!=wx['settings_key']:wx.update(last_attempt=0.,error=None,settings_key=current_weather_key)
+  await broadcast({'type':'invalidate','revision':store.get('revision')})
  async def refresh_weather():
   async with wx_lock:
    settings=store.get('settings');wx['last_attempt']=time.monotonic()
@@ -67,8 +76,8 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
    settings=store.get('settings')
    if settings['latitude'] is not None and time.monotonic()-wx['last_attempt']>=settings['weather_interval_minutes']*60:await refresh_weather()
    await asyncio.sleep(20)
- speech=SpeechHub(store,data,changed,config=speech_config,runner=speech_runner)
- llm=LLMHub(store,changed,speech=speech,backend=llm_backend)
+ speech=SpeechHub(store,data,changed,config=speech_config,runner=speech_runner,profile=ai_profile)
+ llm=LLMHub(store,changed,speech=speech,backend=llm_backend,profile=ai_profile)
  speech.set_transcript_sink(llm.submit_transcription)
  life=LifeService(store,changed)
  timers=TimerService(store,changed)
@@ -101,6 +110,7 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
  app.state.timers=timers
  app.state.speech=speech
  app.state.llm=llm
+ app.state.ai_profile=ai_profile
  app.state.store=store;app.state.admin_token=admin_key;app.state.ingest_token=ingest_key;app.state.connections=connections
  @app.middleware('http')
  async def security(request,call_next):
@@ -150,7 +160,6 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
   if auth.startswith('Bearer ') and hmac.compare_digest(auth[7:],ingest_key):return {'role':'ingest'}
   return authenticate(request,'admin')
  from .ai_runtime import register_routes as register_ai_runtime
- register_ai_runtime(app,speech,llm,admin)
  register_life_routes(app,life,admin,viewer,changed)
  register_timer_routes(app,timers,viewer)
  register_temperature_routes(app,data,store,admin,viewer)
@@ -202,6 +211,9 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
  async def assistant_tasks(start:str,end:str,status:str='all',limit:int=50,_=Depends(admin)):
   try:return store.query_tasks(start,end,status,limit)
   except ValueError as exc:raise HTTPException(422,str(exc))
+ @app.get('/api/display/llm')
+ async def llm_display_index(_=Depends(viewer)):
+  return llm_display.index(store)
  @app.get('/api/display/llm/{rid}')
  async def llm_display_entry(rid:str,_=Depends(viewer)):
   if not rid or len(rid)>80:raise HTTPException(422,'기록 ID를 확인하세요.')
@@ -261,8 +273,7 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
   await changed('layout.updated');return result
  @app.put('/api/settings')
  async def settings(body:HubSettings,_=Depends(admin)):
-  old=store.get('settings');new=body.model_dump();store.set('settings',new)
-  if any(old[k]!=new[k] for k in ['latitude','longitude','location_name','timezone']):store.set('weather',None);wx.update(last_attempt=0,error=None)
+  new,_invalidated=apply_settings(store,body)
   await changed('settings.updated');return new
  @app.post('/api/weather/refresh')
  async def refresh(_=Depends(admin)):
@@ -329,11 +340,21 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
    count=cur.rowcount;db.execute('DELETE FROM series WHERE id NOT IN(SELECT series_id FROM tasks WHERE series_id IS NOT NULL)')
   await changed('task.deleted',str(count));return {'deleted':count}
  # Reuse the exact existing CRUD handlers; protocol does not replace UI/assistant paths.
- protocol=widget_protocol.build_registry(store,life,changed,
-  widget_protocol.TaskServices(add_task,edit_task,complete_task,delete_task),timers=timers)
+ task_services=widget_protocol.TaskServices(add_task,edit_task,complete_task,delete_task)
+ protocol=widget_protocol.build_registry(store,life,changed,task_services,timers=timers)
  app.state.widget_protocol=protocol
  llm.set_widget_registry(protocol)
  widget_protocol.register_routes(app,protocol,admin)
+ personal_agent=PersonalAgentService(store,life,timers,None,task_services,speech=speech,llm=llm,gateway=agent_gateway,changed=changed,refresh_weather=refresh_weather,broadcast_fn=broadcast,widget_root=widget_root,temperature_store=getattr(app.state,'indoor_temperature',None),profile=ai_profile)
+ app.state.personal_agent=personal_agent
+ register_agent_routes(app,personal_agent,admin,viewer)
+ register_ai_runtime(app,speech,llm,admin,agent=personal_agent)
+ async def route_speech_transcript(job_id:str,voice_id:str,text:str):
+  if personal_agent.is_enabled():return await personal_agent.submit_from_speech_job(job_id,voice_id,text)
+  if ai_profile.pc_free:raise HTTPException(503,'Personal Agent가 꺼져 있습니다. 전사 결과는 보관하며 PC LLM으로 전송하지 않습니다.')
+  return await llm.submit_transcription(job_id,voice_id,text)
+ speech.set_transcript_sink(route_speech_transcript)
+ speech.set_agent_hooks(options=personal_agent.speech_options,transcribe=personal_agent.transcribe_speech_job,viewer=personal_agent.get_run_for_viewer)
  @app.get('/api/admin/export')
  async def export(_=Depends(admin)):
   with store.connect() as db:series=[dict(r) for r in db.execute('SELECT * FROM series')]

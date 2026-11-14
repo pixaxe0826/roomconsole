@@ -92,13 +92,18 @@ class TimerAdapter(WidgetAdapter):
                     raise ProtocolFault('not_found', 'NOT_FOUND', '실행 중인 타이머가 없습니다.', 'target')
             return AdapterResult(await asyncio.to_thread(self.timers.get, identity), source=self.source_of_truth)
         key = request.idempotency_key or request.request_id
-        if request.action == 'start':
-            data = await asyncio.to_thread(self.timers.start, TimerStart(request_id=key, **args.model_dump()), authority.principal)
-            event = 'timer.started'
-        else:
-            data = await asyncio.to_thread(self.timers.stop, request.target.value,
+        def execute_control():
+            # A device may be revoked while this work waits for a thread.
+            # Recheck trusted server authority at the mutation boundary too.
+            if authority.reauthorize is not None:
+                authority.reauthorize()
+            if request.action == 'start':
+                return self.timers.start(TimerStart(request_id=key, **args.model_dump()), authority.principal)
+            return self.timers.stop(request.target.value,
                 TimerStop(request_id=key, **args.model_dump()), authority.principal)
-            event = 'timer.stopped'
+
+        data = await asyncio.to_thread(execute_control)
+        event = 'timer.started' if request.action == 'start' else 'timer.stopped'
         if data['changed']:
             await self.timers.announce(event, data['id'])
         return AdapterResult(data, changed=data['changed'], source=self.source_of_truth, event=event, entity_id=data['id'])

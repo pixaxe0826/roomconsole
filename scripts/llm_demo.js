@@ -22,8 +22,16 @@
  rows.unshift(assistant(make('오늘 남은 할 일 확인해줘')));
  rows.unshift(assistant(make('오늘 할 일에 택배 보내기 추가해?')));
  function summary(r){return {...r,model:r.config_json.model,metrics:r.response_json?.metrics||{},source_preview:r.source_text,output_preview:r.response_json?.output||''}}
+ let agentPolicy={agent_enabled:false,cloud_enabled:false,audio_cloud_enabled:false,allow_shared_notes_in_cloud:false,monthly_cap_usd:100};
+ let agentDemoRuns=[];
  window.ROOM_LLM_DEMO={async api(path,method='GET',body){
   const u=new URL(path,'http://demo'),p=u.pathname;
+  if(p==='/api/agent/status')return {...clone(agentPolicy),cloud_status:agentPolicy.agent_enabled?(agentPolicy.cloud_enabled?'ready':'cloud_disabled'):'agent_disabled',local_tier0_available:true,local_stt_available:false,budget:{state:'NORMAL',committed_usd:0,spent_usd:0,unknown_usd:0,reserved_usd:0,monthly_cap_usd:agentPolicy.monthly_cap_usd}};
+  if(p==='/api/agent/budget/policy'&&method==='PUT'){agentPolicy={...agentPolicy,...(body||{})};return {ok:true,policy:clone(agentPolicy)};}
+  if(p==='/api/agent/runs')return {items:clone(agentDemoRuns)};
+  if(p==='/api/agent/command'||p==='/api/agent/briefing'){const rid='demo-agent-'+(++seq),run={run_id:rid,id:rid,status:'completed',mode:body?.mode||'auto',tier:'tier0_local',model:'local',source_text:body?.text||'브리핑',assistant_reply:'[예시 Personal Agent 응답] 실제 서버에서 실행하세요.',requires_confirmation:false,preview_sha256:null,staged_steps:[],executed_results:[],schedule_conflicts:[],cost_microdollars:0,created_at:now()};agentDemoRuns.unshift(run);return clone(run);}
+  if(p.startsWith('/api/agent/confirm/')){const rid=p.split('/').pop(),run=agentDemoRuns.find(x=>x.run_id===rid);if(!run)throw Error('예시 기록 없음');run.status='completed';return clone(run);}
+  if(p.startsWith('/api/agent/cancel/')){const rid=p.split('/').pop(),run=agentDemoRuns.find(x=>x.run_id===rid);if(!run)throw Error('예시 기록 없음');run.status='cancelled';return clone(run);}
   if(p==='/api/llm/config'){if(method==='PUT')cfg=clone(body);return {config:clone(cfg),counts:{prepared:rows.filter(r=>r.status==='prepared').length,succeeded:rows.filter(r=>r.status==='succeeded').length},last_probe:null,max_pending:4,max_history:1000,streaming:false,auto_execute:false}}
   if(p==='/api/llm/probe')return {ok:false,reachable:false,checked_at:now(),models:[],message:'독립 미리보기입니다. 실제 연결 확인은 서버에서 하세요.'};
   if(p==='/api/llm/requests'){

@@ -17,6 +17,16 @@ env:
   PYTHONUTF8: '1'
   PYTHONDONTWRITEBYTECODE: '1'
   HUB_DATA_DIR: artifacts/runtime-data
+  # Compatibility suites keep the default profile; Odyssey tests opt in explicitly.
+  HUB_AI_PROFILE: legacy
+  # Offline regression only. Never inherit or supply paid provider credentials.
+  OPENAI_API_KEY: ''
+  HUB_OPENAI_API_KEY: ''
+  HUB_PERSONAL_AGENT_ENABLED: 'false'
+  HUB_OPENAI_ENABLED: 'false'
+  HUB_OPENAI_AUDIO_ENABLED: 'false'
+  HUB_RUN_LIVE_OPENAI_TESTS: '0'
+  HUB_LIVE_OPENAI_BUDGET_USD: ''
 
 jobs:
   backend:
@@ -69,6 +79,9 @@ jobs:
           tests/test_sqlite_runtime_m340.py
           tests/test_remote_speech_m340.py
           tests/test_ai_runtime_m340.py
+          tests/test_odyssey_backend.py
+          tests/test_odyssey_agent.py
+          tests/test_odyssey_ai_runtime.py
           tests/test_backend.py
           tests/test_display_completion.py
           tests/test_all_tasks.py
@@ -100,6 +113,13 @@ jobs:
           tests/test_memo_grounding_m33b.py
           tests/test_benchmark_catalog_m33b.py
           tests/test_memo_language_m33b1.py
+          tests/test_personal_agent.py
+          tests/test_agent_adapter_safety.py
+          tests/test_agent_budget_safety.py
+          tests/test_agent_grounding_safety.py
+          tests/test_agent_ingress.py
+          tests/test_agent_speech_safety.py
+          tests/test_agent_visibility.py
           --timeout=30
           --timeout-method=thread
           --junitxml=artifacts/test-results/backend.xml
@@ -147,6 +167,12 @@ jobs:
       - run: python scripts/widget_bridge_browser.py
       - run: python scripts/runtime_browser.py
       - run: python scripts/timers_browser.py
+      - name: Speech and agent lifecycle (production JavaScript, mocked transport)
+        run: node scripts/agent_speech_transport_regression.js
+      - name: Odyssey PC-free routing and diagnostics (mocked transport)
+        run: node scripts/odyssey_ui_regression.js
+      - name: Speech and agent lifecycle (Chromium, mocked transport)
+        run: python scripts/agent_speech_browser.py
       - run: python scripts/benchmark_fast_reads.py --iterations 30
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()

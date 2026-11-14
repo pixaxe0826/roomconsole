@@ -134,3 +134,12 @@
 - Remote metadata is configured versus observed; stock whisper health cannot verify model/GPU. Keep unknown values null and distinguish HTTP time from CLI load/inference time.
 - Manager-only AI diagnostics do not grant paired-display permissions or generate inference from polling/startup. Core uptime does not depend on the PC.
 - Keep parser/prompt/capability/scoring/dataset frozen. Run M340 lifetime/offline/transport tests plus existing complete suites. See docs/RUNTIME_M340.md.
+
+## Odyssey OpenAI profile (explicit PC-detachment exception)
+
+- `HUB_AI_PROFILE=odyssey_openai` is an immutable process-level topology; it never grants cloud/audio consent or overrides saved policy. The legacy default preserves other installations.
+- Odyssey owns HTTP/HTTPS intake, FFmpeg validation, queue/storage, rule routing and approved adapters. OpenAI is the only STT/model provider in this profile; no PC, SSH tunnel, local Whisper/Qwen dispatch or fallback, including diagnostics and old requests.
+- Missing consent/key/budget/provider must fail closed for audio; deterministic local text rules may continue. Do not relabel an unavailable provider as online because local configuration is valid.
+- Preserve old configs, source audio and historical rows, but never reinterpret previously queued `configured` audio as a new cloud upload or restart a paid request. Old local jobs need explicit new user input in the new topology.
+- `HUB_FFMPEG` is a codec-only absolute path override; no model/driver/service installation, PC deletion or production deployment is implied by editing this PR.
+- Test no legacy network/process invocation across off/failed/restarted/queued cases, fake official OpenAI transport, display-to-Odyssey lifecycle and manager routing. No paid tests or production data.
