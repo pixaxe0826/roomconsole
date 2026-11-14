@@ -113,6 +113,10 @@ jobs:
           tests/test_entity_catalog_m33b.py
           tests/test_memo_grounding_m33b.py
           tests/test_benchmark_catalog_m33b.py
+          tests/test_agent_benchmark_gateway.py
+          tests/test_agent_benchmark_projection.py
+          tests/test_agent_benchmark_runner.py
+          tests/test_personal_agent_benchmark_runtime.py
           tests/test_memo_language_m33b1.py
           tests/test_personal_agent.py
           tests/test_agent_adapter_safety.py

@@ -181,6 +181,11 @@ V35의 `~/room-hub-benchmark-data/`에서 읽습니다. 기존 production DB·Wh
 [전송/검증/실행/비교와 격리 한계](docs/ASSISTANT_BENCHMARK.md)를 먼저 읽으세요.
 전송 도구와 외부 loader는 dataset 없이 동작한 것처럼 성공 처리하지 않습니다.
 
+같은 외부 텍스트 세트를 현재 Personal Agent/OpenAI 경로로 평가하려면 별도
+[`python -m benchmarks.agent` 커넥터](docs/PERSONAL_AGENT_BENCHMARK.md)를 사용합니다.
+운영 서비스 대신 임시 DB를 사용하며 유료 호출은 명시적 동의·실행별 비용/호출 한도가 필요합니다.
+STT 평가가 아니며, 이전 Qwen 지원 분모나 레거시 M2 분석을 자동으로 적용하지 않습니다.
+
 ### M2 benchmark diagnostics
 
 Benchmark engine 1.2.0 adds **offline analysis of an existing run**, not new
