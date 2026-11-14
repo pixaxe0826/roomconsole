@@ -35,8 +35,20 @@ python3 -m venv .venv
 | `HUB_ADMIN_TOKEN` | 자동 생성 | 직접 지정 시 비밀값 |
 | `HUB_INGEST_TOKEN` | 자동 생성 | 음성/외부 입력용 별도 키 |
 | `HUB_SECURE_COOKIE` | `false` | HTTPS 프록시 환경에서만 `true` 검토 |
+| `HUB_PERSONAL_AGENT_ENABLED` | `false` | 새 하이브리드 Personal Agent(`/api/agent/*` 및 음성 자동 연결) 초기 활성화 여부 |
+| `HUB_OPENAI_ENABLED` | `false` | OpenAI 클라우드 플래너 호출 초기 허용 여부 |
+| `HUB_OPENAI_AUDIO_ENABLED` | `false` | 음성의 OpenAI STT(`/v1/audio/transcriptions`) 외부 전송 초기 허용 여부 |
+| `HUB_OPENAI_INCLUDE_SHARED_NOTES` | `false` | 디스플레이 공유 메모(`shared=true`) 제목/ID의 클라우드 문맥 포함 여부 (비공개 메모는 항상 제외) |
+| `OPENAI_API_KEY` / `HUB_OPENAI_API_KEY` | 미설정 | OpenAI 전용 API 키 (`HUB_LLM_API_KEY`를 자동 재사용하지 않음) |
+| `HUB_OPENAI_MONTHLY_BUDGET_USD` | `100.00` | 최초 DB 초기화 시 월 예산 한도(USD) |
+| `HUB_OPENAI_FAST_MODEL` / `HUB_OPENAI_DEEP_MODEL` | `gpt-6.1-sol` | 최초 DB 초기화 시 Tier 1 / Tier 2 계획 모델 |
+| `HUB_OPENAI_REASONING_EFFORT` | `high` | 최초 DB 초기화 시 추론 강도(`low`/`medium`/`high`) |
+| `HUB_OPENAI_STT_MODEL` | `gpt-4o-mini-transcribe` | 최초 DB 초기화 시 클라우드 STT 모델 |
 
-직접 Python 실행은 `.env`를 자동으로 읽지 않습니다. Compose는 YAML에 전달하도록 정의된 값만 사용합니다.
+직접 Python 실행(`run.py`)은 `.env` 파일을 자동으로 읽지 않습니다.
+- **Python / systemd**: 셸에서 `export VAR=value`(PowerShell은 `$env:VAR="value"`)를 먼저 설정하거나, systemd 유닛에 `EnvironmentFile=/path/to/.env`를 명시해야 프로세스에 전달됩니다.
+- **Docker Compose**: `compose.yaml`의 `environment:` 섹션에 선언된 변수만 컨테이너로 전달됩니다.
+- **설정 우선순위**: `(1) 요청의 local_only 지정` > `(2) DB에 저장된 관리자 정책(PUT /api/agent/budget/policy)` > `(3) 최초 DB 생성 시 환경변수 초기화값` > `(4) 코드 기본값(전체 비활성)`. 서버를 재시작해도 관리자가 DB에 저장한 정책은 환경변수 초기값으로 덮어쓰지 않습니다.
 
 ## iPad 연결
 

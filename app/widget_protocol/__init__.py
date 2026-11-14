@@ -5,12 +5,16 @@ from .adapters import AlarmAdapter, CalendarAdapter, MemoAdapter, TodoAdapter, T
 from .system_adapters import (
     ClockAdapter,
     FullAlarmAdapter,
+    FullCalendarAdapter,
     FullMemoAdapter,
     FullTodoAdapter,
+    IndoorSensorAdapter,
     LLMDisplayAdapter,
+    LLMResponseAdapter,
     LayoutAdapter,
     SettingsAdapter,
     SystemAdapter,
+    SystemStatusAdapter,
     WeatherAdapter,
     build_full_registry,
 )
@@ -20,6 +24,8 @@ __all__ = [
     'WidgetRequest', 'WidgetResponse', 'WidgetEvent', 'Capability', 'ExecutionContext',
     'WidgetAdapter', 'WidgetRegistry', 'request_digest', 'MemoAdapter', 'TodoAdapter',
     'CalendarAdapter', 'AlarmAdapter', 'TaskServices', 'build_registry', 'register_routes',
-    'FullMemoAdapter', 'FullTodoAdapter', 'FullAlarmAdapter', 'ClockAdapter', 'WeatherAdapter',
-    'LLMDisplayAdapter', 'LayoutAdapter', 'SettingsAdapter', 'SystemAdapter', 'build_full_registry',
+    'FullMemoAdapter', 'FullTodoAdapter', 'FullCalendarAdapter', 'FullAlarmAdapter',
+    'ClockAdapter', 'WeatherAdapter', 'IndoorSensorAdapter', 'LLMDisplayAdapter',
+    'LLMResponseAdapter', 'LayoutAdapter', 'SettingsAdapter', 'SystemAdapter',
+    'SystemStatusAdapter', 'build_full_registry',
 ]

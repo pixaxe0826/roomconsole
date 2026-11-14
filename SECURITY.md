@@ -102,3 +102,11 @@ LAN/DNS/redirect/ambient proxy/자동 fallback/모델 load는 허용하지 않�
 끝점 PC도 음원과 기존 어휘 힌트(작업 제목 포함 가능)를 받는 신뢰 경계입니다. 선택적 speech 키는
 admin/ingest/LLM 키와 별개입니다. 관리자 전용 AI probe는 health/models만 조회하며 모델·GPU 인증이 아닙니다.
 자세한 제한과 취소/시간초과 계약은 [M3.4-0](docs/RUNTIME_M340.md)을 참고하세요.
+
+## OpenAI Personal Agent 보안·개인정보·권한 경계
+
+- **기본 비활성화 (Opt-in)**: `HUB_PERSONAL_AGENT_ENABLED=false`, `HUB_OPENAI_ENABLED=false`, `HUB_OPENAI_AUDIO_ENABLED=false`가 기본값입니다. 환경에 API 키가 존재하더라도 명시적으로 활성화하기 전에는 외부 요청을 보내지 않습니다.
+- **키 분리**: 기존 `HUB_LLM_API_KEY`는 OpenAI 호출에 재사용하지 않으며 `OPENAI_API_KEY` 또는 `HUB_OPENAI_API_KEY`만 사용합니다.
+- **비공개 메모 및 클라우드 전송 격리**: 비공개 메모(`shared=false`)의 제목·ID·본문·개수는 어떠한 경우에도 클라우드 프롬프트나 STT 힌트에 포함하지 않습니다. 디스플레이 공유(`shared=true`) 역시 외부 AI 전송 동의와 동일시하지 않으며 기본값(`allow_shared_notes_in_cloud=false`)에서 클라우드 문맥에서 제외됩니다.
+- **프롬프트 인젝션 및 카탈로그 밖 대상 방어**: 할 일·알람·메모 문자열은 신뢰할 수 없는 데이터로 취급하여 인젝션 패턴을 제거하고, 모델이 반환한 `target_id`는 요청 카탈로그 소속 여부·원문 근거·유일성·대상 버전을 모두 검증합니다.
+- **관리자(`admin`)와 표시 기기(`display`) 권한 분리**: paired iPad는 허용된 명령 제출과 자신의 실행 기록(`principal = display:<device_id>`)만 조회할 수 있으며, 데이터 변경 승인(`POST /api/agent/confirm/{run_id}`), 예산 정책 변경, 설정/배치 수정은 관리자 전용입니다. 상세 설계는 [OpenAI Personal Agent](docs/OPENAI_PERSONAL_AGENT.md)를 참고하세요.

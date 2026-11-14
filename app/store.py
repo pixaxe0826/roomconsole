@@ -1,7 +1,62 @@
 import sqlite3,json,uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime,timezone
 from pathlib import Path
 from .sqlite_connection import ClosingConnection
+
+_UOW_STATE: ContextVar[dict[str, '_UnitOfWorkState'] | None] = ContextVar('_UOW_STATE', default=None)
+
+
+class _UnitOfWorkState:
+ def __init__(self, conn: ClosingConnection):
+  self.conn = conn
+  self.failed = False
+
+
+class _BorrowedConnection:
+ """Borrowed view over an active Unit-of-Work connection.
+
+ Suppresses nested BEGIN/COMMIT/CLOSE so multi-step adapter writes execute
+ atomically inside the outer unit_of_work() transaction.
+ """
+ def __init__(self, state: _UnitOfWorkState):
+  self._state = state
+  self._conn = state.conn
+
+ def __enter__(self):
+  return self
+
+ def __exit__(self, exc_type, exc_val, exc_tb):
+  if exc_type is not None:
+   self._state.failed = True
+  return False
+
+ def execute(self, sql, *args, **kwargs):
+  if isinstance(sql, str) and sql.strip().upper() in {
+   'BEGIN', 'BEGIN IMMEDIATE', 'BEGIN EXCLUSIVE', 'BEGIN DEFERRED', 'COMMIT', 'END'
+  }:
+   return self._conn.execute('SELECT 1')
+  return self._conn.execute(sql, *args, **kwargs)
+
+ def executemany(self, sql, *args, **kwargs):
+  return self._conn.executemany(sql, *args, **kwargs)
+
+ def executescript(self, sql_script):
+  return self._conn.executescript(sql_script)
+
+ def commit(self):
+  return None
+
+ def rollback(self):
+  self._state.failed = True
+  return None
+
+ def close(self):
+  return None
+
+ def __getattr__(self, name):
+  return getattr(self._conn, name)
 
 def uid():return uuid.uuid4().hex
 def utcnow():return datetime.now(timezone.utc).isoformat()
@@ -28,7 +83,46 @@ class Store:
      CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT,event TEXT NOT NULL,detail TEXT NOT NULL,created_at TEXT NOT NULL);
      ''')
      for k,v in [('layout',DEFAULT_LAYOUT),('settings',DEFAULT_SETTINGS),('weather',None),('revision',0)]:db.execute('INSERT OR IGNORE INTO kv VALUES(?,?)',(k,json.dumps(v,ensure_ascii=False)))
+ def in_unit_of_work(self) -> bool:
+    active = _UOW_STATE.get()
+    return bool(active and str(self.path) in active)
+
+ @contextmanager
+ def unit_of_work(self):
+    active = _UOW_STATE.get() or {}
+    key = str(self.path)
+    if key in active:
+     yield _BorrowedConnection(active[key])
+     return
+    db = sqlite3.connect(self.path, timeout=15, check_same_thread=False, factory=ClosingConnection)
+    try:
+     db.row_factory = sqlite3.Row
+     db.execute('PRAGMA foreign_keys=ON')
+     db.execute('BEGIN IMMEDIATE')
+    except BaseException:
+     db.close()
+     raise
+    state = _UnitOfWorkState(db)
+    token = _UOW_STATE.set({**active, key: state})
+    try:
+     yield _BorrowedConnection(state)
+     if state.failed:
+      raise RuntimeError('Unit of work marked failed by nested operation.')
+     db.commit()
+    except BaseException:
+     try:
+      db.rollback()
+     except Exception:
+      pass
+     raise
+    finally:
+     _UOW_STATE.reset(token)
+     db.close()
+
  def connect(self):
+    active = _UOW_STATE.get()
+    if active and str(self.path) in active:
+     return _BorrowedConnection(active[str(self.path)])
     db=sqlite3.connect(self.path,timeout=15,factory=ClosingConnection)
     try:
      db.row_factory=sqlite3.Row

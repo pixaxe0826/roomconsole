@@ -1,18 +1,20 @@
-/* Room Hub 0.1.4: manager-only LLM notebook. No model or task execution in browser. */
+/* Room Hub 0.1.4+: manager-only LLM notebook & Personal Agent control panel. No model or task execution in browser. */
 (() => {
 'use strict';
 const E=Room.esc, I=Room.icon, $=(s,r=document)=>r.querySelector(s);
-const LABEL={awaiting_confirmation:'확인 대기 · 아직 미실행',needs_clarification:'추가 확인 필요',prepared:'미전송 · 모델 연결 대기',queued:'대기 중',running:'LLM 응답 대기',succeeded:'응답 완료',failed:'실패',cancelled:'취소됨',interrupted:'서버 종료로 중단'};
+const LABEL={awaiting_confirmation:'확인 대기 · 아직 미실행',needs_clarification:'추가 확인 필요',prepared:'미전송 · 모델 연결 대기',queued:'대기 중',running:'LLM 응답 대기',succeeded:'응답 완료',completed:'실행 완료',failed:'실패',cancelled:'취소됨',interrupted:'서버 종료로 중단'};
 const ACTIVE=new Set(['queued','running']);
+const CLOUD_STATUS_LABEL={agent_disabled:'에이전트 비활성',cloud_disabled:'클라우드 비활성 · 로컬 전용',api_key_missing:'API 키 미설정 · 로컬 전용',budget_exhausted:'예산 한도 도달 · 로컬 전용',live_network_blocked_in_test:'오프라인 보호 · 로컬 전용',ready:'OpenAI 클라우드 준비됨'};
 let root=null,cfg=null,list={items:[],total:0},selected=null,detail=null,status='',query='',voice='',limit=30,offset=0;
 let lastDetail='',loading=false,pendingRefresh=false,generation=0,timer=null,searchTimer=null,draft=null,filterKey='';
 let requestMode='auto';
+let agentState=null,agentRuns=[],selectedAgentRunId=null,selectedAgentRun=null,agentMode='auto',agentTextDraft='';
 const sending=new Set(),keys=new Map();
 const requestKey=()=>globalThis.crypto?.randomUUID?.() || 'llm-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
 const fnum=(n,d=2)=>typeof n==='number'&&Number.isFinite(n)?n.toFixed(d):'—';
 const seconds=n=>typeof n==='number'&&Number.isFinite(n)?`${n.toFixed(2)}초`:'—';
 function when(s){if(!s)return '—';try{return new Intl.DateTimeFormat('ko-KR',{timeZone:window.RoomManager?.getState()?.settings?.timezone||'Asia/Seoul',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(new Date(s))}catch{return '—'}}
-const badge=s=>`<span class="llm-badge llm-${E(s)}">${E(LABEL[s]||s)}</span>`;
+const badge=s=>`<span class="llm-badge llm-${E(s==='completed'?'succeeded':s)}">${E(LABEL[s]||s)}</span>`;
 const pretty=o=>JSON.stringify(o,null,2);
 function numField(name,label,value,attrs=''){return `<label>${label}<input name="${name}" type="number" value="${E(value)}" ${attrs}></label>`}
 async function api(path,method='GET',body){
@@ -29,10 +31,47 @@ async function api(path,method='GET',body){
 }
 function shell(){return `
  <section class="llm-connection panel"><div class="llm-connection-main"><span class="llm-symbol">${I('note',22)}</span><div><div class="eyebrow">LOCAL MODEL / MANAGER ONLY</div><h2>전사 다음의 한 단계</h2><p>입력 한 건, 응답 한 건. 실제 전송 내용과 결과를 나란히 확인합니다.</p></div></div><div class="llm-connection-tools"><span id="llmConnectionBadge" class="badge">설정 확인 중</span><button type="button" class="btn small" data-llm="probe">연결 확인</button><button type="button" class="btn small" data-llm="settings">연결 설정</button></div></section>
- <div class="assistant-mode-bar"><label>새 요청 처리 방식<select id="assistantMode"><option value="auto">자동 분기 · 조회 / Widget 제안 / 변경 확인</option><option value="chat">일반 대화 · Widget 요청은 별도 검증</option><option value="legacy">기존 직접 전송 · Widget 요청 제외</option></select></label><p>명확한 조회는 실제 서버 데이터를 사용합니다. 추가·완료·완료취소·삭제는 관리자 확인 전까지 실행하지 않습니다.</p></div>
+ <div class="assistant-mode-bar"><label>새 요청 처리 방식<select id="assistantMode"><option value="auto">자동 분기 · 조회 / Widget 제안 / 변경 확인</option><option value="chat">일반 대화 · Widget 요청은 별도 검증</option><option value="legacy">기존 직접 전송 · Widget 요청 제외</option><option value="personal_agent">Personal Agent · 하이브리드 에이전트 전달</option></select></label><p>명확한 조회는 실제 서버 데이터를 사용합니다. 추가·완료·완료취소·삭제는 관리자 확인 전까지 실행하지 않습니다.</p></div>
  <div id="llmTopNotice" class="llm-notice" role="status"></div>
  <section id="llmSettings" class="panel hidden llm-settings"><div class="panel-head"><div><h2>로컬 LLM 연결 설정</h2><p>모델 설치나 실행은 하지 않습니다. 준비된 서버의 API 연결만 설정합니다.</p></div><button type="button" class="icon-button" data-llm="settings" aria-label="설정 닫기">${I('close',18)}</button></div><div id="llmSettingsForm"></div></section>
  <details class="panel llm-disclosure" data-section="capabilities"><summary>연결된 서버 기능 · 시간 기준</summary><p id="assistantClock" class="field-help">서버 시각은 연결 시 확인합니다.</p><div id="assistantCatalog">시간·할 일·날씨: 서버에서 확인 / 쓰기는 관리자 승인</div></details>
+ <section id="personalAgentSection" class="panel personal-agent-panel" data-personal-agent="panel">
+  <div class="panel-head">
+   <div>
+    <span class="eyebrow">HYBRID PERSONAL AGENT · OPT-IN</span>
+    <h2>Personal Agent (Tier 0 로컬 + GPT-6.1 Sol High)</h2>
+    <p>기본 비활성. 활성화 시 조회는 즉시 실행하고 할 일·일정·메모·알람·배치·설정 변경은 관리자 승인 후 단일 트랜잭션으로 반영합니다.</p>
+   </div>
+   <div class="llm-connection-tools">
+    <span id="agentStatusBadge" class="badge">상태 확인 중</span>
+    <span id="agentLocalBadge" class="badge">로컬 Tier 0</span>
+    <span id="agentBudgetBadge" class="badge">예산 확인 중</span>
+   </div>
+  </div>
+  <div id="agentPolicyBar" class="llm-checks">
+   <label><input id="agentEnabledToggle" type="checkbox"> Personal Agent 활성화</label>
+   <label><input id="agentCloudToggle" type="checkbox"> OpenAI 클라우드 플래너 허용</label>
+   <label><input id="agentAudioCloudToggle" type="checkbox"> 음성 외부 OpenAI STT 전송 허용</label>
+   <button type="button" class="btn small" data-llm="agent-save-policy">정책 적용</button>
+   <span id="agentPolicyFeedback" class="field-help"></span>
+  </div>
+  <div class="llm-filters">
+   <select id="agentCommandMode" aria-label="Personal Agent 실행 모드">
+    <option value="auto">자동 (Tier 0 로컬 우선 → 클라우드)</option>
+    <option value="local_only">로컬 전용 (외부 AI/STT 호출 0회 강제)</option>
+    <option value="fast">빠른 계획 (Tier 1 Fast)</option>
+    <option value="deep">복합 심층 계획 (Tier 2 Deep)</option>
+    <option value="briefing">데일리 브리핑 (일정·할 일·알람·센서)</option>
+   </select>
+   <input id="agentCommandInput" type="text" placeholder="명령 또는 전사문 입력 (예: 내일 15:00 치과 일정 추가해줘 / 실내 온도 알려줘)" aria-label="Personal Agent 명령 입력" maxlength="2000">
+   <button type="button" class="btn primary" data-llm="agent-submit">에이전트 실행</button>
+   <button type="button" class="btn" data-llm="agent-briefing">브리핑</button>
+  </div>
+  <div id="agentRunsWorkspace" class="llm-workspace">
+   <div class="llm-history"><div class="panel-head"><h3>에이전트 실행 이력 <span id="agentRunsCount" class="muted small">0</span></h3></div><div id="agentRunsList" class="llm-history-scroll"><div class="empty">아직 실행 이력이 없습니다.</div></div></div>
+   <div id="agentRunDetail" class="llm-detail"><div class="empty">에이전트 실행 항목을 선택하거나 새 명령을 입력하세요.</div></div>
+  </div>
+ </section>
 <div class="llm-workspace"><section class="panel llm-history"><div class="panel-head"><div><h2>요청 기록 <span id="llmTotal" class="muted small">0</span></h2><p>음성 입력별로 쌓이는 LLM 처리 이력</p></div><button class="icon-button" data-llm="refresh" aria-label="LLM 목록 새로고침">${I('refresh',17)}</button></div><div class="llm-filters"><input id="llmSearch" type="search" placeholder="전사 내용 검색" aria-label="LLM 전사 내용 검색" maxlength="240" value="${E(query)}"><select id="llmStatus" aria-label="LLM 요청 상태"><option value="">모든 상태</option>${Object.entries(LABEL).map(([k,v])=>`<option value="${k}" ${status===k?'selected':''}>${E(v)}</option>`).join('')}</select></div><div id="llmSourceFilter"></div><div id="llmList" class="llm-history-scroll"><div class="empty">기록을 불러오는 중…</div></div><div class="llm-pages"><button class="btn llm-prev hidden" data-llm="prev">이전 30개</button><span id="llmPageCount" class="field-help"></span><button class="btn llm-more hidden" data-llm="more">다음 30개</button></div><p class="field-help">원본 전사가 수정되어도 이전 요청의 입력과 응답은 바뀌지 않습니다.</p></section>
  <section id="llmDetail" class="llm-detail" aria-live="polite"><div class="panel empty">${I('note',36)}<strong>확인할 요청을 선택하세요</strong><span>성공한 음성 전사는 자동 분기됩니다. 수동 재전송도 가능합니다.<br>모델이 필요한 미연결 요청은 전송 예정 입력으로 보관합니다.</span></div></section></div>`}
 function settingsForm(c){return `<form id="llmConfigForm"><div class="llm-form-grid"><label class="llm-wide">API 주소<input name="base_url" value="${E(c.base_url)}" required spellcheck="false"><span class="field-help">V35 내부의 127.0.0.1 또는 ::1만 허용합니다. 기존 8080·8088·8443·8022 포트는 변경하지 않습니다.</span></label><label class="llm-wide">모델 ID / llama-server 별칭<input name="model" value="${E(c.model)}" required maxlength="160" spellcheck="false"></label>${numField('max_tokens','최대 출력 토큰',c.max_tokens,'min="16" max="1024" required')}${numField('temperature','Temperature',c.temperature,'min="0" max="2" step="0.1" required')}${numField('timeout_seconds','응답 제한 시간 · 초',c.timeout_seconds,'min="10" max="600" required')}<div class="llm-checks"><label><input name="enabled" type="checkbox" ${c.enabled?'checked':''}> LLM 전송 사용</label><label><input name="non_thinking" type="checkbox" ${c.non_thinking?'checked':''}> non-thinking 요청</label><label><input name="include_time_context" type="checkbox" ${c.include_time_context?'checked':''}> 기준 시각·시간대 포함</label></div><label class="llm-wide">기존 직접 전송 모드의 System 입력<textarea name="system_prompt" rows="5" maxlength="6000">${E(c.system_prompt)}</textarea></label></div><p class="field-help">자동 분기는 기준 시각을 항상 포함합니다. 일반 대화는 temperature 0.7·top_p 0.8·top_k 20·min_p 0·presence 1.0, 최대 128토큰입니다. Widget 제안은 temperature 0, 최대 64토큰, JSON Schema 제한입니다. 자동 모드에서는 자유 대화로 우회하지 않습니다. 이 화면의 Temperature는 기존 직접 전송에 적용됩니다. 이 System은 기존 직접 전송 모드에만 적용됩니다. non-thinking은 API 옵션 요청이며 백엔드의 모델·템플릿 지원이 필요합니다. 컨텍스트 크기·LLM 스레드는 추후 모델 서버에서 설정합니다. Whisper Base/6T는 이 화면에서 변경하지 않습니다.</p><div class="form-actions"><button type="submit" class="btn primary">설정 저장</button><button type="button" class="btn" data-llm="settings-reset">저장된 설정 불러오기</button><span id="llmSettingsFeedback" class="field-help"></span></div></form>`}
@@ -43,6 +82,46 @@ function updateConfig(){if(!root?.isConnected||!cfg)return;const c=cfg.config,p=
  if(cfg.capability_catalog){const n=$('#assistantCatalog');if(n)n.innerHTML=cfg.capability_catalog.capabilities.map(c=>`<span class="badge">${E(c.name)} · ${c.confirmation?'확인 후 변경':'조회'}</span>`).join(' ')+'<p class="field-help">명확한 조회는 서버 Fast-path입니다. Widget 제안은 Registry를 거치며, 변경은 관리자 확인이 필요합니다. 알람 설정·취소 Adapter는 미연결입니다. 표시 위젯 추가만으로 실행 권한이 생기지 않습니다.</p>'}
  if(!$('#llmConfigForm')){$('#llmSettingsForm').innerHTML=settingsForm(draft||c);bindSettings()}}
 function bindSettings(){const f=$('#llmConfigForm');if(!f)return;f.oninput=collectDraft;f.onchange=collectDraft;f.onsubmit=async e=>{e.preventDefault();collectDraft();const btn=$('[type=submit]',f);btn.disabled=true;try{cfg=await api('/api/llm/config','PUT',draft);draft=structuredClone(cfg.config);$('#llmSettingsFeedback').textContent='저장했습니다. 과거 미전송 기록은 자동 실행되지 않습니다.';updateConfig();await refresh()}catch(err){$('#llmSettingsFeedback').textContent=err.message}finally{if(btn.isConnected)btn.disabled=false}}}
+function paintAgentSection(){
+ if(!root?.isConnected||!agentState)return;
+ const stBadge=$('#agentStatusBadge'),locBadge=$('#agentLocalBadge'),budBadge=$('#agentBudgetBadge');
+ if(stBadge)stBadge.textContent=CLOUD_STATUS_LABEL[agentState.cloud_status]||agentState.cloud_status||'확인 필요';
+ if(locBadge)locBadge.textContent=`로컬 Tier0: 가능 · 로컬 STT: ${agentState.local_stt_available?'가능':'미설정'}`;
+ const b=agentState.budget||{};
+ if(budBadge){
+  const comm=typeof b.committed_usd==='number'?b.committed_usd:(b.spent_usd||0);
+  const lim=typeof b.monthly_budget_usd==='number'?b.monthly_budget_usd:(b.monthly_cap_usd||100);
+  budBadge.textContent=`예산 (${b.state||'normal'}): $${fnum(comm,4)} / $${fnum(lim,2)}`;
+ }
+ const tAgent=$('#agentEnabledToggle'),tCloud=$('#agentCloudToggle'),tAudio=$('#agentAudioCloudToggle');
+ if(tAgent&&document.activeElement!==tAgent)tAgent.checked=!!(agentState.agent_enabled??agentState.enabled);
+ if(tCloud&&document.activeElement!==tCloud)tCloud.checked=!!agentState.cloud_enabled;
+ if(tAudio&&document.activeElement!==tAudio)tAudio.checked=!!agentState.audio_cloud_enabled;
+ const cnt=$('#agentRunsCount');if(cnt)cnt.textContent=String(agentRuns.length);
+ const rList=$('#agentRunsList');
+ if(rList){
+  rList.innerHTML=agentRuns.map(r=>{
+   const rid=r.run_id||r.id;
+   const costUsd=((r.cost_microdollars||0)/1000000).toFixed(4);
+   return `<button type="button" class="llm-history-item ${selectedAgentRunId===rid?'selected':''}" data-llm="agent-select" data-run-id="${E(rid)}"><span class="llm-history-line">${badge(r.status)}<time>${E(when(r.created_at))}</time></span><strong>${E(r.source_text||'—')}</strong><span class="llm-history-model">${E(r.model_used||r.model||'local')} · ${E(r.tier_used||r.tier||r.mode||'tier0_local')} · $${E(costUsd)}</span></button>`;
+  }).join('')||'<div class="empty">아직 에이전트 실행 기록이 없습니다.</div>';
+ }
+ const rDetail=$('#agentRunDetail');
+ if(!rDetail)return;
+ const d=selectedAgentRun||agentRuns.find(x=>(x.run_id||x.id)===selectedAgentRunId)||null;
+ if(!d){
+  rDetail.innerHTML='<div class="empty">에이전트 실행 기록을 선택하거나 위 입력창에서 명령을 실행하세요.</div>';
+  return;
+ }
+ const rid=d.run_id||d.id;
+ const steps=Array.isArray(d.preview?.mutations)?d.preview.mutations:(Array.isArray(d.staged_steps)?d.staged_steps:[]);
+ const results=Array.isArray(d.receipt?.results)?d.receipt.results:(Array.isArray(d.executed_results)?d.executed_results:[]);
+ const conflicts=Array.isArray(d.schedule_conflicts)?d.schedule_conflicts:steps.flatMap(s=>Array.isArray(s.conflicts)?s.conflicts:[]);
+ const costUsd=((d.cost_microdollars||0)/1000000).toFixed(4);
+ const previewBox=d.status==='awaiting_confirmation'?`<div class="assistant-confirm-box" data-agent-preview="true"><strong>변경 미리보기 · 관리자 승인 대기 (아직 DB에 반영되지 않음)</strong>${conflicts.length?`<p class="assistant-warning">${conflicts.map(c=>E(c)).join('<br>')}</p>`:''}<ul class="assistant-targets">${steps.map(s=>{const req=s.widget_request||s.request||{},args=req.args||s.payload||{},tgt=req.target?.value||s.target_lock?.id||'신규/기본';return `<li><strong>${E(s.summary||s.summary_ko||(s.domain+'.'+s.action))}</strong> · 대상: <code>${E(tgt)}</code> · 날짜/시각: ${E(args.date||'—')} ${E(args.time||'')} · 변경값: <code>${E(JSON.stringify(args))}</code></li>`;}).join('')}</ul><div class="form-actions"><button type="button" class="btn primary" data-llm="agent-confirm" data-run-id="${E(rid)}" data-preview="${E(d.preview_sha256||'')}">변경 내용 승인 및 실행</button><button type="button" class="btn danger" data-llm="agent-cancel" data-run-id="${E(rid)}">취소 · 변경하지 않음</button></div></div>`:'';
+ const executedBox=results.length?`<details class="llm-disclosure" open><summary>실행 결과 (${results.length}건)</summary><pre>${E(pretty(results))}</pre></details>`:'';
+ rDetail.innerHTML=`<div class="panel"><div class="panel-head"><div><span class="eyebrow">AGENT RUN ${E(rid.slice(0,8))}</span><h3>${E(d.source_text||'—')}</h3><p>모델: ${E(d.model_used||d.model||'local')} · 경로: ${E(d.tier_used||d.tier||d.mode||'tier0_local')} · 추정 비용: $${E(costUsd)}</p></div>${badge(d.status)}</div><pre class="llm-output">${E(d.summary_text||d.assistant_reply||'—')}</pre>${previewBox}${executedBox}</div>`;
+}
 function paintList(){if(!root?.isConnected)return;$('#llmTotal').textContent=list.total;const box=$('#llmList'),scroll=box.scrollTop;
  const html=list.items.map(j=>`<button class="llm-history-item ${selected===j.id?'selected':''}" data-llm="select" data-id="${E(j.id)}"><span class="llm-history-line">${badge(j.status)}<time>${E(when(j.created_at))}</time></span><strong>${E(j.source_preview)}</strong><span class="llm-history-model">${E(['rule','clarify'].includes(j.route)?'Room Hub 서버 · 모델 미호출':j.model)}${j.parent_id?' · 재요청':''}</span><span class="llm-history-metrics">${['succeeded','awaiting_confirmation','needs_clarification'].includes(j.status)?`${seconds(j.request_seconds)} <i>·</i> ${j.metrics.output_tokens??'—'} tokens <i>·</i> ${fnum(j.metrics.generation_tps,1)} tok/s`:j.error?E(j.error):j.status==='prepared'?'아직 LLM에 전송하지 않았습니다.':'결과를 기다리고 있습니다.'}</span></button>`).join('')||'<div class="empty"><strong>요청 기록이 없습니다</strong><span>음성 수신함에서 저장된 전사문을 보내세요.</span><button class="btn soft" data-llm="voice">음성 수신함 열기</button></div>';
  if(box.innerHTML!==html)box.innerHTML=html;box.scrollTop=scroll;
@@ -88,17 +167,30 @@ async function refresh(){
  if(loading){pendingRefresh=true;return}loading=true;const gen=generation;
  try{
   const params=new URLSearchParams({limit:String(limit),offset:String(offset),status,query,voice_id:voice});
-  const [newcfg,newlist]=await Promise.all([api('/api/llm/config'),api('/api/llm/requests?'+params)]);
+  const [newcfg,newlist,newAgentStatus,newAgentRuns]=await Promise.all([
+   api('/api/llm/config'),
+   api('/api/llm/requests?'+params),
+   api('/api/agent/status').catch(()=>null),
+   api('/api/agent/runs?limit=25').catch(()=>({items:[]})),
+  ]);
   if(gen!==generation||!root?.isConnected)return;if(JSON.stringify(cfg?.config)!==JSON.stringify(newcfg.config))lastDetail='';cfg=newcfg;list=newlist;
+  if(newAgentStatus){
+   agentState=newAgentStatus;
+   agentRuns=Array.isArray(newAgentRuns?.items)?newAgentRuns.items:[];
+   if(!selectedAgentRunId&&agentRuns.length)selectedAgentRunId=agentRuns[0].run_id||agentRuns[0].id;
+   selectedAgentRun=agentRuns.find(x=>(x.run_id||x.id)===selectedAgentRunId)||null;
+   paintAgentSection();
+  }
   if(!selected&&list.items.length)selected=list.items[0].id;
   updateConfig();paintList();
   if(selected){try{const d=await api('/api/llm/requests/'+selected);if(gen!==generation||d.id!==selected)return;detail=d;paintDetail()}catch(e){if(e.status===404){selected=null;detail=null;lastDetail='';$('#llmDetail').innerHTML='<section class="panel empty">삭제된 요청입니다. 다른 기록을 선택하세요.</section>'}else throw e}}
  }catch(err){if(gen===generation&&root?.isConnected){$('#llmTopNotice').textContent=err.message;if(err.status===401)window.RoomManager?.refresh(false)}}
  finally{loading=false;if(pendingRefresh){pendingRefresh=false;setTimeout(refresh,0)}}
 }
-function mount(el){if(!el)return;if(root===el){refresh();return}root=el;lastDetail='';root.innerHTML=shell();$('#assistantMode').value=requestMode;$('#assistantMode').onchange=e=>{requestMode=e.target.value};root.addEventListener('click',handle);$('#llmStatus').onchange=e=>{status=e.target.value;limit=30;offset=0;selected=null;generation++;refresh()};$('#llmSearch').oninput=e=>{query=e.target.value;clearTimeout(searchTimer);searchTimer=setTimeout(()=>{limit=30;offset=0;selected=null;generation++;refresh()},250)};clearInterval(timer);timer=setInterval(refresh,3000);refresh()}
+function mount(el){if(!el)return;if(root===el){refresh();return}root=el;lastDetail='';root.innerHTML=shell();$('#assistantMode').value=requestMode;$('#assistantMode').onchange=e=>{requestMode=e.target.value};const am=$('#agentCommandMode');if(am){am.value=agentMode;am.onchange=e=>{agentMode=e.target.value}}const ai=$('#agentCommandInput');if(ai){ai.value=agentTextDraft;ai.oninput=e=>{agentTextDraft=e.target.value}}root.addEventListener('click',handle);$('#llmStatus').onchange=e=>{status=e.target.value;limit=30;offset=0;selected=null;generation++;refresh()};$('#llmSearch').oninput=e=>{query=e.target.value;clearTimeout(searchTimer);searchTimer=setTimeout(()=>{limit=30;offset=0;selected=null;generation++;refresh()},250)};clearInterval(timer);timer=setInterval(refresh,3000);refresh()}
 async function handle(e){const b=e.target.closest('[data-llm]');if(!b||b.disabled)return;const op=b.dataset.llm,id=b.dataset.id;try{
  if(op==='select'){selected=id;detail=null;lastDetail='';generation++;paintList();await refresh();return}
+ if(op==='agent-select'){selectedAgentRunId=b.dataset.runId;selectedAgentRun=agentRuns.find(x=>(x.run_id||x.id)===selectedAgentRunId)||null;paintAgentSection();return}
  if(op==='settings'){$('#llmSettings').classList.toggle('hidden');return}
  if(op==='settings-reset'){draft=null;$('#llmSettingsForm').innerHTML=settingsForm(cfg.config);bindSettings();return}
  if(op==='voice'){window.RoomManager.navigate('voice');return}
@@ -106,6 +198,49 @@ async function handle(e){const b=e.target.closest('[data-llm]');if(!b||b.disable
  if(op==='clear-source'){voice='';offset=0;selected=null;generation++;await refresh();return}
  if(op==='more'||op==='prev'){offset=Math.max(0,offset+(op==='more'?30:-30));selected=null;detail=null;lastDetail='';generation++;await refresh();return}
  b.disabled=true;
+ if(op==='agent-save-policy'){
+  const patch={
+   agent_enabled:!!$('#agentEnabledToggle')?.checked,
+   cloud_enabled:!!$('#agentCloudToggle')?.checked,
+   audio_cloud_enabled:!!$('#agentAudioCloudToggle')?.checked,
+  };
+  await api('/api/agent/budget/policy','PUT',patch);
+  const fb=$('#agentPolicyFeedback');if(fb)fb.textContent='에이전트 정책을 저장했습니다.';
+  await refresh();return;
+ }
+ if(op==='agent-submit'){
+  const text=($('#agentCommandInput')?.value||'').trim();
+  if(!text){Room.toast('실행할 명령을 입력하세요.');return;}
+  const modeVal=$('#agentCommandMode')?.value||agentMode||'auto';
+  const reqKey=keys.get('agent:'+modeVal+':'+text)||requestKey();
+  keys.set('agent:'+modeVal+':'+text,reqKey);
+  const res=await api('/api/agent/command','POST',{text,mode:modeVal,local_only:modeVal==='local_only',request_id:reqKey});
+  keys.delete('agent:'+modeVal+':'+text);
+  agentTextDraft='';const ai=$('#agentCommandInput');if(ai)ai.value='';
+  selectedAgentRunId=res.id||res.run_id;selectedAgentRun=res;
+  await refresh();window.RoomManager?.refresh(false);return;
+ }
+ if(op==='agent-briefing'){
+  const modeVal=$('#agentCommandMode')?.value||agentMode||'auto';
+  const isLocal=modeVal==='local_only';
+  const res=await api('/api/agent/briefing','POST',{text:'오늘 일정과 할 일, 알람, 타이머, 날씨, 실내 온도를 종합해서 데일리 브리핑해줘.',mode:isLocal?'local_only':'briefing',local_only:isLocal,request_id:requestKey()});
+  selectedAgentRunId=res.id||res.run_id;selectedAgentRun=res;
+  await refresh();return;
+ }
+ if(op==='agent-confirm'){
+  const runId=b.dataset.runId,prev=b.dataset.preview||'';
+  const res=await api('/api/agent/runs/'+encodeURIComponent(runId)+'/confirm','POST',{preview_sha256:prev});
+  selectedAgentRunId=res.id||res.run_id||runId;selectedAgentRun=res;
+  Room.toast('변경 사항을 승인하고 실행했습니다.');
+  await refresh();window.RoomManager?.refresh(false);return;
+ }
+ if(op==='agent-cancel'){
+  const runId=b.dataset.runId;
+  const res=await api('/api/agent/runs/'+encodeURIComponent(runId)+'/cancel','POST');
+  selectedAgentRunId=res.id||res.run_id||runId;selectedAgentRun=res;
+  Room.toast('에이전트 변경 요청을 취소했습니다.');
+  await refresh();return;
+ }
  if(op==='probe'){const result=await api('/api/llm/probe','POST');Room.toast(result.message);await refresh()}
  if(op==='confirm-action'){try{detail=await api('/api/assistant/'+id+'/confirm','POST',{preview_sha256:b.dataset.preview});lastDetail='';await refresh();window.RoomManager?.refresh(false)}catch(err){Room.toast(err.message);await refresh()}return}
  if(op==='send'){await api('/api/llm/requests/'+id+'/send','POST');lastDetail='';await refresh()}
@@ -118,6 +253,13 @@ async function submitFromVoice(v,button){
  if(sending.has(v.id))return;sending.add(v.id);button.disabled=true;
  try{
   const key=keys.get(v.id)||requestKey();keys.set(v.id,key);
+  if(requestMode==='personal_agent'){
+   const res=await api('/api/agent/command','POST',{text:v.text,mode:agentMode||'auto',local_only:agentMode==='local_only',request_id:'voice_'+key});
+   keys.delete(v.id);selectedAgentRunId=res.id||res.run_id;selectedAgentRun=res;generation++;
+   window.RoomManager.navigate('llm');await refresh();
+   Room.toast(res.status==='awaiting_confirmation'?'Personal Agent 변경 미리보기를 생성했습니다. 확인 후 승인하세요.':'Personal Agent 요청을 처리했습니다.');
+   return;
+  }
   const j=await api('/api/llm/requests','POST',{request_id:key,voice_id:v.id,mode:requestMode,expected_text_sha256:v.text_sha256||'0'.repeat(64)});
   keys.delete(v.id);selected=j.id;detail=j;lastDetail='';voice='';status='';query='';limit=30;offset=0;generation++;
   window.RoomManager.navigate('llm');await refresh();
@@ -125,6 +267,6 @@ async function submitFromVoice(v,button){
  }catch(err){if(err.status===409)keys.delete(v.id);throw err}
  finally{sending.delete(v.id);if(button.isConnected)button.disabled=false}
 }
-function reset(){generation++;root=null;cfg=null;list={items:[],total:0};selected=null;detail=null;draft=null;keys.clear();clearInterval(timer);timer=null}
-window.RoomLLM={getMode:()=>requestMode,setMode:v=>{if(['auto','chat','legacy'].includes(v))requestMode=v},mount,refresh,reset,submitFromVoice,filterVoice(id){voice=id;offset=0;selected=null;generation++},getSelection:()=>selected};
+function reset(){generation++;root=null;cfg=null;list={items:[],total:0};selected=null;detail=null;draft=null;agentState=null;agentRuns=[];selectedAgentRunId=null;selectedAgentRun=null;keys.clear();clearInterval(timer);timer=null}
+window.RoomLLM={getMode:()=>requestMode,setMode:v=>{if(['auto','chat','legacy','personal_agent'].includes(v))requestMode=v},mount,refresh,reset,submitFromVoice,filterVoice(id){voice=id;offset=0;selected=null;generation++},getSelection:()=>selected};
 })();

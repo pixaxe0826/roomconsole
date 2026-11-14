@@ -13,6 +13,17 @@ services:
       HUB_DATA_DIR: /app/data
       HUB_PORT: "8088"
       HUB_SECURE_COOKIE: "false"
+      HUB_PERSONAL_AGENT_ENABLED: "false"
+      HUB_OPENAI_ENABLED: "false"
+      HUB_OPENAI_AUDIO_ENABLED: "false"
+      HUB_OPENAI_INCLUDE_SHARED_NOTES: "false"
+      OPENAI_API_KEY: ""
+      HUB_OPENAI_API_KEY: ""
+      HUB_OPENAI_MONTHLY_BUDGET_USD: "100.00"
+      HUB_OPENAI_FAST_MODEL: "gpt-6.1-sol"
+      HUB_OPENAI_DEEP_MODEL: "gpt-6.1-sol"
+      HUB_OPENAI_REASONING_EFFORT: "high"
+      HUB_OPENAI_STT_MODEL: "gpt-4o-mini-transcribe"
     volumes:
       - /mnt/POOL/appdata/room_hub:/app/data
       - /mnt/POOL/apps/room_hub/widgets:/app/widgets:ro

@@ -52,7 +52,9 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
    if not ok:connections.pop(ws,None)
   return sum(results)
  async def changed(event,detail=''):
-  store.bump(event,detail);await broadcast({'type':'invalidate','revision':store.get('revision')})
+  store.bump(event,detail)
+  if store.in_unit_of_work():return
+  await broadcast({'type':'invalidate','revision':store.get('revision')})
  async def refresh_weather():
   async with wx_lock:
    settings=store.get('settings');wx['last_attempt']=time.monotonic()
@@ -203,6 +205,9 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
  async def assistant_tasks(start:str,end:str,status:str='all',limit:int=50,_=Depends(admin)):
   try:return store.query_tasks(start,end,status,limit)
   except ValueError as exc:raise HTTPException(422,str(exc))
+ @app.get('/api/display/llm')
+ async def llm_display_index(_=Depends(viewer)):
+  return llm_display.index(store)
  @app.get('/api/display/llm/{rid}')
  async def llm_display_entry(rid:str,_=Depends(viewer)):
   if not rid or len(rid)>80:raise HTTPException(422,'기록 ID를 확인하세요.')
@@ -335,9 +340,13 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
  app.state.widget_protocol=protocol
  llm.set_widget_registry(protocol)
  widget_protocol.register_routes(app,protocol,admin)
- personal_agent=PersonalAgentService(store,life,timers,None,task_services,speech=speech,gateway=agent_gateway,changed=changed,refresh_weather=refresh_weather,widget_root=widget_root)
+ personal_agent=PersonalAgentService(store,life,timers,None,task_services,speech=speech,llm=llm,gateway=agent_gateway,changed=changed,refresh_weather=refresh_weather,broadcast_fn=broadcast,widget_root=widget_root,temperature_store=getattr(app.state,'indoor_temperature',None))
  app.state.personal_agent=personal_agent
- register_agent_routes(app,personal_agent,admin)
+ register_agent_routes(app,personal_agent,admin,viewer)
+ async def route_speech_transcript(job_id:str,voice_id:str,text:str):
+  if personal_agent.is_enabled():return await personal_agent.submit_from_speech_job(job_id,voice_id,text)
+  return await llm.submit_transcription(job_id,voice_id,text)
+ speech.set_transcript_sink(route_speech_transcript)
  @app.get('/api/admin/export')
  async def export(_=Depends(admin)):
   with store.connect() as db:series=[dict(r) for r in db.execute('SELECT * FROM series')]
