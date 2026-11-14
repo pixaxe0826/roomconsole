@@ -58,7 +58,7 @@ function harness(profile='odyssey_openai'){
    if(url==='/api/llm/config')return response({runtime_profile:env.profile,config:{enabled:true,base_url:'http://127.0.0.1:8179',model:'retired-model'}},env.configFailure?503:200);
    if(url.startsWith('/api/llm/requests?'))return response({items:env.history?[history]:[],total:env.history?1:0});
    if(url==='/api/llm/requests/retired-request')return response(history);
-   if(url==='/api/agent/status')return response({runtime_profile:env.profile,cloud_status:env.cloud_status,agent_enabled:env.policy?.agent_enabled??true,cloud_enabled:env.policy?.cloud_enabled??true,audio_cloud_enabled:env.policy?.audio_cloud_enabled??true,adapters:['todo','alarm'],tiers:{tier1_stt:'synthetic-transcribe',tier2_fast:'synthetic-fast (reasoning_effort=high)',tier3_deep:'synthetic-deep (reasoning_effort=high)'},budget:{monthly_cap_usd:env.policy?.monthly_cap_usd??100}},env.agentStatusFailure?503:200);
+   if(url==='/api/agent/status')return response({runtime_profile:env.profile,cloud_status:env.cloud_status,agent_enabled:env.policy?.agent_enabled??true,cloud_enabled:env.policy?.cloud_enabled??true,audio_cloud_enabled:env.policy?.audio_cloud_enabled??true,allow_shared_notes_in_cloud:env.policy?.allow_shared_notes_in_cloud??false,adapters:['todo','alarm'],tiers:{tier1_stt:env.policy?.stt_model??'gpt-4o-mini-transcribe',tier2_fast:'synthetic-fast (reasoning_effort=high)',tier3_deep:'synthetic-deep (reasoning_effort=high)'},budget:{monthly_cap_usd:env.policy?.monthly_cap_usd??100}},env.agentStatusFailure?503:200);
    if(url.startsWith('/api/agent/runs?'))return response({items:[]});
    if(method==='PUT'&&url==='/api/agent/budget/policy'){
     if(env.policyError)return response(env.policyError.body,env.policyError.status);
@@ -112,16 +112,34 @@ async function main(){
  mounted.node('agentCloudToggle').checked=true;
  mounted.node('agentAudioCloudToggle').checked=true;
  mounted.node('agentMonthlyCap').value='42.5';
+ mounted.node('agentSttModel').value='gpt-transcribe';
  await mounted.root.listeners.click({target:policyButton});await settle();
  const policyWrites=mounted.calls.filter(c=>c.url==='/api/agent/budget/policy');
  check('Policy submits exactly one JSON PUT with all three opt-ins and a numeric USD cap',policyWrites.length===1&&policyWrites[0].method==='PUT'&&policyWrites[0].payload.monthly_cap_usd===42.5&&['agent_enabled','cloud_enabled','audio_cloud_enabled'].every(k=>policyWrites[0].payload[k]===true));
- check('Successful policy save shows confirmation and retains saved monthly cap',mounted.node('agentPolicyFeedback').textContent.includes('저장했습니다')&&mounted.node('agentMonthlyCap').value==='42.5');
+ check('Successful policy save retains the chosen STT model and monthly cap',mounted.node('agentPolicyFeedback').textContent.includes('저장했습니다')&&mounted.node('agentMonthlyCap').value==='42.5'&&policyWrites[0].payload.stt_model==='gpt-transcribe'&&mounted.node('agentSttModel').value==='gpt-transcribe');
  mounted.env.policyError={status:422,body:{detail:[{loc:['query','request'],msg:'Field required'}]}};
  await mounted.root.listeners.click({target:policyButton});await settle();
  check('Policy reports field-specific 422 instead of generic permissions',mounted.notices.some(s=>s.includes('request: Field required'))&&mounted.node('agentPolicyFeedback').textContent.includes('request: Field required'));
  mounted.env.policyError={status:401,body:{}};
  await mounted.root.listeners.click({target:policyButton});await settle();
  check('Policy reports explicit sign-in need on 401',mounted.node('agentPolicyFeedback').textContent.includes('관리자 로그인이 필요합니다'));
+
+ const modelPolicy=harness();
+ modelPolicy.env.policy={agent_enabled:false,cloud_enabled:false,audio_cloud_enabled:false,allow_shared_notes_in_cloud:false,monthly_cap_usd:75,stt_model:'gpt-4o-mini-transcribe'};
+ modelPolicy.load('web/manager-llm.js');modelPolicy.context.RoomLLM.mount(modelPolicy.root);await settle();
+ check('Initial policy load preserves the saved legacy model and never writes opt-ins',modelPolicy.node('agentSttModel').value==='gpt-4o-mini-transcribe'&&!modelPolicy.node('agentSttModel').disabled&&modelPolicy.calls.every(c=>c.method==='GET')&&['agentEnabledToggle','agentCloudToggle','agentAudioCloudToggle'].every(id=>modelPolicy.node(id).checked===false));
+ check('Model picker lists the new model and all existing allowed models',modelPolicy.root.innerHTML.includes('value="gpt-transcribe"')&&modelPolicy.root.innerHTML.includes('value="gpt-4o-mini-transcribe"')&&modelPolicy.root.innerHTML.includes('value="gpt-4o-transcribe"')&&modelPolicy.root.innerHTML.includes('value="whisper-1"'));
+ modelPolicy.node('agentSttModel').value='gpt-transcribe';
+ modelPolicy.node('agentPolicyBar').listeners.change();
+ await modelPolicy.context.RoomLLM.refresh();
+ check('Polling cannot overwrite an unsaved STT selection or apply it',modelPolicy.node('agentSttModel').value==='gpt-transcribe'&&modelPolicy.calls.every(c=>c.method==='GET'));
+ await modelPolicy.root.listeners.click({target:modelPolicy.query('[data-llm="agent-save-policy"]')});await settle();
+ const modelSave=modelPolicy.calls.filter(c=>c.method==='PUT');
+ check('Explicit model apply preserves disabled consents and the existing budget',modelSave.length===1&&modelSave[0].payload.stt_model==='gpt-transcribe'&&modelSave[0].payload.monthly_cap_usd===75&&['agent_enabled','cloud_enabled','audio_cloud_enabled','allow_shared_notes_in_cloud'].every(k=>modelSave[0].payload[k]===false));
+ check('Model apply does not transcribe audio or send an agent command',modelPolicy.calls.every(c=>c.method==='GET'||c.url==='/api/agent/budget/policy'));
+ modelPolicy.node('agentSttModel').value='unknown-model';
+ await modelPolicy.root.listeners.click({target:modelPolicy.query('[data-llm="agent-save-policy"]')});await settle();
+ check('Unsupported model cannot be sent by the policy form',modelPolicy.calls.filter(c=>c.method==='PUT').length===1&&modelPolicy.notices.some(message=>message.includes('전사 모델을 선택')));
 
  const runtime=harness();for(const id of ['architecture','probe','scopeNote','speech','llm','core','message']){const n=new runtime.Element();n.id=id;runtime.root.append(n);}
  runtime.env.state={runtime_profile:'odyssey_openai',speech:{enabled:true,state:'configured',backend:'openai',configured_model:'<img src=x onerror=BAD()>',preprocessing:'Odyssey FFmpeg',identity_note:'local configuration only'},llm:{enabled:true,state:'configured',backend:'openai',configured_model:'synthetic-fast',configured_deep_model:'synthetic-deep',reasoning_effort:'high',identity_note:'local configuration only'}};

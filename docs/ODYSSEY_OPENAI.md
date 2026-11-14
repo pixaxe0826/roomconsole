@@ -4,6 +4,8 @@
 
 이 문서는 PR #37의 `odyssey_openai` 실행 프로필을 적용하는 절차입니다. 소스 지원과 실제 운영 서버 배포는 다릅니다. PR 병합, Odyssey 배포, 실제 API 호출과 iPad 검증을 이 문서를 작성하면서 수행했다는 뜻이 아닙니다.
 
+GPT-Transcribe 지원 업데이트 후에는 기존 저장 모델이 유지됩니다. 관리자 Personal Agent의 **전사 모델 → `gpt-transcribe` → 정책 적용**으로 새 요청의 모델을 선택하세요. DB 삭제·동의 초기화·Whisper 설정 변경은 필요하지 않습니다. [전사 힌트와 과금 계약](OPENAI_PERSONAL_AGENT.md#gpt-transcribe와-room-hub-어휘-힌트) 및 [외부 음성 비교 절차](GPT_TRANSCRIBE_BENCHMARK.md)를 참고하세요.
+
 아래 절차는 기존 **Ubuntu Python/systemd 배포**를 대상으로 합니다. 현재 기본 Docker 이미지에는 FFmpeg가 없습니다. Compose의 프로필·환경변수 전달만으로 iPad 압축 녹음이 지원되지는 않으며, 호스트의 FFmpeg도 컨테이너 내부에 자동으로 제공되지 않습니다. Docker를 쓰려면 FFmpeg와 의존 라이브러리를 포함한 이미지 및 컨테이너 내부 경로를 별도로 준비·검증해야 합니다. [Docker/Compose 제한](SETUP.md#dockercompose-음성-전처리-제한)을 참고하세요.
 
 ## 1. 운영 구조

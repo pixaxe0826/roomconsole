@@ -22,14 +22,19 @@ import urllib.error
 from urllib.parse import urlsplit
 import urllib.request
 import uuid
+import unicodedata
 
-from .openai_budget import ALLOWED_CHAT_MODELS, ALLOWED_STT_MODELS, BudgetGovernor, UsageCategory
+from .openai_budget import ALLOWED_CHAT_MODELS, ALLOWED_STT_MODELS, DURATION_STT_MODELS, BudgetGovernor, UsageCategory
 from .ai_profile import AIProfile
 
 MAX_RESPONSE_BYTES = 512 * 1024
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
 MAX_AUDIO_DURATION_SECONDS = 300.0
 OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1'
+MAX_TRANSCRIPTION_KEYWORDS = 64
+MAX_TRANSCRIPTION_KEYWORD_CHARS = 80
+MAX_TRANSCRIPTION_KEYWORD_BYTES = 2048
+MAX_TRANSCRIPTION_PROMPT_CHARS = 800
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -143,6 +148,49 @@ def extract_usage(body: dict[str, Any]) -> dict[str, Any]:
 def _fingerprint(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
                                      separators=(',', ':'), allow_nan=False).encode('utf-8')).hexdigest()
+
+
+def normalize_transcription_keywords(keywords: list[str] | tuple[str, ...] | None) -> list[str]:
+    """Bound literal hints before reservation; never turn them into commands.
+
+    The provider rejects the entire request for markup/newlines in a keyword.
+    Room Hub also rejects control characters and overlong lists locally.
+    """
+    if keywords is None:
+        return []
+    if not isinstance(keywords, (list, tuple)) or len(keywords) > MAX_TRANSCRIPTION_KEYWORDS:
+        raise OpenAIGatewayError('전사 어휘 힌트 목록이 올바르지 않습니다.', 'invalid_keywords', 422)
+    result, seen, size = [], set(), 0
+    for value in keywords:
+        if (not isinstance(value, str) or any(c in '<>' or unicodedata.category(c).startswith('C')
+                                            or c in '\r\n' for c in value)):
+            raise OpenAIGatewayError('전사 어휘 힌트에 허용되지 않는 문자가 있습니다.', 'invalid_keywords', 422)
+        term = unicodedata.normalize('NFC', value).strip()
+        if not term or len(term) > MAX_TRANSCRIPTION_KEYWORD_CHARS:
+            raise OpenAIGatewayError('전사 어휘 힌트 길이가 올바르지 않습니다.', 'invalid_keywords', 422)
+        if term.casefold() in seen:
+            continue
+        size += len(term.encode('utf-8'))
+        if size > MAX_TRANSCRIPTION_KEYWORD_BYTES:
+            raise OpenAIGatewayError('전사 어휘 힌트가 크기 제한을 초과했습니다.', 'invalid_keywords', 422)
+        seen.add(term.casefold())
+        result.append(term)
+    return result
+
+
+def _detected_languages(body: Any) -> list[str] | None:
+    """Provider observations only; never substitute the configured language hint."""
+    values = body.get('languages') if isinstance(body, dict) else None
+    if not isinstance(values, list) or len(values) > 32:
+        return None
+    codes = []
+    for item in values:
+        code = item.get('code') if isinstance(item, dict) else None
+        if not isinstance(code, str) or len(code) != 2 or not code.isascii() or not code.isalpha():
+            return None
+        if code.lower() not in codes:
+            codes.append(code.lower())
+    return codes
 
 
 _CONTAINER_RULES: dict[str, dict[str, set[str]]] = {
@@ -281,7 +329,9 @@ def verify_audio_payload(
             'container': container,
             'mime_type': clean_mime or 'audio/wav',
             'size_bytes': size,
-            'verified_duration_seconds': round(verified_duration, 3),
+            # Keep accounting precision: rounding 1.000375s to 1.000s could
+            # under-reserve a duration-billed call across a whole-second edge.
+            'verified_duration_seconds': verified_duration,
             'duration_source': 'wav_header',
         }
 
@@ -408,7 +458,7 @@ class OpenAIGateway:
                           cost_source: str = 'provider_usage') -> dict[str, Any] | None:
         """Settle only priced, complete provider usage, including paid failures."""
         usage = extract_usage(body if isinstance(body, dict) else {})
-        expected_kind = 'duration' if model == 'whisper-1' else 'tokens'
+        expected_kind = 'duration' if model in DURATION_STT_MODELS else 'tokens'
         actual_tier = body.get('service_tier') if isinstance(body, dict) else None
         actual_model = body.get('model') if isinstance(body, dict) else None
         if (usage['usage_kind'] != expected_kind or actual_tier not in {None, 'default'}
@@ -761,6 +811,7 @@ class OpenAIGateway:
         duration_seconds: float | None = None,
         language: str = 'ko',
         prompt_hint: str = '',
+        keywords: list[str] | tuple[str, ...] | None = None,
         requested_model: str | None = None,
         timeout: float = 30.0,
         at_iso: str | None = None,
@@ -781,6 +832,10 @@ class OpenAIGateway:
         if language != 'auto' and (len(language) != 2 or not language.isascii() or not language.isalpha()):
             raise OpenAIGatewayError('전사 언어는 두 글자 언어 코드 또는 auto여야 합니다.',
                                      'invalid_language', 422)
+        if not isinstance(prompt_hint, str):
+            raise OpenAIGatewayError('전사 문맥 힌트는 문자열이어야 합니다.', 'invalid_prompt', 422)
+        prompt_hint = prompt_hint[:MAX_TRANSCRIPTION_PROMPT_CHARS]
+        keyword_hints = normalize_transcription_keywords(keywords)
 
         verified = verify_audio_payload(
             audio_bytes,
@@ -815,23 +870,34 @@ class OpenAIGateway:
             at_iso=at_iso,
             request_fingerprint=_fingerprint({
                 'sha256': hashlib.sha256(audio_bytes).hexdigest(), 'language': language,
-                'prompt_hint': prompt_hint[:800], 'model': chosen_model, 'base_url': self.base_url,
+                'prompt_hint': prompt_hint, 'keywords': keyword_hints,
+                'model': chosen_model, 'base_url': self.base_url,
             }),
         )
 
         headers = {'Accept': 'application/json'}
         if key:
             headers['Authorization'] = f'Bearer {key}'
-        data = {
+        data: dict[str, Any] = {
             'model': decision.selected_model,
             'response_format': 'json',
         }
         # The API auto-detects only when language is omitted; "auto" is a
         # Room Hub setting, not an ISO-639-1 code accepted by the provider.
         if language != 'auto':
-            data['language'] = language
+            if decision.selected_model == 'gpt-transcribe':
+                data['languages[]'] = [language]
+            else:
+                data['language'] = language
+        if decision.selected_model == 'gpt-transcribe':
+            if keyword_hints:
+                data['keywords[]'] = keyword_hints
+        elif keyword_hints:
+            # Legacy models do not support keywords[]. Preserve their request
+            # schema, using the already supported bounded prompt instead.
+            prompt_hint = (prompt_hint + ' 참고 어휘: ' + ', '.join(keyword_hints)).strip()[:MAX_TRANSCRIPTION_PROMPT_CHARS]
         if prompt_hint:
-            data['prompt'] = prompt_hint[:800]
+            data['prompt'] = prompt_hint
 
         start = time.perf_counter()
         try:
@@ -845,11 +911,12 @@ class OpenAIGateway:
                     boundary = f'----RoomHubBoundary{uuid.uuid4().hex}'
                     parts: list[bytes] = []
                     for field_name, field_val in data.items():
-                        parts.append(
-                            f'--{boundary}\r\n'
-                            f'Content-Disposition: form-data; name="{field_name}"\r\n\r\n'
-                            f'{field_val}\r\n'.encode('utf-8')
-                        )
+                        for value in field_val if isinstance(field_val, list) else [field_val]:
+                            parts.append(
+                                f'--{boundary}\r\n'
+                                f'Content-Disposition: form-data; name="{field_name}"\r\n\r\n'
+                                f'{value}\r\n'.encode('utf-8')
+                            )
                     parts.append(
                         f'--{boundary}\r\n'
                         f'Content-Disposition: form-data; name="file"; filename="voice.wav"\r\n'
@@ -963,6 +1030,7 @@ class OpenAIGateway:
         return {
             'text': text,
             'model': decision.selected_model,
+            'detected_languages': _detected_languages(body),
             'duration_seconds': verified_seconds,
             'verified_duration_seconds': verified_seconds,
             'cost_source': cost_source,

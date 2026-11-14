@@ -25,7 +25,7 @@ services:
       HUB_OPENAI_FAST_MODEL: "gpt-6.1-sol"
       HUB_OPENAI_DEEP_MODEL: "gpt-6.1-sol"
       HUB_OPENAI_REASONING_EFFORT: "high"
-      HUB_OPENAI_STT_MODEL: "gpt-4o-mini-transcribe"
+      HUB_OPENAI_STT_MODEL: "gpt-transcribe"
     volumes:
       - /mnt/POOL/appdata/room_hub:/app/data
       - /mnt/POOL/apps/room_hub/widgets:/app/widgets:ro

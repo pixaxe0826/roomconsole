@@ -53,7 +53,7 @@ Odyssey 단독 전환은 기존 Ubuntu의 Python/systemd 배포를 권장합니�
 | `HUB_OPENAI_MONTHLY_CAP_USD` | `100.00` | 정책 최초 생성 시 월 예산 한도(USD) |
 | `HUB_OPENAI_FAST_MODEL` / `HUB_OPENAI_DEEP_MODEL` | `gpt-6.1-sol` | 최초 DB 초기화 시 Tier 1 / Tier 2 계획 모델 |
 | `HUB_OPENAI_REASONING_EFFORT` | `high` | 최초 DB 초기화 시 추론 강도(`low`/`medium`/`high`) |
-| `HUB_OPENAI_STT_MODEL` | `gpt-4o-mini-transcribe` | 최초 DB 초기화 시 클라우드 STT 모델 |
+| `HUB_OPENAI_STT_MODEL` | `gpt-transcribe` | 최초 DB 초기화 시 클라우드 STT 모델. 기존 정책은 관리자 전사 모델 선택 후 적용 |
 
 직접 Python 실행(`run.py`)은 `.env` 파일을 자동으로 읽지 않습니다.
 
