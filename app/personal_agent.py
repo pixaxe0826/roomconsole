@@ -45,11 +45,9 @@ from .store import uid, utcnow
 from .timer_commands import exact_timer
 from .widget_protocol import (
     ExecutionContext,
-    LayoutAdapter,
     TaskServices,
     WidgetRegistry,
     WidgetRequest,
-    build_full_registry,
     request_digest,
 )
 
@@ -336,85 +334,102 @@ class PersonalAgentService:
         self.temperature_store = temperature_store
         self.confirm_lock = asyncio.Lock()
         self._inflight_runs: dict[str, asyncio.Future] = {}
+        self._registry = registry
+        self._schema_ready = False
 
-        if registry is None or len(registry.list_widgets()) < len(ALL_ADAPTER_DOMAINS):
+    @property
+    def registry(self) -> WidgetRegistry:
+        if self._registry is None or len(self._registry.list_widgets()) < len(ALL_ADAPTER_DOMAINS):
+            from .widget_protocol.system_adapters import build_full_registry
+
             async def _noop_changed(event: str, detail: str = '') -> None:
-                store.bump(event, detail)
+                self.store.bump(event, detail)
 
-            self.registry = build_full_registry(
-                store,
-                life,
-                changed or _noop_changed,
-                task_services,
-                timers=timers,
-                refresh_weather=refresh_weather,
-                widget_root=widget_root,
-                temperature_store=temperature_store,
-                broadcast_fn=broadcast_fn,
+            self._registry = build_full_registry(
+                self.store,
+                self.life,
+                self.changed or _noop_changed,
+                self.task_services,
+                timers=self.timers,
+                refresh_weather=self.refresh_weather,
+                widget_root=self.widget_root,
+                temperature_store=self.temperature_store,
+                broadcast_fn=self.broadcast_fn,
             )
-        else:
-            self.registry = registry
+        return self._registry
 
-        with self._db() as db:
-            db.executescript('''
-                CREATE TABLE IF NOT EXISTS hub_agent_runs (
-                    id TEXT PRIMARY KEY,
-                    request_key TEXT NOT NULL UNIQUE,
-                    request_id TEXT NOT NULL DEFAULT '',
-                    principal TEXT NOT NULL DEFAULT 'admin',
-                    device_id TEXT,
-                    request_sha256 TEXT NOT NULL DEFAULT '',
-                    session_id TEXT,
-                    mode TEXT NOT NULL,
-                    local_only INTEGER NOT NULL DEFAULT 0,
-                    source_text TEXT NOT NULL,
-                    tier_used TEXT NOT NULL,
-                    model_used TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    summary_text TEXT NOT NULL,
-                    plan_json TEXT NOT NULL,
-                    preview_json TEXT,
-                    preview_sha256 TEXT,
-                    timestamps_json TEXT,
-                    cost_microdollars INTEGER NOT NULL DEFAULT 0,
-                    latency_ms REAL NOT NULL DEFAULT 0.0,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_agent_runs_created
-                    ON hub_agent_runs(created_at DESC, id DESC);
-                CREATE TABLE IF NOT EXISTS hub_agent_receipts (
-                    run_id TEXT PRIMARY KEY REFERENCES hub_agent_runs(id) ON DELETE CASCADE,
-                    preview_sha256 TEXT NOT NULL,
-                    receipt_json TEXT NOT NULL,
-                    executed_at TEXT NOT NULL
-                );
-            ''')
-            cols = {r['name'] for r in db.execute('PRAGMA table_info(hub_agent_runs)').fetchall()}
-            for col_name, col_def in (
-                ('request_id', "TEXT NOT NULL DEFAULT ''"),
-                ('principal', "TEXT NOT NULL DEFAULT 'admin'"),
-                ('device_id', 'TEXT'),
-                ('request_sha256', "TEXT NOT NULL DEFAULT ''"),
-                ('local_only', 'INTEGER NOT NULL DEFAULT 0'),
-                ('timestamps_json', 'TEXT'),
-            ):
-                if col_name not in cols:
-                    db.execute(f'ALTER TABLE hub_agent_runs ADD COLUMN {col_name} {col_def}')
-            # Startup crash recovery: never auto-rerun interrupted runs
-            db.execute(
-                '''UPDATE hub_agent_runs
-                   SET status = 'interrupted',
-                       summary_text = '서버 재시작으로 인해 실행 중이던 작업이 중단되었습니다. 결과를 확인한 뒤 새 요청으로 다시 시도해 주세요.',
-                       updated_at = ?
-                   WHERE status = 'running' ''',
-                (utcnow(),),
-            )
+    @registry.setter
+    def registry(self, value: WidgetRegistry | None) -> None:
+        self._registry = value
+
+    def _ensure_schema(self, db) -> None:
+        if self._schema_ready:
+            return
+        for stmt in (
+            '''CREATE TABLE IF NOT EXISTS hub_agent_runs (
+                id TEXT PRIMARY KEY,
+                request_key TEXT NOT NULL UNIQUE,
+                request_id TEXT NOT NULL DEFAULT '',
+                principal TEXT NOT NULL DEFAULT 'admin',
+                device_id TEXT,
+                request_sha256 TEXT NOT NULL DEFAULT '',
+                session_id TEXT,
+                mode TEXT NOT NULL,
+                local_only INTEGER NOT NULL DEFAULT 0,
+                source_text TEXT NOT NULL,
+                tier_used TEXT NOT NULL,
+                model_used TEXT NOT NULL,
+                status TEXT NOT NULL,
+                summary_text TEXT NOT NULL,
+                plan_json TEXT NOT NULL,
+                preview_json TEXT,
+                preview_sha256 TEXT,
+                timestamps_json TEXT,
+                cost_microdollars INTEGER NOT NULL DEFAULT 0,
+                latency_ms REAL NOT NULL DEFAULT 0.0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )''',
+            '''CREATE INDEX IF NOT EXISTS idx_agent_runs_created
+                ON hub_agent_runs(created_at DESC, id DESC)''',
+            '''CREATE TABLE IF NOT EXISTS hub_agent_receipts (
+                run_id TEXT PRIMARY KEY REFERENCES hub_agent_runs(id) ON DELETE CASCADE,
+                preview_sha256 TEXT NOT NULL,
+                receipt_json TEXT NOT NULL,
+                executed_at TEXT NOT NULL
+            )''',
+        ):
+            db.execute(stmt)
+        cols = {r['name'] for r in db.execute('PRAGMA table_info(hub_agent_runs)').fetchall()}
+        for col_name, col_def in (
+            ('request_id', "TEXT NOT NULL DEFAULT ''"),
+            ('principal', "TEXT NOT NULL DEFAULT 'admin'"),
+            ('device_id', 'TEXT'),
+            ('request_sha256', "TEXT NOT NULL DEFAULT ''"),
+            ('local_only', 'INTEGER NOT NULL DEFAULT 0'),
+            ('timestamps_json', 'TEXT'),
+        ):
+            if col_name not in cols:
+                db.execute(f'ALTER TABLE hub_agent_runs ADD COLUMN {col_name} {col_def}')
+        # Startup crash recovery: never auto-rerun interrupted runs
+        db.execute(
+            '''UPDATE hub_agent_runs
+               SET status = 'interrupted',
+                   summary_text = '서버 재시작으로 인해 실행 중이던 작업이 중단되었습니다. 결과를 확인한 뒤 새 요청으로 다시 시도해 주세요.',
+                   updated_at = ?
+               WHERE status = 'running' ''',
+            (utcnow(),),
+        )
+        if not self.store.in_unit_of_work():
+            db.commit()
+        self._schema_ready = True
 
     @contextmanager
     def _db(self):
         with closing(self.store.connect()) as db:
             with db:
+                if not self._schema_ready:
+                    self._ensure_schema(db)
                 yield db
 
     async def _notify(self, event: str, detail: str = '') -> None:
@@ -422,6 +437,13 @@ class PersonalAgentService:
             await self.changed(event, detail)
 
     def is_enabled(self) -> bool:
+        if not self.governor._schema_ready and not self.governor._initial_policy.agent_enabled:
+            with closing(self.store.connect()) as db:
+                row = db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='hub_ai_budget_policy'"
+                ).fetchone()
+                if not row:
+                    return False
         return bool(self.governor.policy().agent_enabled)
 
     def should_use_cloud(
@@ -1966,6 +1988,8 @@ class PersonalAgentService:
                     if explicit_x is not None and explicit_y is not None:
                         x_pos, y_pos = explicit_x, explicit_y
                     else:
+                        from .widget_protocol.system_adapters import LayoutAdapter
+
                         slot = LayoutAdapter.find_free_slot(
                             working_widgets, w_size, h_size, columns=columns, rows=rows
                         )

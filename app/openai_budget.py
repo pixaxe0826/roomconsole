@@ -270,66 +270,77 @@ class BudgetGovernor:
 
     def __init__(self, store):
         self.store = store
-        with self._db() as db:
-            db.executescript('''
-                CREATE TABLE IF NOT EXISTS hub_ai_budget_policy (
-                    id INTEGER PRIMARY KEY CHECK(id = 1),
-                    policy_json TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS hub_ai_usage_ledger (
-                    id TEXT PRIMARY KEY,
-                    request_id TEXT NOT NULL UNIQUE,
-                    billing_month TEXT NOT NULL,
-                    category TEXT NOT NULL,
-                    model TEXT NOT NULL,
-                    prompt_tokens INTEGER NOT NULL DEFAULT 0,
-                    cached_tokens INTEGER NOT NULL DEFAULT 0,
-                    completion_tokens INTEGER NOT NULL DEFAULT 0,
-                    reasoning_tokens INTEGER NOT NULL DEFAULT 0,
-                    audio_seconds REAL NOT NULL DEFAULT 0.0,
-                    cost_microdollars INTEGER NOT NULL DEFAULT 0,
-                    cost_source TEXT NOT NULL DEFAULT 'provider_usage',
-                    note TEXT NOT NULL DEFAULT '',
-                    created_at TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_ai_usage_month
-                    ON hub_ai_usage_ledger(billing_month, created_at DESC);
-                CREATE TABLE IF NOT EXISTS hub_ai_budget_reservations (
-                    request_id TEXT PRIMARY KEY,
-                    billing_month TEXT NOT NULL,
-                    category TEXT NOT NULL,
-                    model TEXT NOT NULL,
-                    reserved_microdollars INTEGER NOT NULL,
-                    status TEXT NOT NULL CHECK(status IN ('active', 'settled', 'released', 'unknown')),
-                    actual_microdollars INTEGER,
-                    cost_source TEXT NOT NULL DEFAULT 'reservation',
-                    note TEXT NOT NULL DEFAULT '',
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_ai_reservations_month
-                    ON hub_ai_budget_reservations(billing_month, status);
-            ''')
-            cols = {r['name'] for r in db.execute('PRAGMA table_info(hub_ai_usage_ledger)').fetchall()}
-            if 'reasoning_tokens' not in cols:
-                db.execute('ALTER TABLE hub_ai_usage_ledger ADD COLUMN reasoning_tokens INTEGER NOT NULL DEFAULT 0')
-            if 'cost_source' not in cols:
-                db.execute(
-                    "ALTER TABLE hub_ai_usage_ledger ADD COLUMN cost_source TEXT NOT NULL DEFAULT 'provider_usage'"
-                )
-            row = db.execute('SELECT 1 FROM hub_ai_budget_policy WHERE id = 1').fetchone()
-            if not row:
-                initial_policy = policy_from_env().model_dump()
-                db.execute(
-                    'INSERT INTO hub_ai_budget_policy(id, policy_json, updated_at) VALUES(1, ?, ?)',
-                    (json.dumps(initial_policy, ensure_ascii=False), utcnow()),
-                )
+        self._schema_ready = False
+        self._initial_policy = policy_from_env()
+
+    def _ensure_schema(self, db) -> None:
+        if self._schema_ready:
+            return
+        for stmt in (
+            '''CREATE TABLE IF NOT EXISTS hub_ai_budget_policy (
+                id INTEGER PRIMARY KEY CHECK(id = 1),
+                policy_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )''',
+            '''CREATE TABLE IF NOT EXISTS hub_ai_usage_ledger (
+                id TEXT PRIMARY KEY,
+                request_id TEXT NOT NULL UNIQUE,
+                billing_month TEXT NOT NULL,
+                category TEXT NOT NULL,
+                model TEXT NOT NULL,
+                prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                cached_tokens INTEGER NOT NULL DEFAULT 0,
+                completion_tokens INTEGER NOT NULL DEFAULT 0,
+                reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+                audio_seconds REAL NOT NULL DEFAULT 0.0,
+                cost_microdollars INTEGER NOT NULL DEFAULT 0,
+                cost_source TEXT NOT NULL DEFAULT 'provider_usage',
+                note TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            )''',
+            '''CREATE INDEX IF NOT EXISTS idx_ai_usage_month
+                ON hub_ai_usage_ledger(billing_month, created_at DESC)''',
+            '''CREATE TABLE IF NOT EXISTS hub_ai_budget_reservations (
+                request_id TEXT PRIMARY KEY,
+                billing_month TEXT NOT NULL,
+                category TEXT NOT NULL,
+                model TEXT NOT NULL,
+                reserved_microdollars INTEGER NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('active', 'settled', 'released', 'unknown')),
+                actual_microdollars INTEGER,
+                cost_source TEXT NOT NULL DEFAULT 'reservation',
+                note TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )''',
+            '''CREATE INDEX IF NOT EXISTS idx_ai_reservations_month
+                ON hub_ai_budget_reservations(billing_month, status)''',
+        ):
+            db.execute(stmt)
+        cols = {r['name'] for r in db.execute('PRAGMA table_info(hub_ai_usage_ledger)').fetchall()}
+        if 'reasoning_tokens' not in cols:
+            db.execute('ALTER TABLE hub_ai_usage_ledger ADD COLUMN reasoning_tokens INTEGER NOT NULL DEFAULT 0')
+        if 'cost_source' not in cols:
+            db.execute(
+                "ALTER TABLE hub_ai_usage_ledger ADD COLUMN cost_source TEXT NOT NULL DEFAULT 'provider_usage'"
+            )
+        row = db.execute('SELECT 1 FROM hub_ai_budget_policy WHERE id = 1').fetchone()
+        if not row:
+            initial_policy = self._initial_policy.model_dump()
+            db.execute(
+                'INSERT INTO hub_ai_budget_policy(id, policy_json, updated_at) VALUES(1, ?, ?)',
+                (json.dumps(initial_policy, ensure_ascii=False), utcnow()),
+            )
+        if not self.store.in_unit_of_work():
+            db.commit()
+        self._schema_ready = True
 
     @contextmanager
     def _db(self):
         with closing(self.store.connect()) as db:
             with db:
+                if not self._schema_ready:
+                    self._ensure_schema(db)
                 yield db
 
     def current_billing_month(self, at_iso: str | None = None) -> str:
