@@ -44,7 +44,10 @@ class TestAgentBudgetSafety(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.store = Store(Path(self.tmp.name) / 'synthetic.sqlite3')
         self.gov = BudgetGovernor(self.store)
-        self.gov.set_policy({'agent_enabled': True, 'cloud_enabled': True, 'audio_cloud_enabled': True})
+        # Keep legacy token billing coverage explicit when the fresh-install
+        # default changes; GPT-Transcribe duration cases live in their own suite.
+        self.gov.set_policy({'agent_enabled': True, 'cloud_enabled': True, 'audio_cloud_enabled': True,
+                             'stt_model': 'gpt-4o-mini-transcribe'})
 
     def gateway(self, transport, gov=None):
         return OpenAIGateway(gov or self.gov, api_key='synthetic-offline-key', transport=transport)

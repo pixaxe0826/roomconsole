@@ -19,7 +19,7 @@ MOCK_API = r"""() => {
   };
   window.__policy = {
     agent_enabled:false, cloud_enabled:false, audio_cloud_enabled:false,
-    allow_shared_notes_in_cloud:false, monthly_cap_usd:100,
+    allow_shared_notes_in_cloud:false, monthly_cap_usd:100, stt_model:'gpt-4o-mini-transcribe',
   };
   window.__writes = [];
   window.__failure = null;
@@ -37,7 +37,7 @@ MOCK_API = r"""() => {
     if (url === '/api/agent/status') return reply({
       runtime_profile:'odyssey_openai', ...window.__policy,
       budget:{monthly_cap_usd:window.__policy.monthly_cap_usd,committed_usd:0,state:'NORMAL'},
-      cloud_status:'agent_disabled',adapters:[],tiers:{tier1_stt:'synthetic STT'},
+      cloud_status:'agent_disabled',adapters:[],tiers:{tier1_stt:window.__policy.stt_model},
     });
     if (url === '/api/agent/budget/policy' && method === 'PUT') {
       window.__writes.push({url,method,headers:options.headers,credentials:options.credentials,
@@ -73,7 +73,10 @@ def run():
         page.evaluate(MOCK_API)
         page.add_script_tag(content=(ROOT / 'web/manager-llm.js').read_text(encoding='utf-8'))
         page.evaluate("RoomLLM.mount(document.getElementById('llmRoot'))")
-        page.wait_for_function("document.querySelector('#agentMonthlyCap')?.value === '100'")
+        page.wait_for_function("document.querySelector('#agentSttModel')?.value === 'gpt-4o-mini-transcribe'")
+        check('Loading the form preserves the saved model without granting consent or saving',
+              not page.evaluate('window.__writes.length') and
+              not page.locator('#agentAudioCloudToggle').is_checked())
 
         def dimensions():
             return page.locator('#agentMonthlyCap').evaluate('''el => ({
@@ -90,12 +93,21 @@ def run():
                   size['width'] >= 140 and size['height'] >= 40)
             check(f'Policy labels align and do not overflow at {width}px',
                   size['labelDirection'] == 'row' and not size['overflow'])
+            model_size = page.locator('#agentSttModel').bounding_box()
+            check(f'STT model picker remains readable and inside the viewport at {width}px',
+                  model_size['width'] >= 200 and model_size['height'] >= 40 and
+                  model_size['x'] + model_size['width'] <= width)
 
         page.set_viewport_size({'width': 1440, 'height': 900})
         page.locator('#agentEnabledToggle').check()
         page.locator('#agentCloudToggle').check()
         page.locator('#agentAudioCloudToggle').check()
         page.locator('#agentMonthlyCap').fill('42.50')
+        page.locator('#agentSttModel').select_option('gpt-transcribe')
+        page.evaluate('RoomLLM.refresh()')
+        check('Polling preserves an unsaved model selection and does not apply it',
+              page.locator('#agentSttModel').input_value() == 'gpt-transcribe' and
+              not page.evaluate('window.__writes.length'))
         page.locator('[data-llm="agent-save-policy"]').click()
         page.wait_for_function("document.querySelector('#agentPolicyFeedback').textContent.includes('저장했습니다')")
         sent = page.evaluate('window.__writes')
@@ -103,10 +115,12 @@ def run():
               len(sent) == 1 and sent[0]['method'] == 'PUT' and
               sent[0]['credentials'] == 'same-origin' and
               sent[0]['headers'].get('X-Room-Request') == '1')
-        check('Saved settings preserve three opt-ins and the entered USD amount',
+        check('Saved settings preserve three opt-ins, the chosen model, and the entered USD amount',
               all(sent[0]['body'][key] is True for key in
                   ('agent_enabled', 'cloud_enabled', 'audio_cloud_enabled')) and
-              sent[0]['body']['monthly_cap_usd'] == 42.5)
+              sent[0]['body']['monthly_cap_usd'] == 42.5 and
+              sent[0]['body']['stt_model'] == 'gpt-transcribe' and
+              page.locator('#agentSttModel').input_value() == 'gpt-transcribe')
 
         page.evaluate("window.__failure={status:422,body:{detail:[{loc:['query','request'],msg:'Field required'}]}}")
         page.locator('[data-llm="agent-save-policy"]').click()

@@ -139,3 +139,14 @@ python scripts/agent_policy_browser.py
 ```
 
 관리자 정책 PUT의 FastAPI `Request` 바인딩, 관리자 인증/CSRF/Origin 거부, 숫자 예산·동의 저장, 음성 multipart 바인딩을 합성 환경에서 확인합니다. Node 검사는 검증 오류 422와 로그인 만료 401의 표시를 확인합니다. Chromium 검사는 실제 CSS 숫자 입력 너비와 화면 폭 1440/390px을 확인합니다. 실제 서비스의 쿠키·터널·OpenAI 키/권한 및 유료 호출은 검증하지 않습니다.
+
+## GPT-Transcribe 호환·어휘·벤치마크 도구 회귀
+
+```bash
+python -m pytest -q tests/test_gpt_transcribe.py tests/test_transcription_hints.py tests/test_openai_stt_benchmark.py tests/test_agent_budget_safety.py tests/test_agent_policy_routes.py --junitxml=artifacts/test-results/gpt-transcribe.xml
+node scripts/odyssey_ui_regression.js
+```
+
+위 검사는 합성 WAV, 모의 공급자 응답, 임시 DB로 동작합니다. urllib/httpx의 실제 multipart 직렬화, 새 `languages[]`/`keywords[]`, 구형 요청 형식 보존, 저장 모델·동의·예산 유지, duration 정산/미정 usage, 중복 호출 방지, 어휘 힌트의 메모 제외를 확인합니다. 새 모델 선택기는 위 Chromium 검사에도 포함됩니다. 실제 OpenAI 인식 품질·비용·지연을 측정한 결과가 아닙니다.
+
+기존 외부 250문항 suite는 텍스트 명령 해석 평가이며 음성 인식 평가가 아닙니다. 새 [STT 비교 도구](GPT_TRANSCRIBE_BENCHMARK.md)는 별도 녹음/정답 manifest, 명시적 유료 실행, 독립 예산을 요구하며 생산 DB나 실제 할 일·일정 실행 경로에 접근하지 않습니다. 입력이나 키가 없으면 `NOT_RUN`으로 보고하고 API 요청을 하지 않습니다.

@@ -1,6 +1,7 @@
 """Offline regression for FastAPI's postponed route annotations and policy auth."""
 
 from fastapi.testclient import TestClient
+import pytest
 
 from app.main import create_app
 
@@ -70,3 +71,48 @@ def test_agent_audio_file_annotation_is_resolved_before_validation(tmp_path, mon
                                data={'request_id': 'synthetic-policy-binding', 'mode': 'unsupported'})
         assert response.status_code == 422
         assert response.json()['detail'] == '지원하지 않는 실행 모드입니다.'
+
+
+@pytest.mark.parametrize('profile', ['odyssey_openai', 'legacy'])
+def test_stt_model_policy_updates_preserve_opt_ins_and_budget(tmp_path, monkeypatch, profile):
+    monkeypatch.setenv('HUB_AI_PROFILE', profile)
+    monkeypatch.setenv('HUB_OPENAI_STT_MODEL', 'gpt-4o-mini-transcribe')
+    for name in ('OPENAI_API_KEY', 'HUB_OPENAI_API_KEY', 'HUB_LLM_API_KEY',
+                 'HUB_PERSONAL_AGENT_ENABLED', 'HUB_OPENAI_ENABLED',
+                 'HUB_OPENAI_AUDIO_ENABLED', 'HUB_RUN_LIVE_OPENAI_TESTS'):
+        monkeypatch.delenv(name, raising=False)
+    app = create_app(data_dir=tmp_path / 'synthetic-model-policy', weather_enabled=False)
+    with TestClient(app) as client:
+        headers = {'Authorization': 'Bearer ' + app.state.admin_token,
+                   'X-Room-Request': '1'}
+        initial = client.get('/api/agent/status', headers=headers).json()
+        assert initial['stt_model'] == 'gpt-4o-mini-transcribe'
+
+        # A model-only patch neither grants cloud/audio consent nor resets money.
+        for model in ('gpt-transcribe', 'gpt-4o-transcribe', 'whisper-1',
+                      'gpt-4o-mini-transcribe'):
+            response = client.put('/api/agent/budget/policy',
+                                  headers=headers, json={'stt_model': model})
+            assert response.status_code == 200, response.text
+            policy = response.json()['policy']
+            assert policy['stt_model'] == model
+            assert policy['monthly_cap_usd'] == initial['budget']['monthly_cap_usd']
+            assert all(policy[key] is False for key in
+                       ('agent_enabled', 'cloud_enabled', 'audio_cloud_enabled',
+                        'allow_shared_notes_in_cloud'))
+            status = client.get('/api/agent/status', headers=headers).json()
+            assert status['stt_model'] == model
+            assert status['tiers']['tier1_stt'] == (model if profile == 'odyssey_openai' else 'local/whisper')
+
+        # Unrelated edits keep the stored model. Invalid model patches are atomic.
+        budget = client.put('/api/agent/budget/policy', headers=headers,
+                            json={'monthly_cap_usd': 73})
+        assert budget.status_code == 200
+        assert budget.json()['policy']['stt_model'] == 'gpt-4o-mini-transcribe'
+        invalid = client.put('/api/agent/budget/policy', headers=headers,
+                             json={'stt_model': 'unregistered-model', 'cloud_enabled': True})
+        assert invalid.status_code == 422
+        saved = client.get('/api/agent/status', headers=headers).json()
+        assert saved['stt_model'] == 'gpt-4o-mini-transcribe'
+        assert saved['cloud_enabled'] is False
+        assert saved['budget']['monthly_cap_usd'] == 73

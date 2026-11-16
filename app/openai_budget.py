@@ -36,6 +36,7 @@ PRICING_CATALOG_METADATA = {
         'https://developers.openai.com/api/docs/pricing',
         'https://developers.openai.com/api/docs/models/gpt-6.1-sol',
         'https://developers.openai.com/api/docs/models/gpt-6.1-terra',
+        'https://developers.openai.com/api/docs/models/gpt-transcribe',
         'https://developers.openai.com/api/docs/models/gpt-4o-mini-transcribe',
         'https://developers.openai.com/api/docs/models/gpt-4o-transcribe',
         'https://developers.openai.com/api/docs/models/whisper-1',
@@ -47,6 +48,7 @@ PRICING_CATALOG_METADATA = {
     ],
     'scope': 'Standard text / transcription only; excludes tools, regional and premium tiers.',
     'token_stt_minute_rates': 'estimates, never provider_usage',
+    'gpt_transcribe_checked_on': '2026-11-15',
     'unavailable_models': ['o3-mini'],
 }
 PRICING_CATALOG: dict[str, dict[str, int]] = {
@@ -90,6 +92,13 @@ PRICING_CATALOG: dict[str, dict[str, int]] = {
         'output_per_1m_micros': 4_400_000,    # $4.40 / 1M output tokens
         'audio_per_min_micros': 0,
     },
+    'gpt-transcribe': {
+        # Duration billing, NOT the legacy token-STT per-minute estimate.
+        'input_per_1m_micros': 0,
+        'cached_per_1m_micros': 0,
+        'output_per_1m_micros': 0,
+        'audio_per_min_micros': 4_500,        # $0.0045 / minute (2026-11-15)
+    },
     'gpt-4o-mini-transcribe': {
         'input_per_1m_micros': 1_250_000,
         'cached_per_1m_micros': 0,
@@ -124,7 +133,8 @@ ALLOWED_CHAT_MODELS = (
     'gpt-4o',
     'o3-mini',
 )
-ALLOWED_STT_MODELS = ('gpt-4o-mini-transcribe', 'gpt-4o-transcribe', 'whisper-1')
+ALLOWED_STT_MODELS = ('gpt-transcribe', 'gpt-4o-mini-transcribe', 'gpt-4o-transcribe', 'whisper-1')
+DURATION_STT_MODELS = ('gpt-transcribe', 'whisper-1')
 BudgetState = Literal['NORMAL', 'SOFT_CAP', 'CONSERVATION', 'HARD_CAP_REACHED']
 UsageCategory = Literal['stt', 'agent_fast', 'agent_deep', 'briefing', 'chat', 'local_fallback']
 
@@ -162,7 +172,7 @@ class BudgetPolicy(BaseModel):
     fast_model: Literal['gpt-6.1-sol', 'gpt-4o-mini', 'gpt-4o', 'o3-mini'] = 'gpt-6.1-sol'
     deep_model: Literal['gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-4o', 'o3', 'o3-mini', 'gpt-4o-mini'] = 'gpt-6.1-sol'
     reasoning_effort: Literal['low', 'medium', 'high'] = 'high'
-    stt_model: Literal['gpt-4o-mini-transcribe', 'gpt-4o-transcribe', 'whisper-1'] = 'gpt-4o-mini-transcribe'
+    stt_model: Literal['gpt-transcribe', 'gpt-4o-mini-transcribe', 'gpt-4o-transcribe', 'whisper-1'] = 'gpt-transcribe'
     auto_downgrade: bool = True
     fallback_to_local: bool = True
     prefer_tier0_rules: bool = True
@@ -178,7 +188,7 @@ def policy_from_env() -> BudgetPolicy:
     fast_valid = {'gpt-6.1-sol', 'gpt-4o-mini', 'gpt-4o', 'o3-mini'}
     deep_valid = {'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-4o', 'o3', 'o3-mini', 'gpt-4o-mini'}
     effort_valid = {'low', 'medium', 'high'}
-    stt_valid = {'gpt-4o-mini-transcribe', 'gpt-4o-transcribe', 'whisper-1'}
+    stt_valid = set(ALLOWED_STT_MODELS)
 
     soft = _env_float('HUB_OPENAI_SOFT_CAP_RATIO', 0.70, low=0.10, high=0.95)
     cons = _env_float('HUB_OPENAI_CONSERVATION_RATIO', 0.90, low=0.20, high=0.99)
@@ -198,7 +208,7 @@ def policy_from_env() -> BudgetPolicy:
         fast_model=fast_env if fast_env in fast_valid else 'gpt-6.1-sol',  # type: ignore[arg-type]
         deep_model=deep_env if deep_env in deep_valid else 'gpt-6.1-sol',  # type: ignore[arg-type]
         reasoning_effort=effort_env if effort_env in effort_valid else 'high',  # type: ignore[arg-type]
-        stt_model=stt_env if stt_env in stt_valid else 'gpt-4o-mini-transcribe',  # type: ignore[arg-type]
+        stt_model=stt_env if stt_env in stt_valid else 'gpt-transcribe',  # type: ignore[arg-type]
     )
 
 
@@ -265,6 +275,9 @@ def calculate_cost_microdollars(
         raise ValueError('입력 토큰의 캐시 상세 합계가 입력 토큰 수를 초과합니다.')
     if reasoning_tokens > completion_tokens:
         raise ValueError('추론 토큰이 전체 출력 토큰 수를 초과합니다.')
+    if model in DURATION_STT_MODELS and any((prompt_tokens, cached_tokens, completion_tokens,
+                                           reasoning_tokens, cache_write_30m_tokens, cache_write_12h_tokens)):
+        raise ValueError('시간 기반 전사는 오디오 길이로만 비용을 계산합니다.')
     _ = reasoning_tokens  # Subset of completion_tokens; never double-billed.
     uncached_prompt = prompt_tokens - cached_tokens - cache_write_30m_tokens - cache_write_12h_tokens
     cached = cached_tokens
@@ -510,7 +523,7 @@ class BudgetGovernor:
             elif category != 'stt' and selected == 'gpt-6.1-sol' and not force_model and p.fast_model == 'gpt-4o-mini':
                 selected = 'gpt-4o-mini'
                 downgraded = True
-            if category == 'stt' and selected != 'gpt-4o-mini-transcribe':
+            if category == 'stt' and selected in {'gpt-4o-transcribe', 'whisper-1'}:
                 selected = 'gpt-4o-mini-transcribe'
                 downgraded = True
             max_tokens = (
@@ -519,14 +532,23 @@ class BudgetGovernor:
                 else max(max_output_tokens, 2048)
             )
             reason = 'conservation_mode_compact_mini'
+            if category == 'stt' and selected == 'gpt-transcribe':
+                # Do not silently send a newly selected model back to the
+                # deprecated token-STT family. The hard budget cap still applies.
+                reason = 'conservation_mode_duration_stt'
 
         if category != 'stt' and selected.startswith(('gpt-6', 'gpt-5', 'o')) and state in {'NORMAL', 'SOFT_CAP'}:
             max_tokens = max(max_tokens, 4096)
 
-        if category == 'stt' and selected != 'whisper-1':
+        if category == 'stt' and selected not in DURATION_STT_MODELS:
             # $.003/min is only an average, NOT a maximum. Token-billed
             # transcription uses the model's full 16K input / 2K output envelope.
             estimated = calculate_cost_microdollars(selected, prompt_tokens=16_000, completion_tokens=2_000)
+        elif category == 'stt':
+            # The WAV duration is server verified before dispatch. Round the
+            # reservation up, but settle ONLY the provider's duration usage.
+            calculate_cost_microdollars(selected, audio_seconds=audio_seconds)  # validate before ceil coercion
+            estimated = calculate_cost_microdollars(selected, audio_seconds=math.ceil(audio_seconds))
         else:
             estimated = calculate_cost_microdollars(
                 selected,
@@ -737,6 +759,8 @@ class BudgetGovernor:
             cache_write_12h_tokens=cache_write_12h_tokens,
             audio_seconds=audio_seconds,
         )
+        if model in DURATION_STT_MODELS and cost_source.startswith('provider_usage') and audio_seconds <= 0:
+            raise ValueError('시간 기반 전사 정산에는 양수인 공급자 오디오 사용량이 필요합니다.')
         with self._db() as db:
             db.execute('BEGIN IMMEDIATE')
             reservation = db.execute('SELECT billing_month FROM hub_ai_budget_reservations WHERE request_id=?', (request_id,)).fetchone()

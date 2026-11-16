@@ -227,7 +227,7 @@ def test_cloud_audio_then_rule_execution_needs_no_pc_and_replays_once(tmp_path):
     async def provider(method, url, headers, payload):
         calls.append(url)
         assert url == OPENAI_DEFAULT_BASE_URL + '/audio/transcriptions'
-        return {'text': '오늘 할 일 확인해줘', 'usage': {'input_tokens': 50, 'output_tokens': 10}}
+        return {'text': '오늘 할 일 확인해줘', 'usage': {'type': 'duration', 'seconds': 1.0}}
 
     agent, pc = harness(tmp_path, provider)
     first = run(agent.transcribe_and_submit(request_id='synthetic-voice-flow', audio_bytes=make_wav_bytes()))
@@ -264,7 +264,7 @@ def test_agent_disabled_during_stt_preserves_transcript_without_starting_action(
     async def provider(method, url, headers, payload):
         calls.append(url)
         agent.governor.set_policy({'agent_enabled': False})
-        return {'text': '4분 타이머 시작', 'usage': {'input_tokens': 50, 'output_tokens': 10}}
+        return {'text': '4분 타이머 시작', 'usage': {'type': 'duration', 'seconds': 1.0}}
 
     agent, pc = harness(tmp_path, provider)
     with pytest.raises(HTTPException) as error:
