@@ -119,6 +119,7 @@ class Runtime:
         self._clock_patches()
         self.app.state.life.clock = self.clock.epoch
         self.app.state.timers.clock = self.clock.epoch
+        self.app.state.food.clock = self.clock.epoch
         self._fixtures(deepcopy(fixtures))
         self._adapters()
         self._observe()
@@ -136,7 +137,7 @@ class Runtime:
             def time(self): return owner.clock.epoch()
             def __getattr__(self, key): return getattr(time, key)
         for name in ('app.store', 'app.main', 'app.llm', 'app.assistant', 'app.widget_bridge',
-                     'app.life', 'app.timers', 'app.widget_protocol.core', 'app.widget_protocol.adapters'):
+                     'app.life', 'app.timers', 'app.food', 'app.widget_protocol.core', 'app.widget_protocol.adapters'):
             module = importlib.import_module(name)
             if hasattr(module, 'utcnow'):
                 self.stack.enter_context(patch.object(module, 'utcnow', self.clock.iso))
@@ -227,13 +228,24 @@ class Runtime:
         from app.widget_protocol.core import WidgetRegistry
         from app.widget_protocol.adapters import MemoAdapter, TodoAdapter, CalendarAdapter, AlarmAdapter
         from app.widget_protocol.timers import TimerAdapter
+        from app.widget_protocol.food import FoodAdapter
         owner = self
+        owned_food = self.app.state.food
         class SandboxAdapter:
             async def execute(self, request, authority):
                 spec = self.operations[request.action]
                 store = getattr(self, 'store', None) or self.timers.store
                 if not Path(store.path).resolve().is_relative_to(owner.root):
                     raise RuntimeError('Refusing non-sandbox adapter storage')
+                # FoodAdapter holds both a Store and a FoodService. Checking
+                # only the former could miss a rebound service dependency.
+                # Keep the exact owned objects, not merely any path in temp.
+                if isinstance(self, FoodAdapter) and (
+                    store is not owner.store or self.food is not owned_food
+                    or self.food.store is not owner.store
+                    or Path(self.food.store.path).resolve() != owner.owned_store_path
+                ):
+                    raise RuntimeError('Refusing non-sandbox food storage')
                 # Registry already checked this. Recheck before a mode boundary as
                 # direct calls must not turn invalid proposals into EXECUTE decisions.
                 self.validate_request(request)
@@ -260,9 +272,10 @@ class Runtime:
         class FakeCalendarAdapter(SandboxAdapter, CalendarAdapter): pass
         class FakeAlarmAdapter(SandboxAdapter, AlarmAdapter): pass
         class FakeTimerAdapter(SandboxAdapter, TimerAdapter): pass
+        class FakeFoodAdapter(SandboxAdapter, FoodAdapter): pass
         fake_types = {MemoAdapter: FakeMemoAdapter, TodoAdapter: FakeTodoAdapter,
                       CalendarAdapter: FakeCalendarAdapter, AlarmAdapter: FakeAlarmAdapter,
-                      TimerAdapter: FakeTimerAdapter}
+                      TimerAdapter: FakeTimerAdapter, FoodAdapter: FakeFoodAdapter}
         original = self.app.state.widget_protocol
         registry = WidgetRegistry()
         for name in original.list_widgets():
@@ -349,7 +362,7 @@ class Runtime:
 
     def business_state(self):
         """Exclude journal/audit writes. These are not assistant business actions."""
-        tables = ('tasks', 'series', 'hub_notes', 'hub_alarms', 'hub_timers')
+        tables = ('tasks', 'series', 'hub_notes', 'hub_alarms', 'hub_timers', 'hub_food_items')
         with self.store.connect() as db:
             return {name: [dict(r) for r in db.execute(f'SELECT * FROM {name} ORDER BY id')]
                     for name in tables}

@@ -162,7 +162,7 @@ def test_case5_unknown_action(hub):
 
 def test_case6_registry_and_typed_schemas(hub):
     _, client, registry = hub
-    assert registry.list_widgets() == ['memo', 'todo', 'calendar', 'alarm', 'timer']
+    assert registry.list_widgets() == ['memo', 'todo', 'calendar', 'alarm', 'timer', 'food']
     assert registry.get('does-not-exist') is None
     manifest = client.get(API + '/widgets').json()
     assert manifest['protocol_version'] == '1.0' and manifest['http_write_execution'] is True

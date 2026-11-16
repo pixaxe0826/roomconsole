@@ -143,3 +143,13 @@
 - Preserve old configs, source audio and historical rows, but never reinterpret previously queued `configured` audio as a new cloud upload or restart a paid request. Old local jobs need explicit new user input in the new topology.
 - `HUB_FFMPEG` is a codec-only absolute path override; no model/driver/service installation, PC deletion or production deployment is implied by editing this PR.
 - Test no legacy network/process invocation across off/failed/restarted/queued cases, fake official OpenAI transport, display-to-Odyssey lifecycle and manager routing. No paid tests or production data.
+
+## Food expiry reminder (explicit additive widget extension)
+
+- `food-expiry` is a read-only display widget. `food` is its explicit typed service adapter; manual food CRUD is manager-only.
+- Keep name, positive integer quantity and exact civil expiry date as separate fields. Never infer food safety or a use-by date from a food name. Past dates remain visible until explicitly deleted.
+- Food voice writes require the existing Personal Agent manager preview/confirmation, snapshot versions and transaction receipt. Do not widen the timer-only immediate exception.
+- Source-only food parsing must clarify missing fields, multiple items, negation and ambiguous names. Same-name batches with distinct expiry dates must not be silently merged or guessed.
+- Food inventory does not enter cloud catalogs or STT hints. Fixed words such as 소비기한/식품/개수 are linguistic hints only. Existing saved model, consent and layout stay unchanged.
+- Shared food rows and historical agent results require current food-widget opt-in and valid row provenance. Never expose food CRUD to paired displays or ingest keys.
+- Run `tests/test_food*.py`, food UI/transport regressions, full pytest and existing policy/HTTP/browser regressions. Synthetic tests are not measured ASR accuracy or physical iPad validation.

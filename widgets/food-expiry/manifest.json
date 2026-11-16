@@ -1,0 +1,12 @@
+{
+  "id": "food-expiry",
+  "name": "소비기한 알리미",
+  "description": "등록한 식품·개수·소비기한을 날짜순 표로 보고, 임박하거나 지난 날짜를 확인합니다.",
+  "icon": "leaf",
+  "apiVersion": 1,
+  "version": "1.0.0",
+  "entry": "widget.js",
+  "style": "style.css",
+  "defaultSize": {"w": 4, "h": 2},
+  "configDefaults": {}
+}

@@ -36,16 +36,24 @@ def build():
   {'id':'a2','label':'잠깐, 몸을 움직여요','repeat':'weekly','weekdays':list(range(7)),'date':None,'time':'15:00','timezone':'Asia/Seoul','enabled':True,'next_fire_at':'2026-09-17T06:00:00+00:00','version':1}],
   'events':[]}
  demo['life']={'version':1,'revision':1,'as_of':now,'notes':{'enabled':True,'items':[demo['life_demo']['notes'][0]]},'alarms':{'enabled':True,'items':demo['life_demo']['alarms'],'events':[]},'scheduler':{'error':False,'delivery':'foreground_browser_only','sound_confirmed':False}}
+ # Synthetic pantry entries, never copied from an inventory or evaluation set.
+ demo['food']={'enabled':False,'today':today,'timezone':'Asia/Seoul','due_soon_days':3,'items':[]}
+ demo['food_demo']={'items':[
+  {'id':'food-demo-1','name':'우유','quantity':2,'expiry_date':'2026-09-17','version':1,'created_at':now,'updated_at':now},
+  {'id':'food-demo-2','name':'두부','quantity':1,'expiry_date':'2026-09-19','version':1,'created_at':now,'updated_at':now},
+  {'id':'food-demo-3','name':'요거트','quantity':4,'expiry_date':'2026-09-16','version':1,'created_at':now,'updated_at':now},
+ ]}
  safe=lambda obj:json.dumps(obj,ensure_ascii=False).replace('<','\\u003c')
  common=(ROOT/'web/base.css').read_text(encoding='utf-8');shared=(ROOT/'web/shared.js').read_text(encoding='utf-8')
  def assemble(kind,prefix,extra=''):
   html=(ROOT/f'web/{kind}.html').read_text(encoding='utf-8');html=re.sub(r'<link\b[^>]*>','',html);html=re.sub(r'<script defer[^>]*></script>','',html)
   css=common+'\n'+(ROOT/'web/life.css').read_text('utf-8')+'\n'+(ROOT/f'web/{kind}.css').read_text(encoding='utf-8')+'\n'+(ROOT/'web/speech.css').read_text(encoding='utf-8')
-  if kind=='manager':css+='\n'+(ROOT/'web/manager-llm.css').read_text('utf-8')
+  if kind=='manager':css+='\n'+(ROOT/'web/manager-llm.css').read_text('utf-8')+'\n'+(ROOT/'web/food-expiry.css').read_text('utf-8')
   if kind=='client':css+='\n'+'\n'.join((ROOT/'widgets'/m['id']/m['style']).read_text('utf-8') for m in registry)
   html=html.replace('</head>','<style>'+css+'</style></head>')
   llm=(ROOT/'scripts/llm_demo.js').read_text('utf-8')+'\n'+(ROOT/'web/manager-llm.js').read_text('utf-8') if kind=='manager' else ''
-  scripts=prefix+'\n'+shared+'\n'+(ROOT/'web/life.js').read_text('utf-8')+'\n'+extra+'\n'+llm+'\n'+(ROOT/f'web/{kind}.js').read_text(encoding='utf-8')
+  food=(ROOT/'web/food-expiry.js').read_text('utf-8') if kind=='manager' else ''
+  scripts=prefix+'\n'+shared+'\n'+(ROOT/'web/life.js').read_text('utf-8')+'\n'+extra+'\n'+llm+'\n'+food+'\n'+(ROOT/f'web/{kind}.js').read_text(encoding='utf-8')
   if kind=='client':scripts+='\n'+(ROOT/'web/timers.js').read_text(encoding='utf-8')+'\n'+(ROOT/'web/speech.js').read_text(encoding='utf-8')
   return html.replace('</body>','<script>'+scripts.replace('</script','<\\/script')+'</script></body>')
  mod='window.ROOM_WIDGETS={};\n'
@@ -74,5 +82,10 @@ def build():
  life_demo['layout']['widgets'][3].update(type='alarms',title='알람')
  life_client=assemble('client','window.ROOM_DEMO='+safe(life_demo)+';',mod)
  (out/'notes_alarms_preview.html').write_text(life_client,encoding='utf-8',newline='\n')
+ food_demo=json.loads(json.dumps(demo))
+ food_demo['layout']['widgets'][2].update(type='food-expiry',title='소비기한 알리미')
+ food_demo['food'].update(enabled=True,items=food_demo['food_demo']['items'])
+ food_client=assemble('client','window.ROOM_DEMO='+safe(food_demo)+';',mod)
+ (out/'food_expiry_preview.html').write_text(food_client,encoding='utf-8',newline='\n')
  print('Built',len(client.encode()),len(manager.encode()),len(all_client.encode()),'bytes')
 if __name__=='__main__':build()

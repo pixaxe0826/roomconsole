@@ -9,6 +9,7 @@ single unified adapter protocol:
 - calendar (widgets/calendar): list, get, add, update, delete
 - alarm (widgets/alarms): list, events, set, update, cancel, delete, snooze, ack
 - timer (widgets/timers): list, get, start, stop
+- food (widgets/food-expiry): list, get, add, update, delete
 - clock (widgets/clock): read, resolve
 - weather (widgets/weather): read (refresh unavailable in Agent batches)
 - indoor (widgets/indoor-temperature, widgets/indoor-air-quality): read, air, devices
@@ -1323,12 +1324,13 @@ def build_full_registry(
     task_services: TaskServices,
     *,
     timers=None,
+    food=None,
     refresh_weather: Callable | None = None,
     broadcast_fn: Callable | None = None,
     widget_root: Path | None = None,
     temperature_store: TemperatureStore | None = None,
 ) -> WidgetRegistry:
-    """Build a WidgetRegistry containing adapters for all 12 Room Hub widgets, indoor sensors, and systems."""
+    """Build all approved Room Hub widget, inventory, sensor and system adapters."""
 
     def audit(record):
         with closing(store.connect()) as db:
@@ -1348,6 +1350,10 @@ def build_full_registry(
         from .timers import TimerAdapter
 
         registry.register(TimerAdapter(timers))
+    from ..food import FoodService
+    from .food import FoodAdapter
+
+    registry.register(FoodAdapter(store, food or FoodService(store, changed), changed))
     registry.register(ClockAdapter(store))
     registry.register(WeatherAdapter(store, refresh_fn=refresh_weather))
     registry.register(IndoorSensorAdapter(store, temperature_store))

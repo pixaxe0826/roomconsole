@@ -89,7 +89,7 @@ API 키는 DB 정책에 넣지 않습니다. 실행 프로세스의 `OPENAI_API_
 
 ## 7. 승인과 어댑터 연결
 
-`memo`, `todo`, `calendar`, `alarm`, `timer`, `clock`, `weather`, `indoor`, `llm-response`, `layout`, `settings`, `system`의 12개 도메인을 `WidgetProtocol 1.0`으로 연결합니다. 실제 작업 목록과 스키마는 `/api/agent/adapters`를 기준으로 확인합니다.
+`memo`, `todo`, `calendar`, `alarm`, `timer`, `food`, `clock`, `weather`, `indoor`, `llm-response`, `layout`, `settings`, `system`의 13개 도메인을 `WidgetProtocol 1.0`으로 연결합니다. 실제 작업 목록과 스키마는 `/api/agent/adapters`를 기준으로 확인합니다. `food`는 [소비기한 알리미](FOOD_EXPIRY.md)의 원문 기반 등록·조회·변경을 담당하며 변경 승인 정책을 그대로 따릅니다.
 
 - **일반 변경**: 관리자 역할, 10분 미리보기 만료, `preview_sha256`, 시간대, 대상과 버전을 재검사합니다. 어댑터 DB 변경·영수증·실행 완료 상태를 단일 SQLite UoW로 커밋합니다. 단계 중 하나가 실패하면 해당 승인 트랜잭션 전체를 롤백합니다. 알림은 커밋 뒤에 전송합니다.
 - **타이머 예외**: 인증된 1–600초 로컬 타이머 시작/종료는 검증 후 즉시 실행할 수 있습니다. 복합 계획의 즉시 타이머와 승인 대기 변경은 결과에서 구분합니다. 뒤에 승인 대기 변경을 취소했다고 이미 실행한 타이머가 되돌아간다고 가정하지 마세요.

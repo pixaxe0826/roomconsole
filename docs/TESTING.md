@@ -100,6 +100,32 @@ python scripts/llm_widget_live.py
 사용합니다. 실제 HTTP/API/SQLite + 모의 LLM, 브라우저 WS 이벤트 주입이며 물리 LAN 검사가 아닙니다.
 [현재 통합 검증](TEST_REPORT.md)
 
+## 소비기한 알리미 회귀
+
+위의 오프라인 환경과 테스트 전용 데이터 경로를 사용합니다. 기존 운영 설정과 API 키를
+읽거나 전달하지 않습니다. 아래 명령은 재현 절차이며 통과 여부는 해당 실행 결과로 확인합니다.
+
+```bash
+python scripts/build_previews.py
+python -m pytest -q tests/test_food.py tests/test_food_protocol.py tests/test_food_commands.py tests/test_food_agent.py tests/test_stt_accuracy.py tests/test_personal_agent_benchmark_runtime.py --junitxml=artifacts/test-results/food.xml
+node scripts/food_expiry_regression.js
+python scripts/food_expiry_browser.py
+```
+
+서버 검사는 관리자 CRUD, 표시 배치 opt-in, 입력 검증, 지난 날짜 보존, 중복 요청,
+낡은 버전 거부, 승인 트랜잭션·롤백·재시작, source-only 음성 슬롯과 모의 전사 전달을
+확인합니다. 과거 식품 조회와 파생 결과의 표시 권한도 현재 DB와 대조합니다.
+
+Node 검사는 실제 위젯/편집기 JavaScript에 합성 DOM·HTTP를 연결합니다. 173개 항목의
+끝까지 탐색, 3열 순서, 날짜 강조, 입력 보존, 타임아웃 동일 ID 재시도, 409 충돌 후
+명시적 새로고침, 401 인증 만료와 문자열 이스케이프를 검사합니다. Chromium 검사는
+1440/768/390px 관리자 폼과 4×2/확대 위젯을 합성 fixture로 렌더링합니다. 브라우저
+시작이 차단된 환경에서는 Node 통과와 Chromium 미실행을 구분합니다.
+
+새 어댑터의 벤치마크 연결은 검토된 타입·테스트 DB 경로·고정 시계와 미승인 변경 탐지를
+검사합니다. 기존 외부 데이터셋이나 정답·projection·채점 기준을 변경하지 않습니다.
+신규 회귀 뒤 전체 pytest, 저장소/벤치마크 정책, 기존 HTTP와 브라우저 회귀도 실행합니다.
+
 ## OpenAI Personal Agent 오프라인 회귀
 
 별도 테스트 환경과 합성 입력만 사용합니다. 아래 명령은 실행 절차이며 실기기·유료 API·운영 배포를 검증했다는 기록이 아닙니다. 일반 회귀에서는 `OPENAI_API_KEY`, `HUB_OPENAI_API_KEY`를 전달하지 않고, `HUB_PERSONAL_AGENT_ENABLED`, `HUB_OPENAI_ENABLED`, `HUB_OPENAI_AUDIO_ENABLED`를 `false`로 둡니다. `HUB_RUN_LIVE_OPENAI_TESTS=1`을 설정하지 않습니다. 테스트 내부에서 필요한 정책과 응답만 모의로 설정합니다.

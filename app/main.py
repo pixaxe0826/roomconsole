@@ -12,6 +12,7 @@ from .models import *
 from . import llm_display
 from .indoor_temperature import register_routes as register_temperature_routes
 from .life import LifeService, register_routes as register_life_routes
+from .food import FoodService, register_routes as register_food_routes
 from .timers import TimerService, register_routes as register_timer_routes
 from . import widget_protocol
 from .clock_service import clock_context
@@ -80,6 +81,7 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
  llm=LLMHub(store,changed,speech=speech,backend=llm_backend,profile=ai_profile)
  speech.set_transcript_sink(llm.submit_transcription)
  life=LifeService(store,changed)
+ food=FoodService(store,changed)
  timers=TimerService(store,changed)
  @asynccontextmanager
  async def lifespan(app):
@@ -107,6 +109,7 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
    with contextlib.suppress(Exception):await ws.close()
  app=FastAPI(title='Room Hub',version='0.1.7',lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
  app.state.life=life
+ app.state.food=food
  app.state.timers=timers
  app.state.speech=speech
  app.state.llm=llm
@@ -161,6 +164,7 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
   return authenticate(request,'admin')
  from .ai_runtime import register_routes as register_ai_runtime
  register_life_routes(app,life,admin,viewer,changed)
+ register_food_routes(app,food,admin,viewer,changed)
  register_timer_routes(app,timers,viewer)
  register_temperature_routes(app,data,store,admin,viewer)
  def new_session(role,device_id,days):
@@ -199,7 +203,7 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
   return {'revision':store.get('revision'),'server_time':stamp,'today':clock['today'],'clock':clock,
    'settings':settings,'layout':store.get('layout'),'tasks':store.tasks(),'weather':weather,'weather_error':wx['error'],'widgets':registry,'widget_errors':errors,
    'capabilities':{'task_completion':True,'speech_upload':True,'llm_response_widget':True,'timer_control':timers.visible()},
-   'llm_display':llm_display.index(store),'life':life.display(),'timers':timers.display(),
+   'llm_display':llm_display.index(store),'life':life.display(),'timers':timers.display(),'food':food.display(),
    'widget_data':{w['id']:store.get('widget_data:'+w['id']) or {} for w in registry}}
  @app.get('/api/clock')
  async def current_clock(_=Depends(viewer)):
@@ -341,11 +345,11 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
   await changed('task.deleted',str(count));return {'deleted':count}
  # Reuse the exact existing CRUD handlers; protocol does not replace UI/assistant paths.
  task_services=widget_protocol.TaskServices(add_task,edit_task,complete_task,delete_task)
- protocol=widget_protocol.build_registry(store,life,changed,task_services,timers=timers)
+ protocol=widget_protocol.build_registry(store,life,changed,task_services,timers=timers,food=food)
  app.state.widget_protocol=protocol
  llm.set_widget_registry(protocol)
  widget_protocol.register_routes(app,protocol,admin)
- personal_agent=PersonalAgentService(store,life,timers,None,task_services,speech=speech,llm=llm,gateway=agent_gateway,changed=changed,refresh_weather=refresh_weather,broadcast_fn=broadcast,widget_root=widget_root,temperature_store=getattr(app.state,'indoor_temperature',None),profile=ai_profile)
+ personal_agent=PersonalAgentService(store,life,timers,None,task_services,speech=speech,llm=llm,gateway=agent_gateway,changed=changed,refresh_weather=refresh_weather,broadcast_fn=broadcast,widget_root=widget_root,temperature_store=getattr(app.state,'indoor_temperature',None),profile=ai_profile,food=food)
  app.state.personal_agent=personal_agent
  register_agent_routes(app,personal_agent,admin,viewer)
  register_ai_runtime(app,speech,llm,admin,agent=personal_agent)
@@ -359,7 +363,8 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
  async def export(_=Depends(admin)):
   with store.connect() as db:series=[dict(r) for r in db.execute('SELECT * FROM series')]
   payload={'schema_version':1,'exported_at':utcnow(),'settings':store.get('settings'),'layout':store.get('layout'),'tasks':store.tasks(),'series':series,
-   'life':{'schema_version':1,'notes':life.notes(),'alarms':life.alarms(),'alarm_events':life.events()}}
+   'life':{'schema_version':1,'notes':life.notes(),'alarms':life.alarms(),'alarm_events':life.events()},
+   'food':{'schema_version':1,'items':food.items()}}
   return Response(json.dumps(payload,ensure_ascii=False,indent=2),media_type='application/json',headers={'Content-Disposition':'attachment; filename="room-hub-export.json"'})
  @app.get('/api/admin/backup')
  async def backup(_=Depends(admin)):

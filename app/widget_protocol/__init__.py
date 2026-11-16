@@ -2,6 +2,7 @@
 from .core import ExecutionContext, WidgetAdapter, WidgetRegistry, request_digest
 from .models import Capability, WidgetEvent, WidgetRequest, WidgetResponse
 from .adapters import AlarmAdapter, CalendarAdapter, MemoAdapter, TodoAdapter, TaskServices, build_registry
+from .food import FoodAdapter
 from .http import register_routes
 
 _SYSTEM_ADAPTER_EXPORTS = {
@@ -25,6 +26,7 @@ __all__ = [
     'WidgetRequest', 'WidgetResponse', 'WidgetEvent', 'Capability', 'ExecutionContext',
     'WidgetAdapter', 'WidgetRegistry', 'request_digest', 'MemoAdapter', 'TodoAdapter',
     'CalendarAdapter', 'AlarmAdapter', 'TaskServices', 'build_registry', 'register_routes',
+    'FoodAdapter',
     'FullMemoAdapter', 'FullTodoAdapter', 'FullCalendarAdapter', 'FullAlarmAdapter',
     'ClockAdapter', 'WeatherAdapter', 'IndoorSensorAdapter', 'LLMDisplayAdapter',
     'LLMResponseAdapter', 'LayoutAdapter', 'SettingsAdapter', 'SystemAdapter',

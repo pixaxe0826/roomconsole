@@ -1,0 +1,26 @@
+.food-manager-banner{background:var(--accent-soft);border-radius:18px;padding:22px 26px;margin-bottom:22px;line-height:1.75}
+.food-manager-banner strong{font-size:19px;letter-spacing:-.035em}.food-manager-banner p{font-size:13px;margin-top:7px;max-width:92ch}
+.food-voice-example{border-left:3px solid var(--accent);padding-left:12px}
+.food-manager-workspace{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(300px,.85fr);gap:22px;align-items:start}
+.food-manager .panel{min-width:0}.food-manager .panel-head{flex-wrap:wrap;gap:10px}.food-manager .panel-head h2 span{font-size:13px;color:var(--muted)}
+.food-manager-list{max-height:640px;overflow:auto;padding:0 20px 18px;overscroll-behavior:contain}
+.food-manager-table{width:100%;border-collapse:collapse;table-layout:fixed;line-height:1.6;font-size:14px;text-align:left}
+.food-manager-table caption{font-size:11px;color:var(--muted);text-align:left;padding-bottom:12px}
+.food-manager-name-col{width:42%}.food-manager-count-col{width:16%}.food-manager-date-col{width:42%}
+.food-manager-table th,.food-manager-table td{padding:12px 8px;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}
+.food-manager-table thead th{position:sticky;top:0;background:var(--surface);font-size:12px;color:var(--muted);font-weight:600}
+.food-manager-table th:nth-child(2),.food-manager-table td:nth-child(2){text-align:center;font-variant-numeric:tabular-nums}
+.food-manager-table th:first-child{padding-left:0}.food-manager-table td:last-child{padding-right:0}
+.food-manager-table tbody button{padding:5px 0;border:0;background:transparent;color:var(--accent);font-weight:600;text-align:left;white-space:normal;overflow-wrap:anywhere;line-height:1.6;min-height:38px;max-width:100%}
+.food-manager-table tbody tr.selected{background:var(--accent-soft)}
+.food-manager-table time{display:block;font-variant-numeric:tabular-nums}.food-manager-date-status{display:inline-block;border-radius:5px;margin-top:4px;padding:1px 5px;background:var(--surface2);font-size:11px;color:var(--muted)}
+.food-manager-date-status.expired{background:#fff0ee;color:#9c3f39}.food-manager-date-status.today,.food-manager-date-status.soon{background:#fff3d9;color:#775314}
+.food-manager-empty{padding:24px 10px!important;color:var(--muted);text-align:center}
+.food-manager-editor [data-food-form]{padding:0 24px 10px}.food-manager-editor label{display:flex;flex-direction:column;gap:8px;font-size:12px;font-weight:600;min-width:0}
+.food-manager-editor input{width:100%;min-width:0;border:1px solid var(--line);border-radius:10px;padding:11px 12px;background:var(--surface);color:var(--ink);font-size:16px;line-height:1.6;min-height:46px}
+.food-manager-form-row{display:grid;grid-template-columns:minmax(100px,.7fr) minmax(170px,1fr);gap:14px}
+.food-manager-editor .form-actions{flex-wrap:wrap}.food-manager-feedback{padding:8px 24px 20px;font-size:13px;color:var(--accent);white-space:pre-wrap;line-height:1.7}.food-manager-feedback.food-feedback-error{color:var(--red)}
+.food-manager-conflict{background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12px;line-height:1.7}.food-manager-conflict button{display:block;margin-top:9px;white-space:normal}
+.food-manager-caveat{font-size:12px;color:var(--muted);line-height:1.7;margin-top:18px}
+@media(max-width:1100px){.food-manager-workspace{grid-template-columns:1fr}.food-manager-list{max-height:430px}}
+@media(max-width:520px){.food-manager-banner{padding:18px}.food-manager-table{font-size:12px}.food-manager-list{padding:0 12px 12px}.food-manager-table th,.food-manager-table td{padding:9px 4px}.food-manager-date-status{font-size:10px}.food-manager-form-row{grid-template-columns:1fr}.food-manager-editor [data-food-form]{padding:0 18px 10px}}

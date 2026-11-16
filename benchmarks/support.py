@@ -54,7 +54,8 @@ def _inspect() -> dict:
 
         inert = MetadataOnly()
         registry = build_registry(inert, inert, denied,
-                                  TaskServices(denied, denied, denied, denied), timers=inert)
+                                  TaskServices(denied, denied, denied, denied),
+                                  timers=inert, food=inert)
         catalog = registry.manifest()
         operations = []
         for widget in catalog['widgets']:

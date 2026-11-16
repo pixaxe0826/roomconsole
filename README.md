@@ -35,6 +35,7 @@ PC를 추론 경로에서 완전히 분리하려면 **`HUB_AI_PROFILE=odyssey_op
 | LLM 클라이언트 위젯 | 처리된 원문/LLM 응답/서버 실행 결과를 4×2에서 한 쌍씩 탐색. 새 확인 권한 없음 |
 | LLM 모델 | Odyssey OpenAI 프로필은 OpenAI 플래너를 사용. 기존 Qwen 연결은 레거시 호환용이며 새 설치 전송은 기본 비활성 |
 | 저장 | SQLite, JSON 내보내기, DB 복원 도구 |
+| 소비기한 알리미 | 식품·개수·소비기한 표, 관리자 직접 등록·수정·삭제, Personal Agent 음성 입력 후 관리자 확인 |
 | 연결 | 표시 기기 1회용 QR/링크, WebSocket 갱신, 관리자 원격 화면 제어 |
 
 ### 이전 V35 운영 기록 — 2026-09-20
@@ -99,6 +100,18 @@ LAN의 iPad에서는 `localhost`가 아니라 서버의 실제 LAN 주소를 사
 
 ## 위젯
 
+### 소비기한 알리미
+
+관리자 **소비기한 알리미**에서 식품명·개수·소비기한을 입력합니다. **위젯과 배치**에서
+`소비기한 알리미`를 추가하고 화면에 적용하면 연결된 iPad에 **식품 → 개수 → 소비기한**
+순서로 표시합니다. 지난 날짜·오늘·3일 이내 항목을 구분하며 지난 항목도 자동 삭제하지 않습니다.
+
+Personal Agent가 켜져 있으면 `소비기한 알리미에 우유 2개, 소비기한 11월 20일로 추가해 줘`
+같은 텍스트나 전사문을 기존 어댑터에 연결합니다. 변경은 **관리자 확인 후** 저장합니다.
+소비기한을 식품 종류로 추측하거나 음성만으로 승인하지 않습니다. 기존 배치·음성 모델·전송 동의는
+유지합니다. 화면 내 날짜 알림이며 OS 푸시·잠금 화면 알람 기능은 아닙니다.
+[사용 방법·입력 예·API·검증 경계](docs/FOOD_EXPIRY.md).
+
 기본 위젯은 `widgets/<widget-id>/` 폴더 하나로 구성됩니다.
 
 ```text
@@ -109,6 +122,7 @@ widgets/
 ├── all-todos/
 ├── calendar/
 ├── note/
+├── food-expiry/
 └── llm-response/
 ```
 
@@ -251,5 +265,5 @@ SQLite FD 수명/벤치마크 factory를 통합하고, 기존 local CLI를 보�
 - 환경변수는 정책 최초 생성 시의 초기값입니다. 이후에는 관리자 패널/API에 저장된 DB 정책을 사용합니다. 정식 변수는 `HUB_OPENAI_MONTHLY_CAP_USD`, `HUB_OPENAI_ALLOW_SHARED_NOTES`입니다.
 - iPad의 기존 음성 화면은 전사 이후 개인 비서 상태까지 조회합니다. 재연결은 같은 작업을 GET으로 읽으며 유료 요청을 자동 재전송하지 않습니다. 조회·제한된 타이머 외 변경은 관리자 승인이 필요합니다.
 - 비용을 확인하지 못한 요청은 `$0`으로 표시하지 않고 미정 상태와 예약액을 유지합니다. 공유 응답은 현재 메모 공개 여부·버전을 다시 확인하여 비공개 내용을 가립니다.
-- Room Hub의 위젯 및 실내 센서·시스템 어댑터(`memo`, `todo`, `calendar`, `alarm`, `timer`, `clock`, `weather`, `indoor`, `llm-response`, `layout`, `settings`, `system`)를 `WidgetProtocol 1.0` 규격으로 제어합니다.
+- Room Hub의 위젯 및 실내 센서·시스템 어댑터(`memo`, `todo`, `calendar`, `alarm`, `timer`, `food`, `clock`, `weather`, `indoor`, `llm-response`, `layout`, `settings`, `system`)를 `WidgetProtocol 1.0` 규격으로 제어합니다.
 - [설치·적용 절차](docs/SETUP.md) · [동작·권한·예산·미검증 범위](docs/OPENAI_PERSONAL_AGENT.md). 합성 데이터 회귀와 실제 유료 호출·iPad/Safari·운영 배포 검증은 서로 다릅니다.

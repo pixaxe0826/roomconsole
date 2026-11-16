@@ -53,7 +53,11 @@ def test_fast_read_is_not_falsely_attributed_to_semantic_parser():
 def test_always_same_declared_operations_and_no_live_io():
     snapshot = capture_snapshot()
     names = {(op['native'], op['source']) for op in snapshot['operations']}
-    assert len(snapshot['operations']) == 31
+    assert len(snapshot['operations']) == 36
+    food = [op for op in snapshot['operations'] if op['native'].startswith('food.')]
+    assert {op['native'] for op in food} == {'food.list', 'food.get', 'food.add', 'food.update', 'food.delete'}
+    # The new typed service is not a new capability of this legacy interpreter.
+    assert all(not op['exposed'] for op in food)
     for forbidden in ['todo.search', 'todo.move', 'calendar.check_free', 'context.reference']:
         assert not any(n == forbidden for n, _ in names)
     assert snapshot['io'] == {'network_calls': 0, 'sqlite_connections': 0, 'app_main_imported': False}
