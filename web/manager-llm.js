@@ -5,6 +5,7 @@ const E=Room.esc, I=Room.icon, $=(s,r=document)=>r.querySelector(s);
 const LABEL={awaiting_confirmation:'확인 대기 · 아직 미실행',needs_clarification:'추가 확인 필요',prepared:'미전송 · 모델 연결 대기',queued:'대기 중',running:'LLM 응답 대기',succeeded:'응답 완료',completed:'실행 완료',failed:'실패',cancelled:'취소됨',interrupted:'서버 종료로 중단'};
 const ACTIVE=new Set(['queued','running']);
 const CLOUD_STATUS_LABEL={agent_disabled:'에이전트 비활성',cloud_disabled:'클라우드 비활성 · 로컬 규칙만 사용',api_key_missing:'API 키 미설정 · 로컬 규칙만 사용',missing_api_key:'API 키 미설정 · 로컬 규칙만 사용',budget_exhausted:'예산 한도 도달 · 로컬 규칙만 사용',budget_hard_cap_reached:'예산 한도 도달 · 로컬 규칙만 사용',profile_endpoint_blocked:'Odyssey 프로필의 OpenAI 주소 확인 필요',live_network_blocked_in_test:'오프라인 보호 · 로컬 규칙만 사용',ready:'OpenAI 설정 준비됨 · 실제 호출 별도 확인'};
+const STT_MODELS=['gpt-transcribe','gpt-4o-mini-transcribe','gpt-4o-transcribe','whisper-1'];
 let root=null,cfg=null,list={items:[],total:0},selected=null,detail=null,status='',query='',voice='',limit=30,offset=0;
 let lastDetail='',loading=false,pendingRefresh=false,generation=0,timer=null,searchTimer=null,draft=null,filterKey='';
 let requestMode='auto';
@@ -78,10 +79,12 @@ function shell(){return `
    <label><input id="agentCloudToggle" type="checkbox"> OpenAI 클라우드 플래너 허용</label>
    <label><input id="agentAudioCloudToggle" type="checkbox"> 음성 외부 OpenAI STT 전송 허용</label>
    <label><input id="agentSharedNotesToggle" type="checkbox"> 공유 메모 제목의 클라우드 문맥 포함 허용</label>
+   <label class="agent-policy-model">OpenAI 전사 모델 <select id="agentSttModel" aria-label="OpenAI 전사 모델" aria-describedby="agentTranscriptionHintNotice" disabled><option value="" selected disabled>저장된 모델 확인 중</option>${STT_MODELS.map(model=>`<option value="${model}">${model}</option>`).join('')}</select></label>
    <label class="agent-policy-budget">월 예산 USD <input id="agentMonthlyCap" type="number" min="1" max="10000" step="0.01" value="100" aria-label="OpenAI 월 예산 USD"></label>
    <button type="button" class="btn small agent-policy-save" data-llm="agent-save-policy">정책 적용</button>
    <span id="agentPolicyFeedback" class="field-help" role="status" aria-live="polite"></span>
   </div>
+  <p id="agentTranscriptionHintNotice" class="field-help">허용된 OpenAI 음성 전사에 할 일·일정·메모·알람·타이머·실내 센서 등 Room Hub 기본 어휘 힌트를 포함합니다. 메모 제목·본문은 전사 힌트에 넣지 않습니다. 모델 변경은 정책 적용 후 새 음성 요청부터 사용하며, 기존 전송 동의는 별도입니다. 실제 정확도는 녹음 비교로 확인해야 합니다.</p>
   <div class="llm-filters">
    <select id="agentCommandMode" aria-label="Personal Agent 실행 모드">
     <option value="auto">자동 (Tier 0 로컬 우선 → 클라우드)</option>
@@ -137,6 +140,8 @@ function paintAgentSection(){
   const shared=$('#agentSharedNotesToggle'),cap=$('#agentMonthlyCap');
   if(shared)shared.checked=!!agentState.allow_shared_notes_in_cloud;
   if(cap)cap.value=String(b.monthly_cap_usd??100);
+  const stt=$('#agentSttModel'),savedModel=agentState.stt_model??tiers.tier1_stt;
+  if(stt){stt.value=STT_MODELS.includes(savedModel)?savedModel:'';stt.disabled=false;}
  }
  const cnt=$('#agentRunsCount');if(cnt)cnt.textContent=String(agentRuns.length);
  const rList=$('#agentRunsList');
@@ -249,6 +254,11 @@ async function handle(e){const b=e.target.closest('[data-llm]');if(!b||b.disable
    allow_shared_notes_in_cloud:!!$('#agentSharedNotesToggle')?.checked,
    monthly_cap_usd:Number($('#agentMonthlyCap')?.value),
   };
+  const sttModel=$('#agentSttModel')?.value;
+  if(sttModel){
+   if(!STT_MODELS.includes(sttModel))throw Error('지원되는 OpenAI 전사 모델을 선택하세요.');
+   patch.stt_model=sttModel;
+  }
   if(!Number.isFinite(patch.monthly_cap_usd)||patch.monthly_cap_usd<1||patch.monthly_cap_usd>10000)throw Error('월 예산은 1~10,000 USD로 입력하세요.');
   try{await api('/api/agent/budget/policy','PUT',patch)}catch(err){
    const fb=$('#agentPolicyFeedback');if(fb)fb.textContent=err.message;

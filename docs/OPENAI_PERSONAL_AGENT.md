@@ -26,7 +26,7 @@
 | `HUB_OPENAI_FAST_MODEL` | `fast_model` | `gpt-6.1-sol` |
 | `HUB_OPENAI_DEEP_MODEL` | `deep_model` | `gpt-6.1-sol` |
 | `HUB_OPENAI_REASONING_EFFORT` | `reasoning_effort` | `high` |
-| `HUB_OPENAI_STT_MODEL` | `stt_model` | `gpt-4o-mini-transcribe` |
+| `HUB_OPENAI_STT_MODEL` | `stt_model` | `gpt-transcribe` |
 
 API 키는 DB 정책에 넣지 않습니다. 실행 프로세스의 `OPENAI_API_KEY` 또는 `HUB_OPENAI_API_KEY`를 읽으며 기존 `HUB_LLM_API_KEY`는 재사용하지 않습니다. 직접 Python 실행은 `.env`를 자동으로 읽지 않습니다. 셸/systemd 환경 또는 Compose의 `environment:` 매핑을 사용합니다. 예제 파일에 실제 키를 커밋하지 마세요.
 
@@ -37,6 +37,19 @@ API 키는 DB 정책에 넣지 않습니다. 실행 프로세스의 `OPENAI_API_
 `agent_enabled`, `cloud_enabled`, `audio_cloud_enabled`가 **모두 true**여야 합니다. 키와 남은 예산도 필요합니다. iPad의 압축 녹음은 실행 가능한 로컬 FFmpeg로 형식·길이를 확인하고 WAV로 변환한 뒤에만 외부 전송합니다. WAV는 서버가 헤더·프레임 정합성과 길이를 확인합니다. 사용자가 제출한 길이 값이나 압축 비트레이트 추정만으로 업로드를 허용하지 않습니다.
 
 요청의 `mode="local_only"` 또는 `local_only=true`가 위 정책보다 우선합니다. 이 요청은 OpenAI 계획·브리핑·STT를 호출하지 않습니다. `odyssey_openai`에는 로컬 전사 경로가 없으므로 로컬 전용 음성은 명시적으로 거부합니다. 로컬 전용 텍스트 규칙 처리는 유지합니다. 기본 `legacy` 프로필에서 클라우드 오류 뒤 로컬 폴백이 성공하더라도 앞서 전송한 클라우드 요청의 비용이 취소되는 것은 아닙니다. `odyssey_openai`는 저장 정책에 폴백 허용값이 남아 있어도 로컬/PC 폴백을 실행하지 않습니다.
+
+### GPT-Transcribe와 Room Hub 어휘 힌트
+
+새 정책의 기본 전사 모델은 `gpt-transcribe`입니다. **기존에 저장된 전사 모델·동의·월 한도는 자동으로 변경하지 않습니다.** 업데이트 후 관리자 LLM 화면 → Personal Agent → 전사 모델에서 `gpt-transcribe`를 선택하고 **정책 적용**을 누르면 이후 새 음성 요청부터 사용합니다. 기존 모델 세 개도 명시적으로 선택할 수 있으며, 환경변수만 수정해 저장된 정책을 덮어쓸 수는 없습니다.
+
+- 같은 `/v1/audio/transcriptions`에 JSON 응답을 요청합니다. 새 모델에는 `languages[]`와 `keywords[]`를 보내고, 이전 모델에는 기존 `language`와 제한된 `prompt`를 유지합니다. `auto`는 언어 필드를 생략하는 앱 설정입니다.
+- `app/transcription_hints.py`에 실제 어댑터의 명칭을 기준으로 45개 고정 어휘를 등록합니다(`room-hub-ko-v2`). 할 일·일정·메모·알람·타이머·소비기한·식품·개수·날씨·실내 온도·습도·기압·공기질·먼지 센서·ADC·위젯 등의 표현입니다. 힌트는 실행 권한이나 정답 템플릿이 아니며 저장된 식품 이름이나 소비기한은 포함하지 않습니다.
+- 기존의 오늘/내일 미완료 작업 제목 힌트는 이전과 같은 제한·문자열 정제를 거쳐 유지합니다. **비공개/공유 메모 제목과 본문, 평가 데이터의 정답은 STT 힌트에 넣지 않습니다.** 고정 어휘 도우미 자체는 DB·환경변수를 읽지 않습니다.
+- 새 모델은 공개된 분당 `$0.0045`의 오디오 길이 과금입니다(2026-11-15 확인). WAV 길이를 검증해 예약하고, 공급자가 반환한 `usage.type=duration` / `seconds`로만 정산합니다. 누락되거나 다른 종류의 usage는 `$0`이 아니라 미정 예약으로 남깁니다. 앱 계산은 공급자 청구서가 아닙니다.
+- `gpt-transcribe`를 선택하면 소프트 예산 단계에서 구형 토큰 전사 모델로 자동 변경하지 않습니다. 월 하드 한도는 그대로 차단합니다. 기존 구형 모델의 절약 정책은 유지합니다.
+- 공급자의 감지 언어가 없으면 `detected_languages`는 `null`, 감지 불확실로 빈 배열을 반환하면 `[]`입니다. 요청 언어를 감지 결과로 꾸미지 않습니다. 상태 조회는 실제 모델 접근·인식 성공을 증명하지 않습니다.
+
+[공식 모델/가격](https://developers.openai.com/api/docs/models/gpt-transcribe) · [언어·어휘 힌트](https://developers.openai.com/api/docs/guides/speech-to-text) · [전사 API](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create). 실제 한국어 정확도·지연은 [외부 음성 비교 벤치마크](GPT_TRANSCRIBE_BENCHMARK.md)로 별도 측정합니다. 지원 코드나 모의 테스트 통과만으로 정확도가 향상되었다고 주장하지 않습니다.
 
 ## 3. 적용 순서
 

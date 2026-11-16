@@ -49,6 +49,7 @@ from .openai_gateway import OPENAI_DEFAULT_BASE_URL, OpenAIGateway, OpenAIGatewa
 from .semantic_parser import parse_semantic
 from .store import uid, utcnow
 from .timer_commands import exact_timer
+from .transcription_hints import room_hub_transcription_hints
 from .widget_protocol import (
     ExecutionContext,
     TaskServices,
@@ -3084,6 +3085,7 @@ class PersonalAgentService:
             'agent_enabled': pol.agent_enabled,
             'cloud_enabled': pol.cloud_enabled,
             'audio_cloud_enabled': pol.audio_cloud_enabled,
+            'stt_model': pol.stt_model,
             'allow_shared_notes_in_cloud': pol.allow_shared_notes_in_cloud,
             'cloud_status': cloud_status,
             'local_tier0_available': True,
@@ -3345,8 +3347,12 @@ class PersonalAgentService:
             self.authority_for_session(session)
             if cancel is not None and cancel.is_set():
                 raise asyncio.CancelledError
-            # Vocabulary hint uses ONLY task titles (never private or shared note titles/bodies)
+            # Built-in Room Hub words are linguistic hints, not capabilities or
+            # evaluation answers. Preserve the previous bounded task-title hint;
+            # NEVER add private/shared memo titles or bodies to transcription.
+            domain_hints = room_hub_transcription_hints()
             hint_info = task_hint(self.store, AccuracyConfig(profile='careful', include_task_titles=True))
+            task_context = sanitize_untrusted_label(hint_info.get('text', ''), max_len=400)
             try:
                 stt = await self.gateway.transcribe_audio(
                     request_id=request_id,
@@ -3355,7 +3361,8 @@ class PersonalAgentService:
                     mime_type=clean_mime,
                     duration_seconds=duration_seconds,
                     language=language,
-                    prompt_hint=sanitize_untrusted_label(hint_info.get('text', ''), max_len=400),
+                    prompt_hint=domain_hints['prompt'] + (' ' + task_context if task_context else ''),
+                    keywords=domain_hints['keywords'],
                 )
             except OpenAIGatewayError as exc:
                 if exc.code in {'request_already_dispatched', 'request_conflict'}:

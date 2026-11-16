@@ -298,7 +298,7 @@ def test_cloud_stt_for_paired_display_is_durable_and_duplicate_upload_calls_once
         while not release.is_set():
             await asyncio.sleep(0.01)
         return {'text': '오늘 할 일 확인해줘',
-                'usage': {'input_tokens': 16, 'output_tokens': 8, 'total_tokens': 24}}
+                'usage': {'type': 'duration', 'seconds': 0.5}}
 
     with speech_app(cloud_enabled=True, audio_cloud_enabled=True,
                     local_enabled=False, transport=cloud_stt) as h:
