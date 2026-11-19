@@ -92,13 +92,18 @@ def run():
                   for field in ('current_key', 'new_key', 'confirm_key')))
         for width in (1440, 768, 390):
             page.set_viewport_size({'width': width, 'height': 900})
-            check(f'Form fields stay visible and do not overflow at {width}px',
-                  page.evaluate('''() => {
-                    const fields=[...document.querySelectorAll('#adminKeyForm input')];
-                    return fields.every(el=>el.getBoundingClientRect().width>=140 &&
-                      el.getBoundingClientRect().right<=innerWidth) &&
-                      document.documentElement.scrollWidth<=innerWidth;
-                  }'''))
+            dimensions = page.evaluate('''() => ({
+              fields:[...document.querySelectorAll('#adminKeyForm input')].map(el => ({
+                width:Math.round(el.getBoundingClientRect().width),
+                right:Math.round(el.getBoundingClientRect().right),
+              })),
+              documentWidth:document.documentElement.scrollWidth,
+              viewportWidth:innerWidth,
+            })''')
+            check(f'Form fields stay visible and do not overflow at {width}px: {dimensions}',
+                  all(field['width'] >= 140 and field['right'] <= width
+                      for field in dimensions['fields']) and
+                  dimensions['documentWidth'] <= width)
 
         current = page.locator('#adminKeyForm [name=current_key]')
         new = page.locator('#adminKeyForm [name=new_key]')
