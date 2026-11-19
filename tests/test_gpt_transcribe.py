@@ -238,7 +238,8 @@ def test_detected_languages_not_invented_from_hint(governor, languages, expected
     assert result['detected_languages'] == expected
 
 
-def test_agent_registers_room_hub_hints_without_sending_memo_content(tmp_path):
+def test_agent_registers_room_hub_hints_without_sending_memo_or_food_content(tmp_path):
+    from app.food import FoodCreate
     from app.life import NoteCreate
     requests = []
 
@@ -252,10 +253,14 @@ def test_agent_registers_room_hub_hints_without_sending_memo_content(tmp_path):
     for shared in (False, True):
         life.create_note(NoteCreate(request_id='memo-' + str(shared), title='NEVER_SEND_TITLE_' + str(shared),
                                     body='NEVER_SEND_BODY_' + str(shared), shared=shared))
+    agent.food.create(FoodCreate(request_id='synthetic-food-hint', name='NEVER_SEND_FOOD_NAME',
+                                 quantity=2, expiry_date='2042-06-27'))
     result = run(agent.transcribe_audio(request_id='agent-hint-integration', audio_bytes=make_wav_bytes()))
     assert result['model'] == 'gpt-transcribe'
     assert result['cost_known'] is True
     assert requests[0]['keywords[]'] == room_hub_transcription_hints()['keywords']
+    assert {'소비기한', '식품', '개수'} <= set(requests[0]['keywords[]'])
     assert room_hub_transcription_hints()['prompt'] in requests[0]['prompt'][0]
     assert 'NEVER_SEND_' not in json.dumps(requests[0], ensure_ascii=False)
+    assert '2042-06-27' not in json.dumps(requests[0], ensure_ascii=False)
     assert agent.list_runs()['total'] == 0  # transcribing alone never executes a command

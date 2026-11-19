@@ -77,6 +77,32 @@ def _legacy_private(store, agent: dict) -> bool:
     return False
 
 
+def _food_read_is_public(store, db, action: str, data: dict) -> bool:
+    """A past food reply is shared only while its rows and placement still match."""
+    try:
+        if not any(w.get('type') == 'food-expiry'
+                   for w in (store.get('layout') or {}).get('widgets', [])):
+            return False
+        if action == 'list':
+            items = data.get('items')
+            if not isinstance(items, list) or type(data.get('count')) is not int or data['count'] != len(items):
+                return False
+        elif action == 'get':
+            items = [data]
+        else:
+            return False
+        for item in items:
+            if not isinstance(item, dict) or not isinstance(item.get('id'), str) or type(item.get('version')) is not int:
+                return False
+            current = db.execute('SELECT * FROM hub_food_items WHERE id=?', (item['id'],)).fetchone()
+            if not current or any(current[key] != item.get(key)
+                                  for key in ('name', 'quantity', 'expiry_date', 'version')):
+                return False
+        return True
+    except (ValueError, TypeError, KeyError, sqlite3.Error):
+        return False
+
+
 def _referenced_result_private(store, db, identity: str, context: dict) -> bool:
     """Re-evaluate ancestry, never trust a saved public flag on derived text."""
     if not enabled(store) or not isinstance(identity, str) or not identity:
@@ -130,6 +156,10 @@ def _agent_run_private(store, db, row: dict, context: dict | None = None) -> tup
             # The source/preview can contain an old private body, even after a
             # write sets shared=True. No exact post-write proof is saved here.
             return True, False
+        if mut.get('domain') == 'food':
+            # A write preview can contain an old inventory name/date. No
+            # post-write version proof is saved for sharing that source text.
+            return False, True
     for rd in reads:
         if not isinstance(rd, dict):
             return False, True
@@ -138,12 +168,15 @@ def _agent_run_private(store, db, row: dict, context: dict | None = None) -> tup
             # Overview includes private-note counts; device/audit data are
             # manager diagnostics, not shared-display information.
             return False, True
-        if domain not in {'memo', 'llm-response'}:
+        if domain not in {'memo', 'food', 'llm-response'}:
             continue
         data = rd.get('data')
         if not isinstance(data, dict):
             return False, True
-        if domain == 'memo':
+        if domain == 'food':
+            if not _food_read_is_public(store, db, rd.get('action'), data):
+                return False, True
+        elif domain == 'memo':
             if rd.get('action') != 'read' or not _memo_read_is_public(store, data):
                 return False, True
         elif rd.get('action') == 'list':

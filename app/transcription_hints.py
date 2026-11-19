@@ -11,7 +11,7 @@ from __future__ import annotations
 from types import MappingProxyType
 
 
-HINT_VERSION = 'room-hub-ko-v1'
+HINT_VERSION = 'room-hub-ko-v2'
 MAX_KEYWORDS = 48
 MAX_KEYWORD_CHARACTERS = 40
 MAX_PROMPT_CHARACTERS = 400
@@ -22,6 +22,7 @@ ROOM_HUB_DOMAIN_KEYWORDS = MappingProxyType({
     'todo': ('할 일', '완료 처리', '완료 취소', '우선순위'),
     'calendar': ('일정', '달력', '종일', '반복 일정'),
     'memo': ('메모',),
+    'food': ('소비기한', '식품', '개수'),
     'alarm': ('알람', '미루기'),
     'timer': ('타이머', '카운트다운'),
     'clock': ('현재 시각', '시간대'),
@@ -40,7 +41,7 @@ ROOM_HUB_KEYWORDS = tuple(dict.fromkeys(
 ))
 ROOM_HUB_PROMPT = (
     '한국어로 말하는 Room Hub 개인 비서 요청에 관한 녹음. '
-    '주제는 할 일, 일정, 메모, 알람, 타이머, 시각, 날씨, 실내 센서, '
+    '주제는 할 일, 일정, 메모, 식품 소비기한과 개수, 알람, 타이머, 시각, 날씨, 실내 센서, '
     '위젯 배치, 허브 설정 및 시스템 상태.'
 )
 

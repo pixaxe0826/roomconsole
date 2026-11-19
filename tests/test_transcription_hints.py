@@ -15,6 +15,7 @@ from app.transcription_hints import (
     ROOM_HUB_PROMPT,
     room_hub_transcription_hints,
 )
+from app.widget_protocol.food import FoodAdapter
 from app.widget_protocol.system_adapters import (
     ClockAdapter,
     FullAlarmAdapter,
@@ -36,7 +37,7 @@ def test_vocabulary_groups_match_existing_adapter_names():
         FullTodoAdapter, FullCalendarAdapter, FullMemoAdapter,
         FullAlarmAdapter, TimerAdapter, ClockAdapter, WeatherAdapter,
         IndoorSensorAdapter, LLMDisplayAdapter, LayoutAdapter,
-        SettingsAdapter, SystemAdapter,
+        SettingsAdapter, SystemAdapter, FoodAdapter,
     )
     assert set(ROOM_HUB_DOMAIN_KEYWORDS) == {adapter.name for adapter in adapters}
     assert all(terms for terms in ROOM_HUB_DOMAIN_KEYWORDS.values())
@@ -58,7 +59,9 @@ def test_context_describes_recording_without_operation_instructions():
     assert '한국어' in ROOM_HUB_PROMPT and '녹음' in ROOM_HUB_PROMPT
     for instruction in ('실행하세요', '추가하세요', '출력하세요', '반드시', '정답', '보정하세요'):
         assert instruction not in ROOM_HUB_PROMPT
-    assert {'할 일', '완료 취소', '실내 온도', '습도', '기압', '먼지 센서', '타이머', '위젯'} <= set(ROOM_HUB_KEYWORDS)
+    assert {'할 일', '완료 취소', '실내 온도', '습도', '기압', '먼지 센서', '타이머', '위젯',
+            '소비기한', '식품', '개수'} <= set(ROOM_HUB_KEYWORDS)
+    assert '식품 소비기한과 개수' in ROOM_HUB_PROMPT
     # A vocabulary hint must not misrepresent raw dust readings as a calibrated
     # concentration or air-quality grade supported by the indoor adapter.
     assert 'PM2.5' not in ROOM_HUB_KEYWORDS and 'AQI' not in ROOM_HUB_KEYWORDS
@@ -83,6 +86,7 @@ def test_hint_generation_does_not_access_stored_or_environment_data(monkeypatch)
     monkeypatch.setattr(sqlite3, 'connect', forbidden)
     monkeypatch.setenv('HUB_NOTE_TITLE', 'synthetic private note title')
     monkeypatch.setenv('HUB_TASK_TITLE', 'synthetic task title')
+    monkeypatch.setenv('HUB_FOOD_NAME', 'synthetic food name')
     result = room_hub_transcription_hints()
     assert 'synthetic' not in repr(result)
     assert set(result) == {'version', 'prompt', 'keywords'}

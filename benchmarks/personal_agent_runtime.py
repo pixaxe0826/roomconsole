@@ -75,11 +75,13 @@ class PersonalAgentRuntime(Runtime):
 
         self.store.connect = sandbox_connect
         self.agent = self.app.state.personal_agent
+        self.owned_food_service = self.app.state.food
         # Kept for the inherited fixture helper only; never used for inference.
         self.hub = self.app.state.llm
         self._clock_patches()
         self.app.state.life.clock = self.clock.epoch
         self.app.state.timers.clock = self.clock.epoch
+        self.app.state.food.clock = self.clock.epoch
         self.agent.temperature_store.clock = self.clock.epoch
         settings = self.store.get('settings')
         settings['timezone'] = timezone_name
@@ -152,10 +154,11 @@ class PersonalAgentRuntime(Runtime):
             LayoutAdapter, SettingsAdapter, SystemAdapter,
         )
         from app.widget_protocol.timers import TimerAdapter
+        from app.widget_protocol.food import FoodAdapter
         reviewed = {FullMemoAdapter, FullTodoAdapter, FullCalendarAdapter,
                     FullAlarmAdapter, TimerAdapter, ClockAdapter, WeatherAdapter,
                     IndoorSensorAdapter, LLMDisplayAdapter, LayoutAdapter,
-                    SettingsAdapter, SystemAdapter}
+                    SettingsAdapter, SystemAdapter, FoodAdapter}
 
         async def no_external_effect(*_args, **_kwargs):
             raise RuntimeError('External weather/display actions are excluded from the benchmark')
@@ -171,6 +174,7 @@ class PersonalAgentRuntime(Runtime):
             store = getattr(adapter, 'store', None) or adapter.timers.store
             if Path(store.path).resolve() != self.owned_store_path:
                 raise RuntimeError('Refusing non-sandbox adapter storage')
+            self._guard_food_adapter(adapter)
             if hasattr(adapter, 'temperature_store'):
                 if not Path(adapter.temperature_store.path).resolve().is_relative_to(self.root):
                     raise RuntimeError('Refusing non-sandbox sensor storage')
@@ -192,12 +196,25 @@ class PersonalAgentRuntime(Runtime):
 
         self.registry.execute = registry_observed
 
+    def _guard_food_adapter(self, adapter):
+        from app.widget_protocol.food import FoodAdapter
+        if isinstance(adapter, FoodAdapter) and (
+            adapter.store is not self.store
+            or adapter.food is not self.owned_food_service
+            or self.agent.food is not self.owned_food_service
+            or self.app.state.food is not self.owned_food_service
+            or adapter.food.store is not self.store
+            or Path(adapter.food.store.path).resolve() != self.owned_store_path
+        ):
+            raise RuntimeError('Refusing non-sandbox food storage')
+
     def _observe_adapter(self, adapter, store):
         execute = adapter.execute
 
         async def adapter_observed(request, authority):
             if Path(store.path).resolve() != self.owned_store_path:
                 raise RuntimeError('Refusing non-sandbox adapter storage')
+            self._guard_food_adapter(adapter)
             if (request.widget, request.action) in {
                     ('weather', 'refresh'), ('layout', 'focus'), ('layout', 'select_date')}:
                 raise RuntimeError('External actions are excluded from the benchmark')

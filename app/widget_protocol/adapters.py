@@ -260,7 +260,7 @@ class AlarmAdapter(StoredAdapter):
                              changed=result['deleted'], event='alarm.deleted', entity_id=request.target.value)
 
 
-def build_registry(store, life, changed, task_services: TaskServices, *, timers=None) -> WidgetRegistry:
+def build_registry(store, life, changed, task_services: TaskServices, *, timers=None, food=None) -> WidgetRegistry:
     def audit(record):
         # Existing audit table and retention; reads do not bump layout/state revision.
         with closing(store.connect()) as db:
@@ -277,4 +277,7 @@ def build_registry(store, life, changed, task_services: TaskServices, *, timers=
     if timers is not None:
         from .timers import TimerAdapter
         registry.register(TimerAdapter(timers))
+    from ..food import FoodService
+    from .food import FoodAdapter
+    registry.register(FoodAdapter(store, food or FoodService(store, changed), changed))
     return registry

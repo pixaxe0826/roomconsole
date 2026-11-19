@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 PATCH_ID = 'room-hub-0.1.5-stt-accuracy1'
 PROFILES = {'legacy': 1, 'hint': 1, 'balanced': 3, 'careful': 5}
 # A vocabulary hint, NOT an instruction to replace the recording with a command.
-VOCABULARY = '할 일, 오늘, 내일, 남은 할 일, 추가해 줘, 완료 처리해, 완료 취소해, 보여줘.'
+VOCABULARY = '할 일, 오늘, 내일, 남은 할 일, 추가해 줘, 완료 처리해, 완료 취소해, 보여줘, 소비기한, 식품, 개수.'
 # Whisper uses byte-level BPE. This conservative byte bound also bounds the
 # ordinary-text token count below the 224-token initial prompt window for base.
 MAX_HINT_BYTES = 220

@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 
@@ -124,6 +125,61 @@ def test_write_remains_preview_without_confirmation(monkeypatch):
     assert result['agent_run']['receipt'] is None
 
 
+def test_food_write_stays_unconfirmed_in_isolated_runtime(monkeypatch):
+    from app.personal_agent import PersonalAgentService
+
+    async def forbidden_confirm(*args, **kwargs):
+        raise AssertionError('A food benchmark must never automatically confirm')
+
+    monkeypatch.setattr(PersonalAgentService, 'confirm_run', forbidden_confirm)
+
+    def inspect(runtime, result):
+        assert runtime.business_state()['hub_food_items'] == []
+        assert runtime.app.state.food.snapshot()['today'] == DAY
+        assert runtime.agent.food is runtime.app.state.food
+
+    result = run_text('소비기한 알리미에 합성 두부 2개 소비기한 내일로 추가해 줘',
+                      config={'agent_mode': 'local_only'}, inspect=inspect)
+    assert not result['harness_error']
+    assert result['agent_run']['status'] == 'awaiting_confirmation'
+    mutation = result['agent_run']['preview']['mutations'][0]
+    assert mutation['widget_request']['widget'] == 'food'
+    assert mutation['widget_request']['args'] == {
+        'name': '합성 두부', 'quantity': 2, 'expiry_date': '2028-02-10',
+    }
+    assert not result['adapter_calls'] and not result['business_state_changed']
+    assert not result['llm']['attempts']
+
+
+def test_food_adapter_is_reviewed_and_inventory_state_is_observed():
+    from app.food import FoodCreate
+
+    async def exercise():
+        runtime = PersonalAgentRuntime(fixture(), STAMP, 'Asia/Seoul',
+                                       {'agent_mode': 'local_only'}, budget=RunBudget('1', 1))
+        try:
+            before = runtime.business_state()
+            item = runtime.app.state.food.create(FoodCreate(
+                request_id='synthetic-food-seed', name='합성 두유', quantity=3,
+                expiry_date='2028-02-11'))
+            after = runtime.business_state()
+            assert after['hub_food_items'] != before['hub_food_items']
+            assert after['hub_food_items'][0]['id'] == item['id']
+            assert 'food_items' not in after  # One state-diff entry per table.
+            snapshot = runtime.app.state.food.snapshot()
+            assert snapshot['today'] == DAY and snapshot['items'][0]['days_remaining'] == 2
+            result = await runtime.run(TextInput('소비기한 알리미 목록 보여 줘', STAMP, {}))
+            assert not result['harness_error']
+            assert result['agent_run']['status'] == 'succeeded'
+            assert result['adapter_calls'][0]['production_adapter'] == 'FoodAdapter'
+            assert result['adapter_calls'][0]['result']['items'][0]['name'] == '합성 두유'
+            assert not result['business_state_changed']
+        finally:
+            await runtime.close()
+
+    asyncio.run(exercise())
+
+
 def test_timer_service_entry_counted_once_not_preview_duplicates():
     result = run_text('37초 타이머 시작')
     assert not result['harness_error']
@@ -236,7 +292,10 @@ def test_non_live_runtime_strips_keys_and_ignores_production_environment(monkeyp
         assert not policy.auto_downgrade and not policy.fallback_to_local
         assert not runtime.gateway.key_configured()
         assert Path(runtime.store.path).is_relative_to(runtime.root)
-        assert len(runtime.registry.list_widgets()) == 12
+        assert set(runtime.registry.list_widgets()) == {
+            'memo', 'todo', 'calendar', 'alarm', 'timer', 'food', 'clock',
+            'weather', 'indoor', 'llm-response', 'layout', 'settings', 'system',
+        }
         with pytest.raises(RuntimeError, match='outside the benchmark temporary tree'):
             sqlite3.connect(tmp_path / 'forbidden.sqlite3')
         assert 'synthetic-ambient-secret' not in json.dumps(result, ensure_ascii=False)
@@ -331,4 +390,40 @@ def test_tampered_store_cannot_open_external_db_even_during_cleanup(tmp_path):
             await runtime.close()
         assert not root.exists()
     asyncio.run(run())
+    assert not outside.exists()
+
+
+@pytest.mark.parametrize('tamper', ['adapter_store', 'service_store', 'service', 'agent_service', 'app_service', 'path'])
+def test_food_dependencies_are_rechecked_at_each_adapter_call(monkeypatch, tmp_path, tamper):
+    from app.widget_protocol import ExecutionContext, WidgetRequest
+
+    outside = tmp_path / 'forbidden-food.sqlite3'
+
+    async def exercise():
+        runtime = PersonalAgentRuntime(fixture(), STAMP, 'Asia/Seoul', {}, budget=RunBudget('10', 10))
+        runtime.trace = {'adapter_calls': []}
+        adapter = runtime.registry.get('food')
+        try:
+            if tamper == 'adapter_store':
+                monkeypatch.setattr(adapter, 'store', SimpleNamespace(path=runtime.owned_store_path))
+            elif tamper == 'service_store':
+                monkeypatch.setattr(adapter.food, 'store', SimpleNamespace(path=runtime.owned_store_path))
+            elif tamper == 'service':
+                monkeypatch.setattr(adapter, 'food', SimpleNamespace(store=runtime.store))
+            elif tamper == 'agent_service':
+                monkeypatch.setattr(runtime.agent, 'food', SimpleNamespace(store=runtime.store))
+            elif tamper == 'app_service':
+                monkeypatch.setattr(runtime.app.state, 'food', SimpleNamespace(store=runtime.store))
+            else:
+                monkeypatch.setattr(runtime.store, 'path', outside)
+            authority = ExecutionContext(principal='synthetic-manager', role='admin',
+                                         permissions=frozenset({'read'}))
+            with pytest.raises(RuntimeError, match='non-sandbox'):
+                await adapter.execute(WidgetRequest(request_id='synthetic-food-guard', widget='food', action='list'), authority)
+            assert runtime.trace['adapter_calls'] == []
+        finally:
+            await runtime.close()
+        assert not runtime.root.exists()
+
+    asyncio.run(exercise())
     assert not outside.exists()

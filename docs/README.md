@@ -17,6 +17,7 @@
 | [LLM 인터페이스](LLM_INTERFACE.md) | 요청 기록, 연결 설정, 측정 정의 |
 | [LLM 표시 위젯](LLM_WIDGET.md) | 4×2 요청/응답 위젯과 표시 권한 |
 | [위젯 규격](WIDGET_API.md) | 폴더형 UI 플러그인 |
+| [소비기한 알리미](FOOD_EXPIRY.md) | 식품·개수·소비기한, 직접 입력과 확인 기반 음성 입력 |
 | [테스트](TESTING.md) | 재현 명령과 자동화 범위 |
 | [검증 기록](TEST_REPORT.md) | 이번 통합 ZIP에서 실제 수행한 검사 |
 | [로드맵](ROADMAP.md) | 아직 구현하지 않은 후보 |

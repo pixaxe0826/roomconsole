@@ -80,6 +80,18 @@ def test_missing_legacy_and_bounded_prompt(tmp_path):
     assert not make_hint(AccuracyConfig(profile='hint',max_task_titles=0),['secret'])[1]
 
 
+def test_food_vocabulary_is_static_bounded_and_not_inventory(tmp_path):
+    store = Store(tmp_path / 'hint.sqlite3')
+    # A deliberately unrelated stored value must never become speech context.
+    store.set('widget_data:food-expiry', {'name': '비공개 식품 제목'})
+    hint = task_hint(store, AccuracyConfig(profile='careful', include_task_titles=False))
+    assert all(word in hint['text'] for word in ('소비기한', '식품', '개수'))
+    assert '비공개 식품 제목' not in hint['text']
+    assert not hint['titles']
+    assert hint['utf8_bytes'] <= MAX_HINT_BYTES
+    assert make_hint(AccuracyConfig(profile='legacy')) == ('', [])
+
+
 @pytest.mark.parametrize('bad',['<|startoftranscript|>','a\nb','a\x00b','a\u202eb','x'*41,'$(touch /tmp/x)','<script>alert(1)</script>',' '])
 def test_title_rejected(bad):
     _,titles=make_hint(AccuracyConfig(profile='balanced'),[bad]);assert not titles

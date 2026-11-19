@@ -251,6 +251,8 @@ def make_step(**overrides: Any) -> dict[str, Any]:
         'repeat_frequency': None,
         'weekdays': None,
         'duration_seconds': None,
+        'quantity': None,
+        'expiry_date': None,
         'pinned': None,
         'shared': None,
     }
@@ -1261,7 +1263,7 @@ class TestPersonalAgentEndToEnd(unittest.TestCase):
 
 
 class TestAllElevenWidgetAdapters(unittest.TestCase):
-    """Verify full WidgetProtocol 1.0 compliance across all 12 registered widgets and systems (including indoor sensor)."""
+    """Verify WidgetProtocol 1.0 compliance across all registered services."""
 
     def test_all_adapters_registered_healthy_and_executable(self):
         run_async(self._test_all_adapters())
@@ -1275,6 +1277,7 @@ class TestAllElevenWidgetAdapters(unittest.TestCase):
                 'calendar',
                 'alarm',
                 'timer',
+                'food',
                 'clock',
                 'weather',
                 'indoor',
@@ -1285,9 +1288,9 @@ class TestAllElevenWidgetAdapters(unittest.TestCase):
             ]
             self.assertEqual(agent.registry.list_widgets(), expected_adapters)
 
-            # 1. Health check across all 12 adapters
+            # 1. Health check across the complete registry, including food.
             health = await agent.adapters_health()
-            self.assertEqual(health['adapter_count'], 12)
+            self.assertEqual(health['adapter_count'], len(expected_adapters))
             for name in expected_adapters:
                 self.assertTrue(health['adapters'][name]['available'], f'{name} adapter should be healthy')
 

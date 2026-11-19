@@ -112,3 +112,11 @@ Content-Type: application/json
 
 ## 0.1.7 note / alarms
 `note`는 같은 ID로 저장형 메모를 표시하며 기존 config.text/widget_data 문구를 유지합니다. `alarms`는 새 4×2 위젯입니다. 실제 데이터는 state.life의 명시적 공유 DTO를 사용하며 위젯 설치 자체가 관리자 권한을 주지 않습니다. [기능](NOTES_ALARMS.md)
+
+## 소비기한 알리미
+
+`food-expiry`는 기본 4×2 읽기 전용 표입니다. `state.food`의 `enabled`, `items`,
+`today`, `timezone`, `due_soon_days`를 사용합니다. `items`의 저장 필드는
+`id`, `name`, `quantity`, `expiry_date`, `version`, `created_at`, `updated_at`입니다.
+표시 DTO는 위젯이 배치된 경우에만 식품 목록을 포함합니다. 직접 입력 폼은 관리자에만
+존재하며 표시 세션에는 추가 CRUD 권한을 주지 않습니다. [상세 계약](FOOD_EXPIRY.md).

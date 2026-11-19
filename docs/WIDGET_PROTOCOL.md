@@ -4,6 +4,14 @@
 
 [문서 홈](../README.md) · [기존 브라우저 위젯 API](WIDGET_API.md) · [V35 Git 업데이트](V35_GIT_UPDATE.md)
 
+## 소비기한 서비스 추가
+
+`food` / `FoodAdapter`는 `hub_food_items`의 식품·개수·소비기한을 처리합니다.
+`list/get`은 읽기이고, `add/update/delete`는 서버의 확인된 digest가 필요한 쓰기입니다.
+수정·삭제는 실제 항목 ID와 버전을 검증합니다. 관리자 수동 CRUD와 승인된 Personal Agent가
+같은 서비스를 사용하며 표시 위젯은 읽기 전용입니다. 최신 [소비기한 계약](FOOD_EXPIRY.md)을
+참고하세요. 아래 본문은 최초 Protocol 도입 시점의 범위를 설명합니다.
+
 ## 목적과 이번 경계
 
 `Caller → WidgetRequest → WidgetRegistry → WidgetAdapter → 기존 서비스/DB → WidgetResponse`.
