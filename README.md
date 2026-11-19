@@ -96,6 +96,12 @@ python3 -m venv .venv
 http://localhost:8088/manager
 ```
 
+첫 관리자 키는 기본적으로 `data/admin-token.txt`에 생성됩니다. 로그인한 뒤
+**설정 → 관리자 키 변경**에서 현재 키를 확인하고 **8자 이상**의 원하는 새 키로 변경할 수 있습니다.
+변경하면 모든 관리자 세션이 종료되므로 새 키로 다시 로그인합니다. `HUB_ADMIN_TOKEN`
+환경 변수를 설정한 서버는 웹 변경 대신 해당 환경 변수 값을 교체하고 재시작해야 합니다.
+[설치·키 관리 안내](docs/SETUP.md#관리자-키-확인변경)를 참고하세요.
+
 LAN의 iPad에서는 `localhost`가 아니라 서버의 실제 LAN 주소를 사용합니다. 일반 HTTP 클라이언트는 표시/할 일 조작에 사용할 수 있지만, **iPad 마이크는 신뢰된 HTTPS가 필요**합니다. V35용 음성·HTTPS 설치는 [V35/Termux](docs/V35_TERMUX.md)와 [Speech API](docs/SPEECH_API.md)를 참고하세요.
 
 ## 위젯

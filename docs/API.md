@@ -10,6 +10,14 @@
 
 브라우저의 변경 요청은 `X-Room-Request: 1`을 보냅니다. 다른 출처의 Origin은 거부합니다. 관리자 키·입력 키를 일반 조회 URL의 query에 넣지 않습니다. 연결 코드만 URL fragment로 전달하고 교환 직후 지웁니다.
 
+관리자 키 변경은 `POST /api/auth/key`로 `{"current_key":"...","new_key":"...","confirm_key":"..."}`를 전송합니다.
+관리자 쿠키 또는 Bearer 권한이 필요하고, 현재 키를 다시 검증합니다. 새 키는 8~256자이며
+확인 값과 같고 기존 키와 달라야 합니다. 성공 시 `{"ok":true,"relogin_required":true}`만 반환하고
+모든 관리자 쿠키 세션·관리자 WebSocket을 무효화합니다. 표시 기기·입력 키는 그대로 유지됩니다.
+파일 기반 키는 `HUB_DATA_DIR/admin-token.txt`에 저장됩니다. `HUB_ADMIN_TOKEN`이 설정된 서버는
+환경 설정을 변경해야 하므로 이 API를 409로 거부합니다. 인증 오류는 401, 입력 오류는 422,
+과도한 잘못된 키 입력은 429로 응답합니다. 요청·응답·로그에 실제 키를 남기지 마세요.
+
 ## 주요 경로
 
 | Method | 경로 | 내용 |
@@ -18,6 +26,7 @@
 | GET | /client, /manager | 앱 화면 |
 | POST | /api/auth/login | `{"token":"..."}` 관리자 세션 |
 | POST | /api/auth/logout | 현재 관리자 쿠키 세션 종료 |
+| POST | /api/auth/key | 관리자 전용 키 변경. 현재 키 + 새 키(8~256자) + 확인, 관리자 세션 전체 종료 |
 | GET | /api/auth/me | 현재 역할 |
 | GET | /api/state | 표시용 스냅샷 |
 | GET | /api/admin/overview | 등록 기기·수신함·감사 기록 |

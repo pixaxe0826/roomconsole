@@ -101,6 +101,14 @@ class RemoteCommand(StrictModel):
     date: Date|None=None
     device_id: str|None=Field(default=None,max_length=64)
 class Login(StrictModel): token:str=Field(min_length=1,max_length=256)
+class AdminKeyChange(StrictModel):
+    current_key: str=Field(min_length=1,max_length=256)
+    new_key: str=Field(min_length=8,max_length=256)
+    confirm_key: str=Field(min_length=8,max_length=256)
+    @model_validator(mode='after')
+    def matches(self):
+        if self.new_key!=self.confirm_key: raise ValueError('새 관리자 키와 확인 값이 일치하지 않습니다.')
+        return self
 class PairCreate(StrictModel): name:str=Field(default='Room iPad',min_length=1,max_length=80)
 class PairAccept(StrictModel): code:str=Field(min_length=10,max_length=200)
 class VoiceReview(StrictModel):

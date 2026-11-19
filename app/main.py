@@ -1,4 +1,4 @@
-import asyncio,contextlib,hashlib,hmac,io,json,os,secrets,time,sqlite3,re
+import asyncio,contextlib,hashlib,hmac,io,json,os,secrets,time,sqlite3,re,tempfile
 from contextlib import asynccontextmanager
 from datetime import datetime,timezone
 from pathlib import Path
@@ -6,6 +6,8 @@ from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 import qrcode,qrcode.image.svg
 from fastapi import FastAPI,Request,Response,HTTPException,Depends,UploadFile,File,Form,WebSocket,WebSocketDisconnect
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse,JSONResponse,RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from .models import *
@@ -36,17 +38,17 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
  ai_profile=AIProfile.from_env()
  data=Path(data_dir or os.getenv('HUB_DATA_DIR',ROOT/'data')).resolve();data.mkdir(parents=True,exist_ok=True);(data/'audio').mkdir(exist_ok=True)
  widget_root=Path(os.getenv('HUB_WIDGET_DIR',ROOT/'widgets')).resolve()
- store=Store(data/'room-hub.sqlite3');connections={};attempts={};wx={'last_attempt':0.,'error':None};wx_lock=asyncio.Lock()
+ store=Store(data/'room-hub.sqlite3');connections={};attempts={};wx={'last_attempt':0.,'error':None};wx_lock=asyncio.Lock();admin_key_lock=asyncio.Lock()
  wx['settings_key']=weather_settings_key(store.get('settings'))
  secure=os.getenv('HUB_SECURE_COOKIE','false').lower()=='true'
- def secret(env,name):
+ def secret(env,name,min_length=24):
   v=os.getenv(env);path=data/name
   if not v:
    if path.exists():v=path.read_text().strip()
    else:v=secrets.token_urlsafe(32);path.write_text(v+'\n');path.chmod(0o600)
-  if len(v)<24:raise RuntimeError(env+' must contain at least 24 characters')
+  if len(v)<min_length:raise RuntimeError(env+f' must contain at least {min_length} characters')
   return v
- admin_key=secret('HUB_ADMIN_TOKEN','admin-token.txt');ingest_key=secret('HUB_INGEST_TOKEN','ingest-token.txt')
+ admin_key=secret('HUB_ADMIN_TOKEN','admin-token.txt',8);ingest_key=secret('HUB_INGEST_TOKEN','ingest-token.txt')
  async def send(ws,payload):
   try:await asyncio.wait_for(ws.send_json(payload),3);return True
   except Exception:return False
@@ -108,6 +110,12 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
   for ws in list(connections):
    with contextlib.suppress(Exception):await ws.close()
  app=FastAPI(title='Room Hub',version='0.1.7',lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
+ @app.exception_handler(RequestValidationError)
+ async def redact_admin_key_validation(request:Request,exc:RequestValidationError):
+  # FastAPI's default 422 includes Pydantic's `input`, which would echo secrets.
+  if request.url.path=='/api/auth/key':
+   return JSONResponse({'detail':'관리자 키 입력 형식, 새 키 길이(8~256자), 확인 값을 검토하세요.'},422)
+  return await request_validation_exception_handler(request,exc)
  app.state.life=life
  app.state.food=food
  app.state.timers=timers
@@ -188,6 +196,41 @@ def create_app(data_dir=None,weather_enabled=True,*,speech_config=None,speech_ru
   if len(recent)>=10:raise HTTPException(429,'잠시 후 다시 시도하세요.')
   if not hmac.compare_digest(body.token,admin_key):recent.append(time.time());raise HTTPException(401,'관리자 키를 확인하세요.')
   attempts.pop(ip,None);response.set_cookie('room_admin',new_session('admin',None,.5),max_age=43200,httponly=True,secure=secure,samesite='strict');return {'ok':True}
+ @app.post('/api/auth/key')
+ async def change_admin_key(body:AdminKeyChange,request:Request,response:Response,_=Depends(admin)):
+  nonlocal admin_key
+  ip=request.client.host if request.client else 'unknown'
+  async with admin_key_lock:
+   recent=[x for x in attempts.get(ip,[]) if x>time.time()-300];attempts[ip]=recent
+   if len(recent)>=10:raise HTTPException(429,'잠시 후 다시 시도하세요.')
+   if not hmac.compare_digest(body.current_key,admin_key):
+    recent.append(time.time());raise HTTPException(401,'현재 관리자 키를 확인하세요.')
+   if hmac.compare_digest(body.new_key,admin_key):raise HTTPException(409,'현재 관리자 키와 다른 값을 입력하세요.')
+   if os.getenv('HUB_ADMIN_TOKEN'):
+    raise HTTPException(409,'환경 변수 HUB_ADMIN_TOKEN으로 관리 중입니다. 서버 설정에서 변경한 뒤 재시작하세요.')
+   target=data/'admin-token.txt';temp_path=None
+   try:
+    fd,temp_name=tempfile.mkstemp(prefix='.admin-token-',dir=data)
+    temp_path=Path(temp_name)
+    with os.fdopen(fd,'w',encoding='utf-8') as secret_file:
+     secret_file.write(body.new_key+'\n')
+     secret_file.flush();os.fsync(secret_file.fileno())
+    temp_path.chmod(0o600)
+    # Invalidate admin cookies before changing the credential on disk.
+    with store.connect() as db:db.execute("DELETE FROM sessions WHERE role='admin'")
+    os.replace(temp_path,target)
+    temp_path=None
+   except OSError:
+    raise HTTPException(503,'관리자 키를 저장하지 못했습니다. 서버 저장소를 확인하세요.')
+   finally:
+    if temp_path is not None:temp_path.unlink(missing_ok=True)
+   admin_key=body.new_key;app.state.admin_token=admin_key;attempts.pop(ip,None)
+  response.delete_cookie('room_admin')
+  for ws,m in list(connections.items()):
+   if m['role']=='manager' or m.get('device_id') is None:
+    connections.pop(ws,None)
+    with contextlib.suppress(Exception):await ws.close(code=4001)
+  return {'ok':True,'relogin_required':True}
  @app.post('/api/auth/logout')
  async def logout(request:Request,response:Response,_=Depends(admin)):
   with store.connect() as db:db.execute('DELETE FROM sessions WHERE hash=?',(hashed(request.cookies.get('room_admin','')),))
