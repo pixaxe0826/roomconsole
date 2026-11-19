@@ -79,7 +79,7 @@ def run():
                 route.fulfill(status=404)
 
         page.route('**/*', local_assets)
-        page.add_init_script(MOCK)
+        page.add_init_script('(' + MOCK + ')()')
         page.goto('https://room-hub.test/manager#settings')
         page.wait_for_selector('#adminKeyForm')
         check('Settings exposes current, new and confirmation secret fields',
