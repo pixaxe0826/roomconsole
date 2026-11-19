@@ -26,6 +26,20 @@ python3 -m venv .venv
 
 기본 관리자 주소는 `http://localhost:8088/manager`입니다. LAN의 iPad에서는 서버의 실제 LAN 주소를 사용합니다.
 
+### 관리자 키 확인·변경
+
+첫 실행 시 생성된 관리자 키는 `HUB_DATA_DIR/admin-token.txt`(기본 `data/admin-token.txt`)에서
+확인할 수 있습니다. 로그인한 뒤 **관리자 → 설정 → 관리자 키 변경**에서 현재 키, 새 키,
+새 키 확인을 입력합니다. 새 키는 **8~256자**이고 문자 종류에 대한 별도 필수 조합은 없습니다.
+변경 즉시 기존 관리자 세션과 관리자 WebSocket 연결은 무효화되므로 새 키로 다시 로그인하세요.
+표시 기기 페어링과 음성 수신 키는 유지됩니다. 키를 외부에 공유하거나 화면에 노출하지 마세요.
+
+`HUB_ADMIN_TOKEN` 환경 변수가 설정된 설치에서는 해당 값이 우선합니다. 웹 변경은
+서버가 **409**로 거부하므로 systemd/Compose 등의 환경 변수 값을 직접 교체하고
+서비스를 재시작해야 합니다. 웹 변경이 가능한 기본 파일 관리 모드에서는 비밀 키를
+`admin-token.txt`에 권한 `0600`으로 안전하게 교체하며, 재시작 이후에도 적용됩니다.
+음성 입력 전용 `HUB_INGEST_TOKEN`의 최소 길이는 기존 **24자**를 유지합니다.
+
 ## Docker/Compose 음성 전처리 제한
 
 Odyssey 단독 전환은 기존 Ubuntu의 Python/systemd 배포를 권장합니다. 현재 저장소의 `Dockerfile`은 FFmpeg를 설치하지 않습니다. `compose.yaml`이 `HUB_AI_PROFILE`과 `HUB_FFMPEG`를 전달하더라도 iPad 압축 녹음 전처리가 자동으로 지원되는 것은 아닙니다.
@@ -40,8 +54,8 @@ Odyssey 단독 전환은 기존 Ubuntu의 Python/systemd 배포를 권장합니�
 | `HUB_PORT` | `8088` | 서버 포트 |
 | `HUB_DATA_DIR` | 프로젝트 `data/` | DB·키·음성·런타임 설정 |
 | `HUB_WIDGET_DIR` | 프로젝트 `widgets/` | 위젯 소스 |
-| `HUB_ADMIN_TOKEN` | 자동 생성 | 직접 지정 시 비밀값 |
-| `HUB_INGEST_TOKEN` | 자동 생성 | 음성/외부 입력용 별도 키 |
+| `HUB_ADMIN_TOKEN` | 자동 생성 | 직접 지정 시 비밀값, 최소 8자. 설정하면 웹 변경 불가 |
+| `HUB_INGEST_TOKEN` | 자동 생성 | 음성/외부 입력용 별도 키, 최소 24자 |
 | `HUB_SECURE_COOKIE` | `false` | HTTPS 프록시 환경에서만 `true` 검토 |
 | `HUB_AI_PROFILE` | `legacy` | `odyssey_openai`는 PC/로컬 추론·폴백·레거시 probe를 차단. 프로세스 시작 시 고정; 외부 전송 동의는 별도 |
 | `HUB_FFMPEG` | 미설정 | 음성 변환에 사용할 실행 파일의 절대 경로. Odyssey 예: `/usr/bin/ffmpeg` |

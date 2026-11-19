@@ -87,6 +87,7 @@ jobs:
           tests/test_transcription_hints.py
           tests/test_openai_stt_benchmark.py
           tests/test_backend.py
+          tests/test_admin_key.py
           tests/test_display_completion.py
           tests/test_all_tasks.py
           tests/test_repo_packaging.py
@@ -180,6 +181,8 @@ jobs:
         run: node scripts/food_expiry_regression.js
       - name: Food expiry widget and manager (Chromium, synthetic state)
         run: python scripts/food_expiry_browser.py
+      - name: Administrator key rotation (Chromium, synthetic auth)
+        run: python scripts/admin_key_browser.py
       - run: python scripts/fast_reads_browser.py
       - run: python scripts/widget_bridge_browser.py
       - run: python scripts/runtime_browser.py

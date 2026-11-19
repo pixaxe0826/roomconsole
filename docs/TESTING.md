@@ -24,8 +24,10 @@ Windows에서는 UTF-8 텍스트 처리를 위해 필요하면 `$env:PYTHONUTF8=
 | 저장소 | `python scripts/check_repo.py` | 필수 파일, 소스 경로·대표 비밀정보 패턴, UTF-8/JSON/Python 문법, 버전, 상대 문서 링크 |
 | 스테이징 | `python scripts/check_repo.py --staged` | Git index의 실제 새 내용에 운영 파일·키가 포함되는지 보조 검사 |
 | 서버·패키징 | `python -m pytest -q` | 기존 서버·완료 권한과 추가 소스 ZIP 정책 |
+| 관리자 키 | `python -m pytest -q tests/test_admin_key.py` | 8자 경계·기존 키 폐기·세션/표시 권한·재시작·환경 변수 우선순위 |
 | 실제 HTTP | `python scripts/live_smoke.py` | 별도 Uvicorn 프로세스를 루프백 HTTP로 호출 |
 | UI | `python scripts/browser_smoke.py` | 클라이언트·관리자 데모 UI |
+| 관리자 키 UI | `python scripts/admin_key_browser.py` | 관리자 설정의 8자 입력 제한·확인·409 오류·재로그인 (합성 인증) |
 | 할 일 UI | `python scripts/todo_regression.py` | 일~토·주간 이동·완료·확대·관리자 데모 동기화 |
 | 완료 통신 모의 | `python scripts/todo_transport_regression.py` | 실제 클라이언트 코드 + 모의 HTTP/WS의 충돌·실패·타임아웃 |
 | 크기 회귀 | `python scripts/preview_regression.py --seconds 65` | 관리자 미리보기 크기 유지·리사이즈·탭 왕복 |

@@ -275,7 +275,7 @@ def admin_headers(root):
         p=Path(root)/'data/admin-token.txt'
         if not p.is_file() or p.is_symlink():raise Stop('Local admin key unavailable; use Manager connection settings manually')
         key=p.read_text().strip()
-    if len(key)<24:raise Stop('Invalid local administrator key')
+    if len(key)<8:raise Stop('Invalid local administrator key')
     return {'Authorization':'Bearer '+key}
 
 def desired_config(old):
